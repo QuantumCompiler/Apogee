@@ -429,6 +429,142 @@ foreach(session_file ${SESSION_FILES})
     endif()
 endforeach()
 
+# --- a collection is named, never pathed (CLI-M45) -------------------------
+# `--rag <path>` once opened any SQLite file on the machine and wrote the
+# store's whole schema into it (1 table became 49, a WAL beside it): the
+# reader behind --rag, auto_rag, an agent's collection and serve --rag
+# checked no name. Each now refuses in embed's words before anything is
+# opened, and the foreign file keeps its bytes and its folder its listing.
+file(COPY_FILE "${APOGEE_WORK_DIR}/embeddings/notes.db" "${APOGEE_WORK_DIR}/foreign.db")
+file(SHA256 "${APOGEE_WORK_DIR}/foreign.db" FOREIGN_BEFORE)
+function(expect_foreign_untouched what)
+    file(SHA256 "${APOGEE_WORK_DIR}/foreign.db" now)
+    if(NOT now STREQUAL FOREIGN_BEFORE)
+        message(FATAL_ERROR "${what} changed foreign.db's bytes")
+    endif()
+    file(GLOB beside "${APOGEE_WORK_DIR}/foreign.db*")
+    list(LENGTH beside count)
+    if(NOT count EQUAL 1)
+        message(FATAL_ERROR "${what} left files beside foreign.db: ${beside}")
+    endif()
+endfunction()
+function(expect_plain_name_refusal what)
+    if(NOT APOGEE_ERR MATCHES "is not a plain collection name")
+        message(FATAL_ERROR "${what} did not refuse in the read rule's words:\n${APOGEE_OUT}${APOGEE_ERR}")
+    endif()
+    if(APOGEE_OUT MATCHES "mock response")
+        message(FATAL_ERROR "${what} answered after the refusal:\n${APOGEE_OUT}")
+    endif()
+endfunction()
+foreach(pathed "../foreign" "${APOGEE_WORK_DIR}/foreign")
+    apogee_run(1 complete -m mock --rag "${pathed}" "what does the zarquon protocol require?")
+    expect_plain_name_refusal("complete --rag ${pathed}")
+    apogee_run(1 analyze -a meeting-minutes -m mock --rag "${pathed}" "notes")
+    expect_plain_name_refusal("analyze --rag ${pathed}")
+    execute_process(
+        COMMAND "${APOGEE_BIN}" chat -m mock --rag "${pathed}"
+        INPUT_FILE "${APOGEE_WORK_DIR}/question.txt"
+        RESULT_VARIABLE chat_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+    if(NOT chat_code EQUAL 1)
+        message(FATAL_ERROR "chat --rag ${pathed}: expected exit 1, got ${chat_code}\n${APOGEE_ERR}")
+    endif()
+    expect_plain_name_refusal("chat --rag ${pathed}")
+    # Bounded: a serve that failed to refuse would listen until killed.
+    execute_process(
+        COMMAND "${APOGEE_BIN}" serve -m mock --port 0 --rag "${pathed}"
+        TIMEOUT 30
+        RESULT_VARIABLE serve_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+    if(NOT serve_code EQUAL 1)
+        message(FATAL_ERROR "serve --rag ${pathed}: expected exit 1, got ${serve_code}\n${APOGEE_ERR}")
+    endif()
+    expect_plain_name_refusal("serve --rag ${pathed}")
+endforeach()
+# An interactive analyze's `/rag <path>` is refused in place, the session's
+# choice unchanged.
+file(WRITE "${APOGEE_WORK_DIR}/rag-lines.txt" "/rag ../foreign\n/rag\n")
+execute_process(
+    COMMAND "${APOGEE_BIN}" analyze -a meeting-minutes -m mock --interactive
+    INPUT_FILE "${APOGEE_WORK_DIR}/rag-lines.txt"
+    RESULT_VARIABLE analyze_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+if(NOT "${APOGEE_OUT}${APOGEE_ERR}" MATCHES "'\\.\\./foreign' is not a plain collection name"
+   OR NOT "${APOGEE_OUT}${APOGEE_ERR}" MATCHES "retrieval off")
+    message(FATAL_ERROR "/rag ../foreign was not refused in place:\n${APOGEE_OUT}${APOGEE_ERR}")
+endif()
+file(REMOVE "${APOGEE_WORK_DIR}/rag-lines.txt")
+expect_foreign_untouched("--rag <path>")
+# embed's own refusal, the rule this item lifted into contracts, unchanged.
+apogee_run(1 embed query -- ../foreign zarquon)
+expect_plain_name_refusal("embed query ../foreign")
+
+# An older config holding a path still loads; the turn that would read it
+# refuses with the same words, and check fails the row naming the key.
+string(REPLACE "\"auto_rag\": \"notes\"" "\"auto_rag\": \"../foreign\"" PATHED_AUTO_RAG
+       "${WITH_AUTO_RAG}")
+file(WRITE "${CONFIG_FILE}" "${PATHED_AUTO_RAG}")
+apogee_run(0 config get auto_rag)
+expect_equal("${APOGEE_OUT}" "../foreign" "a pathed auto_rag still loads")
+apogee_run(1 complete -m mock "what does the zarquon protocol require?")
+expect_plain_name_refusal("complete under a pathed auto_rag")
+execute_process(
+    COMMAND "${APOGEE_BIN}" chat -m mock
+    INPUT_FILE "${APOGEE_WORK_DIR}/question.txt"
+    RESULT_VARIABLE chat_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+expect_plain_name_refusal("a chat turn under a pathed auto_rag")
+execute_process(COMMAND "${APOGEE_BIN}" check
+    RESULT_VARIABLE check_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+if(NOT APOGEE_OUT MATCHES "auto_rag[^\n]*'\\.\\./foreign' is not a plain collection name")
+    message(FATAL_ERROR "check did not fail the pathed auto_rag:\n${APOGEE_OUT}")
+endif()
+expect_foreign_untouched("a pathed auto_rag")
+
+# An agent's collection, hand-written as a path: loads, every run refuses,
+# check fails it naming the key -- and no door adds one.
+file(WRITE "${CONFIG_FILE}" "${WITH_AUTO_RAG}")
+apogee_run(0 agents create pathed --no-schema)
+file(READ "${CONFIG_FILE}" WITH_AGENT)
+string(REPLACE "\"save_subdir\": \"pathed\"" "\"collection\": \"../foreign\", \"save_subdir\": \"pathed\""
+       PATHED_AGENT "${WITH_AGENT}")
+if(PATHED_AGENT STREQUAL WITH_AGENT)
+    message(FATAL_ERROR "the agent's entry was not found to hand-edit:\n${WITH_AGENT}")
+endif()
+file(WRITE "${CONFIG_FILE}" "${PATHED_AGENT}")
+apogee_run(0 agents list)
+if(NOT APOGEE_OUT MATCHES "\npathed ")
+    message(FATAL_ERROR "a config with a pathed agent collection did not load:\n${APOGEE_OUT}")
+endif()
+apogee_run(1 analyze -a pathed -m mock "notes")
+expect_plain_name_refusal("analyze under a pathed agent collection")
+execute_process(COMMAND "${APOGEE_BIN}" check
+    RESULT_VARIABLE check_code OUTPUT_VARIABLE APOGEE_OUT ERROR_VARIABLE APOGEE_ERR)
+if(NOT APOGEE_OUT MATCHES "agents\\.pathed\\.collection")
+    message(FATAL_ERROR "check did not name the pathed agent collection:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" BEFORE_PATHED_ADD)
+apogee_run(1 agents create other --collection ../foreign)
+expect_plain_name_refusal("agents create --collection ../foreign")
+file(READ "${CONFIG_FILE}" AFTER_PATHED_ADD)
+if(NOT AFTER_PATHED_ADD STREQUAL BEFORE_PATHED_ADD)
+    message(FATAL_ERROR "a refused agents create changed the config")
+endif()
+if(EXISTS "${APOGEE_WORK_DIR}/prompts/other.txt")
+    message(FATAL_ERROR "a refused agents create wrote the agent's prompt")
+endif()
+expect_foreign_untouched("a pathed agent collection")
+
+# Every store under embeddings/ reads as before, whatever its name.
+file(COPY_FILE "${APOGEE_WORK_DIR}/embeddings/notes.db" "${APOGEE_WORK_DIR}/embeddings/my notes.db")
+file(COPY_FILE "${APOGEE_WORK_DIR}/embeddings/notes.db" "${APOGEE_WORK_DIR}/embeddings/a..b.db")
+foreach(odd "my notes" "a..b")
+    apogee_run(0 complete -m mock -v --rag "${odd}" "what does the zarquon protocol require?")
+    if(NOT "${APOGEE_OUT}${APOGEE_ERR}" MATCHES "chunk\\(s\\) from '${odd}'")
+        message(FATAL_ERROR "--rag '${odd}' no longer reads:\n${APOGEE_OUT}${APOGEE_ERR}")
+    endif()
+    apogee_run(0 embed query -- "${odd}" zarquon)
+endforeach()
+file(REMOVE "${APOGEE_WORK_DIR}/foreign.db" "${APOGEE_WORK_DIR}/embeddings/my notes.db"
+     "${APOGEE_WORK_DIR}/embeddings/a..b.db" "${APOGEE_WORK_DIR}/prompts/pathed.txt")
+file(WRITE "${CONFIG_FILE}" "${WITH_AUTO_RAG}")
+
 # --- vector and hybrid retrieval through the real binary ------------------
 # A mock embedder from config (a mock entry with an embedding_model) stands in
 # for a real one: free, deterministic, and -- the point -- a second one with a

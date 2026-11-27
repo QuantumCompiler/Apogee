@@ -19,6 +19,7 @@
 #include "backends/factory.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
@@ -88,11 +89,10 @@ struct CaptureFlags {
 }
 
 /// Refuses a name that would escape the embeddings directory -- the rule
-/// `embed` applies: a collection is NAMED, not pathed.
+/// every collection reader asks (CLI-M45): a collection is NAMED, not pathed.
 void require_plain_name(std::string_view name) {
-    if (name.find("..") != std::string_view::npos || name.find('/') != std::string_view::npos ||
-        name.find('\\') != std::string_view::npos) {
-        fail_user("'" + std::string{name} + "' is not a plain collection name");
+    if (const std::string refused = harness::collection_read_error(name); !refused.empty()) {
+        fail_user(refused);
     }
 }
 

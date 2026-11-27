@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -1187,6 +1188,52 @@ TEST_CASE("a cancel during compaction ends the turn at once, and the session is 
     CHECK(turn.saved() == before);
     CHECK(turn.session.messages.size() == in_memory.messages.size());
     CHECK(turn.session.compactions == in_memory.compactions);
+}
+
+TEST_CASE(
+    "an auto_rag written as a path refuses its turn before any model call, and the next turn runs",
+    "[commands][machine][turns][rag][M45]") {
+    // CLI-M45: the config's auto_rag is read again every turn, so a path
+    // there refuses the turn that would read it -- before compaction, the
+    // follow-up's rewrite or the chat model -- and the session stays as the
+    // last finished turn left it, serving the next line.
+    HeldTurn turn{"    context_size: 300\n", {apogee::backends::MockTurn{.text = "a summary"}}};
+    turn.session.messages = {apogee::harness::ChatMessage::user("first question"),
+                             apogee::harness::ChatMessage::assistant(std::string(1200, 'a'))};
+    turn.session.turns = 1;
+    apogee::logger::save(turn.session);
+    const std::vector<std::string> before = turn.saved();
+    std::string original;
+    {
+        std::ifstream in{turn.config_path, std::ios::binary};
+        original.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+    }
+    std::ofstream{turn.config_path, std::ios::binary} << original << "auto_rag: ../foreign\n";
+    const auto run = [&turn](const std::string& text) {
+        return apogee::commands::run_chat_turn(
+            *turn.harness, turn.session, text, nullptr, nullptr, nullptr, {},
+            apogee::commands::ToolGate{}, turn.reporter,
+            [&turn](const std::string& line) { turn.notices.push_back(line); }, turn.rag, {},
+            nullptr, nullptr);
+    };
+    const apogee::commands::ChatTurnResult refused = run("second question");
+    CHECK_FALSE(refused.completed);
+    CHECK_FALSE(refused.cancelled);
+    CHECK(refused.error ==
+          "'../foreign' is not a plain collection name -- from auto_rag in the config; 'apogee "
+          "check' names the fix");
+    REQUIRE(turn.notices.size() == 1);
+    CHECK(turn.notices.front() == refused.error);
+    CHECK(turn.util->requests().empty());
+    CHECK(turn.chatty->requests().empty());
+    CHECK(turn.saved() == before);
+    CHECK(turn.session.messages.size() == 2);
+
+    std::ofstream{turn.config_path, std::ios::binary} << original;
+    const apogee::commands::ChatTurnResult next = run("second question");
+    CHECK(next.completed);
+    CHECK(next.error.empty());
+    CHECK(turn.chatty->requests().size() == 1);
 }
 
 TEST_CASE("a cancel during the follow-up's rewrite ends the turn at once, as it was",

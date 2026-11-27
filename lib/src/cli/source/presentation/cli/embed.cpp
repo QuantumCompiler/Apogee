@@ -19,6 +19,7 @@
 #include "backends/factory.h"
 #include "cli/graph.h"
 #include "cli/helpers.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
@@ -41,16 +42,10 @@ namespace {
 ///
 /// The same rule `models delete` follows: a collection is NAMED, not pathed. A
 /// `..` or an absolute path here would turn "search my notes" into a way to
-/// address any file on the machine.
+/// address any file on the machine. The rule is the one every reader asks
+/// (`contracts/collection_name.h`, CLI-M45).
 [[nodiscard]] std::string plain_name_error(std::string_view name) {
-    if (name.empty()) {
-        return "a collection needs a name";
-    }
-    if (name.find("..") != std::string_view::npos || name.find('/') != std::string_view::npos ||
-        name.find('\\') != std::string_view::npos) {
-        return "'" + std::string{name} + "' is not a plain collection name";
-    }
-    return {};
+    return harness::collection_read_error(name);
 }
 
 void require_plain_name(std::string_view name) {

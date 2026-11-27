@@ -28,6 +28,7 @@
 #include "cli/helpers.h"
 #include "cli/permissions.h"
 #include "contracts/assets.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
@@ -536,6 +537,16 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("provide --agent <name> (see --list) or --prompt <file>");
         }
         const LoadedAgent loaded = load_agent(config, config_path, *flags);
+        // A collection is named, never pathed (CLI-M45): `--rag`, else the
+        // agent's own collection -- read by every turn of the run -- refused
+        // before anything is built, read or asked.
+        if (const std::string refused =
+                rag_choice_refusal(choose_rag_collection(flags->rag_option->count() > 0, flags->rag,
+                                                         loaded.config.collection),
+                                   "agents." + flags->agent + ".collection");
+            !refused.empty()) {
+            fail_user(refused);
+        }
         const std::filesystem::path home = harness::home_for_config(config_path);
         std::string input = resolve_input(*flags);
 
@@ -665,7 +676,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                     harness, config, rag_choice.collection, question, flags->rag_limit,
                     flags->retriever, flags->rerank, {}, model,
                     agentloop::turn_budget(harness, model, max_tokens));
-                if (!rag.error.empty() && !flags->retriever.empty()) {
+                if (!rag.error.empty() && (rag.refused || !flags->retriever.empty())) {
                     fail_user(rag.error);
                 }
                 if (rag.error.empty() && !rag.prefix.empty()) {
@@ -942,6 +953,14 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                             style.tag(ansi::Role::Rag) + " " +
                             (choice.active() ? "retrieving from '" + choice.collection + "'"
                                              : "retrieval off -- /rag <name> to enable"));
+                    } else if (const std::string refused =
+                                   argument == "off" ? std::string{}
+                                                     : harness::collection_read_error(argument);
+                               !refused.empty()) {
+                        // A path, never a name (CLI-M45): refused here, the
+                        // session's choice unchanged.
+                        reporter.status().print_line(style.tag(ansi::Role::Warning) + " " +
+                                                     refused);
                     } else {
                         // An explicit choice for the rest of the session; `off`
                         // is the empty flag, exactly as `--rag ""` is.

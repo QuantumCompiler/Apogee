@@ -60,6 +60,45 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
     }
     agentloop::Options loop_options;
     try {
+        // Retrieval runs PER TURN, against what the user just asked -- which is the
+        // reason the injected chunks must stay out of history. Turn one's context
+        // left lying in the transcript would still be competing for attention on
+        // turn five, against the chunks that actually answer the new question.
+        //
+        // Which collection: the flag for the whole session, else whatever
+        // `auto_rag` says RIGHT NOW. The config is re-read here rather than at
+        // startup on purpose, and a config that has become unreadable mid-session
+        // costs this turn its auto_rag and says so -- never the turn itself.
+        RagChoice rag_choice;
+        std::optional<harness::Config> turn_config;
+        try {
+            turn_config = harness::load_config(rag.config_path);
+            // The chat's suite, not the file's default: retrieval's embedder and
+            // judge resolve under the suite the chat is running (27d).
+            turn_config->models.default_suite = harness.config().models.default_suite;
+        } catch (const harness::ConfigError& e) {
+            if (!rag.flag_given) {
+                notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
+            }
+        }
+        if (rag.flag_given) {
+            rag_choice = choose_rag_collection(true, rag.flag_value, {});
+        } else if (turn_config.has_value()) {
+            rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
+        }
+        // A collection is named, never pathed (CLI-M45): an auto_rag holding
+        // a path refuses the turn that would read it, in the read rule's
+        // words, before compaction, any model call or any file open -- so
+        // decided first, the session untouched, as the last finished turn
+        // left it.
+        if (std::string refused = rag_choice_refusal(rag_choice); !refused.empty()) {
+            if (attached != nullptr) {
+                attached->abandon_turn();
+            }
+            notice(refused);
+            outcome.error = std::move(refused);
+            return outcome;
+        }
         // Context is measured against what is ABOUT TO BE SENT -- the saved history
         // plus this turn -- not the history alone. Measuring before appending means
         // the first turn always reads as empty, and a single large prompt never
@@ -147,32 +186,6 @@ ChatTurnResult run_chat_turn(const harness::Harness& harness, logger::Session& s
             loop_options.refusal = mode_refusal(gate.approvals);
         }
 
-        // Retrieval runs PER TURN, against what the user just asked -- which is the
-        // reason the injected chunks must stay out of history. Turn one's context
-        // left lying in the transcript would still be competing for attention on
-        // turn five, against the chunks that actually answer the new question.
-        //
-        // Which collection: the flag for the whole session, else whatever
-        // `auto_rag` says RIGHT NOW. The config is re-read here rather than at
-        // startup on purpose, and a config that has become unreadable mid-session
-        // costs this turn its auto_rag and says so -- never the turn itself.
-        RagChoice rag_choice;
-        std::optional<harness::Config> turn_config;
-        try {
-            turn_config = harness::load_config(rag.config_path);
-            // The chat's suite, not the file's default: retrieval's embedder and
-            // judge resolve under the suite the chat is running (27d).
-            turn_config->models.default_suite = harness.config().models.default_suite;
-        } catch (const harness::ConfigError& e) {
-            if (!rag.flag_given) {
-                notice(std::string{"auto_rag skipped -- config unreadable: "} + e.what());
-            }
-        }
-        if (rag.flag_given) {
-            rag_choice = choose_rag_collection(true, rag.flag_value, {});
-        } else if (turn_config.has_value()) {
-            rag_choice = choose_rag_collection(false, {}, turn_config->auto_rag);
-        }
         // A follow-up is searched as a standalone question, restated by the
         // utility model when one is set, else the chat's own (26b) -- once, for
         // the attachments and the collection alike. The chat model is still

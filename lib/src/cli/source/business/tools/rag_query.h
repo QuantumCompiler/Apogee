@@ -24,7 +24,4 @@ namespace apogee::tools {
 void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* harness,
                         const harness::Config* config);
 
-/// Whether `name` can name a collection: letters, digits, `.`, `_`, `-`.
-[[nodiscard]] bool valid_collection_name(std::string_view name) noexcept;
-
 }  // namespace apogee::tools

@@ -492,7 +492,14 @@ call is `search_documents` embedding a query (next):
   the call is billed, under the same rule a chat's search keeps (a question
   against a collection already built with a model may embed through it;
   vectorising a whole collection through a paid embedder needs your yes).
-  A search asked for `lexical` makes no model call at all.
+  A search asked for `lexical` makes no model call at all. A collection is
+  named, never pathed (CLI-M45): `search_documents` and `collection_info`
+  take any name `list_collections` lists -- a spaced or a long one included
+  -- and refuse a path (`../x`, `/x`) in `embed`'s words, `'../x' is not a
+  plain collection name`. Every other reader holds the same rule: `--rag` on
+  `complete`, `chat` and `analyze`, the config's `auto_rag`, an agent's
+  collection and `serve --rag` refuse a path before anything is opened, so
+  no flag or config value can make Apogee open a database outside its home.
 - **The status reads** (since 54a). Each one answers with the JSON document
   its command prints under `--output-format json`, byte for byte, minus the
   newline that ends the command's output:
@@ -771,7 +778,9 @@ guessed: the error lists each by the address that names it alone.
 **Which graph.** Each tool also takes `graph` (a named graph, else a
 collection's own) or `collection` (the named graph listing it, else its own).
 With neither, the one graph built is read; with several, the error lists
-them, and with none, it says how to build one.
+them, and with none, it says how to build one. Either is a name, never a path
+(CLI-M45): a path is refused, and so is a named graph whose member is written
+as one.
 
 **Always there, never asking.** The toolset is registered with the others
 (switch it off with `tools.disabled: [graph]`, or leave it out of a suite

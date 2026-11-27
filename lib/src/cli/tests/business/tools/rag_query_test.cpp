@@ -1,6 +1,7 @@
 #include "tools/rag_query.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <random>
@@ -75,8 +76,6 @@ TEST_CASE("search_documents reports the retriever that ran and every hit's sourc
     CHECK(world.run("search_documents", R"({"query":"x","collection":"docs","top_k":0})").is_error);
     CHECK(
         world.run("search_documents", R"({"query":"x","collection":"docs","top_k":99})").is_error);
-    CHECK(apogee::tools::valid_collection_name("notes-2026"));
-    CHECK_FALSE(apogee::tools::valid_collection_name("a/b"));
 }
 
 TEST_CASE("list_collections and collection_info describe what is on disk", "[tools][rag]") {
@@ -92,4 +91,54 @@ TEST_CASE("list_collections and collection_info describe what is on disk", "[too
     for (const std::string& name : world.registry.names()) {
         CHECK_FALSE(world.registry.find(name)->writes);
     }
+}
+
+TEST_CASE("every collection list_collections lists can be searched and described",
+          "[tools][rag][collection_name][M45]") {
+    // CLI-M45: the tools once kept a stricter rule of their own (ASCII
+    // letters, digits and `. _ -`, at most 128 characters), so a registered
+    // `my notes` or a 129-character name was listed and then refused. They
+    // take the one read rule now: every name under the folder, and no path.
+    const World world;
+    const std::string long_name(129, 'n');
+    for (const std::string& name : {std::string{"my notes"}, long_name, std::string{"a..b"}}) {
+        INFO(name);
+        {
+            apogee::embedstore::Store store{apogee::harness::embeddings_dir() / (name + ".db")};
+            store.replace_source("plan.md", {"the zarquon protocol requires seventeen widgets"});
+        }
+        const nlohmann::json search{{"query", "zarquon widgets"}, {"collection", name}};
+        const ToolOutcome hits = world.run("search_documents", search.dump());
+        CHECK_FALSE(hits.is_error);
+        CHECK(hits.content.find("seventeen widgets") != std::string::npos);
+        const ToolOutcome info =
+            world.run("collection_info", nlohmann::json{{"collection", name}}.dump());
+        CHECK_FALSE(info.is_error);
+        CHECK(info.content.find("collection: " + name) != std::string::npos);
+        CHECK(world.run("list_collections", "{}").content.find("  " + name + "  1 chunks") !=
+              std::string::npos);
+    }
+    for (const std::string pathed : {"../x", "/x", "a/b", "a\\b", ".."}) {
+        INFO(pathed);
+        const ToolOutcome search = world.run(
+            "search_documents", nlohmann::json{{"query", "x"}, {"collection", pathed}}.dump());
+        CHECK(search.is_error);
+        CHECK(search.content.find("is not a plain collection name") != std::string::npos);
+        const ToolOutcome info =
+            world.run("collection_info", nlohmann::json{{"collection", pathed}}.dump());
+        CHECK(info.is_error);
+        CHECK(info.content.find("is not a plain collection name") != std::string::npos);
+    }
+#ifndef _WIN32
+    // A store whose name no reader takes -- a hand-made `a\b.db`, legal on
+    // POSIX -- is not listed, so everything listed can be searched.
+    {
+        apogee::embedstore::Store store{apogee::harness::embeddings_dir() / "a\\b.db"};
+    }
+    CHECK(world.run("list_collections", "{}").content.find("a\\b") == std::string::npos);
+#endif
+    // No collection named is still asked for, in the tool's own words.
+    CHECK(
+        world.run("search_documents", R"({"query":"x"})").content.find("collection is required") !=
+        std::string::npos);
 }

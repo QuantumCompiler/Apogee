@@ -12,6 +12,7 @@
 #include "agentloop/rerank.h"
 #include "agentloop/retriever.h"
 #include "agentloop/validate.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "httpserver/handler.h"
@@ -61,9 +62,9 @@ constexpr int kHttpQueryTopK = 20;
     return it->get<bool>();
 }
 
+/// The collections' read rule (CLI-M45); empty is the default collection.
 [[nodiscard]] bool plain_name(std::string_view name) {
-    return name.find("..") == std::string_view::npos && name.find('/') == std::string_view::npos &&
-           name.find('\\') == std::string_view::npos;
+    return name.empty() || !harness::name_leaves_folder(name);
 }
 
 [[nodiscard]] nlohmann::json envelope(const commands::CaptureResult& result) {

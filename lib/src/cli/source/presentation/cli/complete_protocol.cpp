@@ -106,6 +106,9 @@ namespace {
         if (value.list && (',' + head).find(',' + item + ',') != std::string::npos) {
             continue;  // already in the list
         }
+        if (value.list && item.find(',') != std::string::npos) {
+            continue;  // the verb would split it into two (CLI-M45)
+        }
         offered.push_back(head + item);
     }
     return offered;
@@ -554,6 +557,16 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
             pending = nullptr;
             continue;
         }
+        // Past `--` every word is a positional of the command in play, a
+        // dash-led one included, as the parser reads it (CLI-M45).
+        if (context.options_ended) {
+            context.positionals.push_back(word);
+            continue;
+        }
+        if (word == "--") {
+            context.options_ended = true;
+            continue;
+        }
         if (word.size() > 1 && word.front() == '-') {
             // `--model=x` carries its own value; `--model x` takes the next word.
             if (const std::size_t equals = word.find('='); equals != std::string::npos) {
@@ -584,13 +597,14 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
 
     // A word starting with a dash is a flag being typed: the flags of whichever
     // command is in play -- the root's when none is. Only its own: CLI11 does
-    // not accept a parent's flag after a subcommand.
-    if (request.current.starts_with('-')) {
+    // not accept a parent's flag after a subcommand. Past `--` it is a name
+    // being typed, offered as the positional it is.
+    if (!context.options_ended && request.current.starts_with('-')) {
         return {.candidates = filter_prefix(node->flags, request.current)};
     }
 
     // A command with verbs, none chosen yet: offer them.
-    if (!node->subcommands.empty() && positionals == 0) {
+    if (!context.options_ended && !node->subcommands.empty() && positionals == 0) {
         std::vector<std::string> names;
         names.reserve(node->subcommands.size());
         for (const CommandSpec& child : node->subcommands) {
@@ -608,7 +622,10 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
     }
 
     // Every positional is given: only flags can follow, so offer those rather
-    // than nothing.
+    // than nothing -- and past `--`, where no flag can, nothing.
+    if (context.options_ended) {
+        return {};
+    }
     return {.candidates = filter_prefix(node->flags, request.current)};
 }
 

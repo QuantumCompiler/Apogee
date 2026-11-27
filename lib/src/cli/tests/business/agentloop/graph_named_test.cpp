@@ -104,6 +104,27 @@ TEST_CASE("named_graph_covering honours built_only, config order, and case-insen
     CHECK(covering->name == "work");
 }
 
+TEST_CASE("a graphs: entry named by a path never covers a collection, so its file is never opened",
+          "[agentloop][graph][named][covering][M45]") {
+    // CLI-M45: a graph's name is held to the collections' read rule. A
+    // hand-written `graphs:` key holding a path would have joined the
+    // graphs/ folder to it and handed retrieval a foreign database.
+    const Fixture f;
+    const std::filesystem::path foreign = f.home.path() / "foreign.db";
+    {
+        const Store store{foreign};
+    }
+    // The graphs/ folder exists, so `../../foreign` really reaches the file.
+    std::filesystem::create_directories(apogee::agentloop::graph_db_path("x").parent_path());
+    REQUIRE(std::filesystem::exists(apogee::agentloop::graph_db_path("../../foreign")));
+    const apogee::harness::Config pathed = apogee::harness::parse_config(
+        "graphs:\n  ../../foreign:\n    collections: [docs]\n", "<test>");
+    CHECK_FALSE(apogee::agentloop::named_graph_covering(pathed, "docs", true).has_value());
+    CHECK_FALSE(apogee::agentloop::named_graph_covering(pathed, "docs", false).has_value());
+    const TurnGraph turn = apogee::agentloop::resolve_turn_graph(pathed, "docs");
+    CHECK(turn.store_path.empty());
+}
+
 TEST_CASE(
     "resolve_turn_graph prefers a built named graph, then the collection's own block, "
     "then nothing",

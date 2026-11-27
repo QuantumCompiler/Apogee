@@ -689,6 +689,40 @@ TEST_CASE("a selection that names nothing, or two things, says so", "[graph][nav
     CHECK(plain.message == "no graph built for 'plain' -- run: apogee graph build plain");
 }
 
+TEST_CASE("the graph tools take the collections' read rule: names reach, paths never",
+          "[graph][navigate][target][M45]") {
+    // CLI-M45: one read rule for every reader. A collection whose name
+    // holds `..` but cannot leave the folder reaches its graph, as it reads
+    // at --rag; a path -- named, or a named graph's member hand-written as
+    // one -- is refused before a path is built from it.
+    const Home home;
+    {
+        Store odd{apogee::harness::embeddings_dir() / "a..b.db"};
+        apogee::testing::build_navigation_graph(odd, odd, "");
+    }
+    CHECK(home.target("a..b").store_path == apogee::harness::embeddings_dir() / "a..b.db");
+    CHECK(home.target("", "a..b").name == "a..b");
+
+    for (const std::string pathed : {"..", "../x", "/x", "a\\b"}) {
+        INFO(pathed);
+        const Failure graph = failure_of([&] { (void)home.target(pathed); });
+        CHECK(graph.kind == Kind::InvalidArgument);
+        CHECK(contains(graph.message, "not a plain graph or collection name"));
+        const Failure collection = failure_of([&] { (void)home.target("", pathed); });
+        CHECK(collection.kind == Kind::InvalidArgument);
+        CHECK(contains(collection.message, "not a plain collection name"));
+    }
+
+    const apogee::harness::Config pathed_member = apogee::harness::parse_config(
+        "graphs:\n  work:\n    collections: [notes, ../outside]\n", "<navigate>");
+    const Failure member = failure_of([&] {
+        (void)apogee::graph::resolve_graph_target(pathed_member,
+                                                  apogee::graph::GraphSelection{.graph = "work"});
+    });
+    CHECK(member.kind == Kind::InvalidArgument);
+    CHECK(member.message == "'../outside' is not a plain collection name");
+}
+
 TEST_CASE("with no selection, the one graph built is the one read", "[graph][navigate][target]") {
     const Home home{/*with_docs=*/false};
     CHECK(home.target("").name == "work");

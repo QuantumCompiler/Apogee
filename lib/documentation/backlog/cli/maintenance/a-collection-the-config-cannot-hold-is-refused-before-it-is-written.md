@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Stores › `embed ingest`, `graph build`, the knowledge store, their HTTP twins and the adds that name a collection |
 | **Labels** | `collections` `knowledge` `graph` `config` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M45](a-collection-is-named-not-pathed-at-every-reader.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | CLI-M42's probes (2026-11-22), then a sandboxed investigation, two skeptics and a critic the same day |
 | **Created** | 2026-11-22 |
@@ -205,14 +205,14 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
 
 ## Out of scope
 
-- **The read rule at every reader**, the `--rag` path escape and the completion filters: [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md).
+- **The read rule at every reader**, the `--rag` path escape and the completion filters: [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27).
 - **Widening the config editor to quoted keys** (above).
 - **An `embed rename` verb**: a follow-up.
 - **The Mac app** passing `--` before a collection name ([APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed)), and showing a finished run's notes ([APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person)). The app needs no change to show this item's refusals for a name that reaches the verb, since they are the last stderr line.
 
 ## Links
 
-- **Blocked by:** [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md) · **Blocks:** —
+- **Blocked by:** — ([CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader), its gate, shipped 2026-11-27) · **Blocks:** —
 - **Relates to:**
   - [CLI-M42](../../../assistant/cli/MILESTONES.md#2026-11-27--stubs-read-the-words-as-the-shell-does-maintenance-item-m42-a-quoted-word-completes-and-a-name-lands-as-one-word-in-every-shell), whose investigation found the spaced collection;
   - [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27), whose refusals this item's dry run asks before the write;

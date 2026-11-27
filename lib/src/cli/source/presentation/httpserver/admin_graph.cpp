@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "agentloop/graph_context.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "embedstore/store.h"
@@ -36,9 +37,10 @@ constexpr std::string_view kConfigError = "config_error";
 constexpr std::string_view kConflict = "conflict";
 constexpr int kNotImplemented = 501;
 
+/// The collections' read rule (CLI-M45), for a graph's name as for a
+/// collection's.
 [[nodiscard]] bool plain_name(std::string_view name) {
-    return !name.empty() && name.find("..") == std::string_view::npos &&
-           name.find('/') == std::string_view::npos && name.find('\\') == std::string_view::npos;
+    return !harness::name_leaves_folder(name);
 }
 
 [[nodiscard]] bool file_exists(const std::filesystem::path& path) {

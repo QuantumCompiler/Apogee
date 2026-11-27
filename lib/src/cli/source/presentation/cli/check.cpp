@@ -39,6 +39,7 @@
 #include "cli/provider_offer.h"
 #include "cli/train.h"
 #include "contracts/assets.h"
+#include "contracts/collection_name.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
 #include "contracts/host.h"
@@ -741,6 +742,17 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         }
         add(report, Status::Ok, "Config", label,
             collection.retriever.empty() ? "auto" : collection.retriever);
+    }
+    // A collection is named, never pathed (CLI-M45): an older config holding
+    // a path in auto_rag still loads, every turn that would read it refuses,
+    // and this row says so -- the key named, and the hand edit, since no
+    // verb writes the key.
+    if (const std::string refused = harness::collection_read_error(config.auto_rag);
+        !config.auto_rag.empty() && !refused.empty()) {
+        add(report, Status::Fail, "Config", "auto_rag",
+            refused + " -- every turn that would read it is refused",
+            "edit auto_rag in " + inputs.config_path.string() +
+                " to a collection's name, as 'apogee embed list' shows it, or remove it");
     }
 }
 
@@ -1760,8 +1772,17 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
                     name + ".model)");
             clean = false;
         }
-        if (!agent.collection.empty() &&
-            !std::filesystem::exists(collection_path(agent.collection), code)) {
+        if (const std::string refused = harness::collection_read_error(agent.collection);
+            !agent.collection.empty() && !refused.empty()) {
+            // A path, never a name (CLI-M45): every run of the agent refuses
+            // it, and no path is built from it here.
+            add(report, Status::Fail, "Agents", label,
+                "collection: " + refused + " -- every run of the agent is refused",
+                "edit agents." + name + ".collection in " + inputs.config_path.string() +
+                    " to a collection's name, as 'apogee embed list' shows it");
+            clean = false;
+        } else if (!agent.collection.empty() &&
+                   !std::filesystem::exists(collection_path(agent.collection), code)) {
             add(report, Status::Warn, "Agents", label,
                 "collection '" + agent.collection + "' does not exist; the agent runs without it",
                 "apogee embed ingest " + agent.collection + " <path>");
@@ -2072,6 +2093,14 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
     // config.
     for (const auto& [name, graph] : inputs.config.graphs) {
         const std::string label = "named graph: " + name;
+        // A name written as a path (CLI-M45): no graph is read from it, and
+        // no path is built from it here.
+        if (harness::name_leaves_folder(name)) {
+            add(report, Status::Fail, "Graph", label,
+                "'" + name + "' is not a plain graph name -- no graph is read from it",
+                "rename the graphs: entry in " + inputs.config_path.string() + " to a plain name");
+            continue;
+        }
         const std::filesystem::path collection_db = inputs.home / "embeddings" / (name + ".db");
         if (inputs.config.find_embedding(name) != nullptr ||
             std::filesystem::exists(collection_db, code)) {
@@ -2118,6 +2147,16 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
         }
         bool members_ok = true;
         for (const std::string& member : graph.collections) {
+            if (const std::string refused = harness::collection_read_error(member);
+                !refused.empty()) {
+                // A path, never a name (CLI-M45): never opened as a member.
+                add(report, Status::Fail, "Graph", label,
+                    "member collection: " + refused + " -- it is never read",
+                    "edit graphs." + name + ".collections in " + inputs.config_path.string() +
+                        " to collections' names");
+                members_ok = false;
+                continue;
+            }
             const std::filesystem::path member_db = inputs.home / "embeddings" / (member + ".db");
             if (inputs.config.find_embedding(member) == nullptr &&
                 !std::filesystem::exists(member_db, code)) {

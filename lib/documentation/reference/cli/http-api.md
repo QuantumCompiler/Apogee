@@ -25,7 +25,7 @@ apogee serve --all-backends --rag notes        # every servable backend, retriev
 | `--allow-remote` | Permits a non-loopback `--bind`. **Without it the server refuses to start** — the inference plane is unauthenticated (for OpenAI-client compatibility), so exposing it is a decision the operator makes explicitly. Put it behind your own access control. It is also the switch for **a reverse proxy in front**: under it the server answers whatever `Host` the proxy forwards, on any bind, so a proxy on the same host keeps `--bind 127.0.0.1` ([Browsers and DNS rebinding](#browsers-and-dns-rebinding); since 57n, 2026-11-01). |
 | `-m BACKEND` / `--all-backends` | Which backends a request may name. The default (or `-m`) alone unless `--all-backends`: adding an entry to the config never silently exposes it. Vendor-CLI backends (`claude-cli`, `codex-cli`, `gemini-cli`, `ollama-cli`) are **never served** — they run on a personal subscription. |
 | `--tools` | Run the tool loop server-side with **the built-in tools, as `chat` has them** ([tools.md](tools.md)): files under `tools.fs_root` (the launch folder when unset — `read_file` there reads a `.env` as readily as source), `notes`, `rag`, `graph`, `shell` and `git` where the build can start programs, `fetch_url` (and `web_search` when `tools.search` names a SearXNG), the session todo, and every enabled MCP server. Clients see only the final answer, and **any client of the port can ask for any of them**. The startup line counts them and names each set — `-- tools: 25 (files under /srv/app, shell, git, notes, rag, graph, fetch_url to listed hosts, todo_write)` — and `-- runs unasked:` names every destructive tool the config sets to `allow` (or `none`): nobody can answer a permission prompt on a served request, so `ask` is deny and [`allow` is the only way one runs](#put-v1adminpermissionsid). For the same reason `fetch_url` reaches **only the hosts in `tools.allowed_hosts`** — anything else, including a redirect to an unlisted host, comes back to the model as a refusal (since 2026-09-25; before that a served fetch reached any website). Until 57n (2026-11-01) the flag's help and the startup line said `fetch_url` alone. |
-| `--rag NAME`, `--rag-limit N`, `--retriever`, `--rerank` | Retrieval, fixed for the server's lifetime (`--rag ""` switches off the config's `auto_rag`). `?retriever=` and `?rerank=` override per request. |
+| `--rag NAME`, `--rag-limit N`, `--retriever`, `--rerank` | Retrieval, fixed for the server's lifetime (`--rag ""` switches off the config's `auto_rag`). `?retriever=` and `?rerank=` override per request. A collection is named, never pathed (CLI-M45): a `--rag`, or an `auto_rag`, holding a path (`../x`, `/x`) refuses the start, `'../x' is not a plain collection name`. |
 | `--preload` | Load every served local model now rather than on the first request. |
 | `--ignore-timeout` | Keep local models resident: ignore `idle_unload_seconds`. |
 | `--session-ttl MINUTES` | How long a server-side session may sit idle before it leaves memory (default 60; 0 keeps them). |
@@ -543,7 +543,8 @@ no body is given -- and the entry is appended through the CLI's own edit,
 so the result is byte-identical to the CLI's. `201` with the view plus
 `prompt_path` and `schema_path`; `409` (`type: conflict`) when the agent or
 its files exist without `force`; `400` on an invalid name, policy, format, or
-body. No restart is needed: `analyze` reads the config on every run.
+body, and on a `collection` written as a path (CLI-M45), in the CLI's words
+(`'../x' is not a plain collection name`), before any file is written. No restart is needed: `analyze` reads the config on every run.
 
 ### `GET /v1/admin/agents/{id}`
 
@@ -556,7 +557,8 @@ unknown.
 
 The twin of `apogee agents edit`: the same body as `POST`, with the name
 from the path and `force` implied, so `prompt_body` and `schema_body`
-replace the files in place. `200` with the view; `400` on a malformed body.
+replace the files in place. `200` with the view; `400` on a malformed body
+or a `collection` written as a path, as at `POST`.
 
 ### `DELETE /v1/admin/agents/{id}`
 

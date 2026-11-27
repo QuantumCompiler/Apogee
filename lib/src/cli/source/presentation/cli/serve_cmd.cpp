@@ -279,6 +279,15 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
         if (!agentloop::valid_rerank(flags->rerank, config)) {
             fail_user("--rerank: no backend named '" + flags->rerank + "'");
         }
+        // Retrieval is fixed for the server's lifetime: the flag, else the
+        // config's auto_rag -- the one shared decision every surface makes.
+        // A collection is named, never pathed (CLI-M45): every request would
+        // read it, so a path refuses the start, before anything is built.
+        const RagChoice rag_choice =
+            choose_rag_collection(flags->rag_option->count() > 0, flags->rag, config.auto_rag);
+        if (const std::string refused = rag_choice_refusal(rag_choice); !refused.empty()) {
+            fail_user(refused);
+        }
 
         // A suite member naming nothing is refused at startup, never routed
         // around per request (27d).
@@ -344,10 +353,6 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(message);
         }
 
-        // Retrieval is fixed for the server's lifetime: the flag, else the
-        // config's auto_rag -- the one shared decision every surface makes.
-        const RagChoice rag_choice =
-            choose_rag_collection(flags->rag_option->count() > 0, flags->rag, config.auto_rag);
         options.rag_collection = rag_choice.collection;
         options.rag_source = rag_choice.source;
         options.rag_limit = flags->rag_limit;

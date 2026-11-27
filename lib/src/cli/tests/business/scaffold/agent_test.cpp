@@ -144,6 +144,36 @@ TEST_CASE("names are sanitised or refused, and bad enums are refused before any 
     CHECK_FALSE(std::filesystem::exists(tree.home.path() / "prompts" / "x.txt"));
 }
 
+TEST_CASE("a collection named by a path is refused before any file is written",
+          "[scaffold][agent][M45]") {
+    // CLI-M45: an agent's collection is read by every run, so a path is
+    // refused at add -- the one core `agents create` and the admin POST and
+    // PUT share -- in the read rule's words, the config and the tree as they
+    // were. Every plain name, odd or not, is kept.
+    const Tree tree;
+    const std::string before = tree.bytes();
+    for (const std::string pathed : {"../x", "/tmp/x", "a/b", "a\\b", ".."}) {
+        INFO(pathed);
+        AgentSpec spec;
+        spec.name = "reader";
+        spec.collection = pathed;
+        try {
+            (void)create_agent(tree.config, spec);
+            FAIL("a pathed collection must be refused");
+        } catch (const std::runtime_error& e) {
+            CHECK(std::string{e.what()} == "'" + pathed + "' is not a plain collection name");
+        }
+        CHECK(tree.bytes() == before);
+        CHECK_FALSE(std::filesystem::exists(tree.home.path() / "prompts" / "reader.txt"));
+        CHECK_FALSE(std::filesystem::exists(tree.home.path() / "schemas" / "reader.json"));
+    }
+    AgentSpec spec;
+    spec.name = "reader";
+    spec.collection = "my notes";
+    const apogee::scaffold::AgentResult made = create_agent(tree.config, spec);
+    CHECK(made.name == "reader");
+}
+
 TEST_CASE("a config failure leaves the files on disk and says so", "[scaffold][agent]") {
     const Tree tree;
     std::ofstream{tree.config, std::ios::binary} << "backends: [not, a, mapping]\n";

@@ -3,6 +3,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/collection_name.h"
 #include "contracts/layout.h"
 
 namespace apogee::agentloop {
@@ -161,6 +162,11 @@ std::filesystem::path graph_db_path(std::string_view name) {
 std::optional<CoveringGraph> named_graph_covering(const harness::Config& config,
                                                   std::string_view collection, bool built_only) {
     for (const auto& [name, graph] : config.graphs) {
+        // A name written as a path is never a graph (CLI-M45): its file
+        // would lie outside graphs/.
+        if (harness::name_leaves_folder(name)) {
+            continue;
+        }
         const harness::CaseInsensitiveLess less;
         bool member = false;
         for (const std::string& candidate : graph.collections) {

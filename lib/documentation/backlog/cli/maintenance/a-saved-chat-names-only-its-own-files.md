@@ -241,7 +241,7 @@ Hermetic: a temporary `APOGEE_HOME` three levels deep, with `sessions/`, `attach
 - **`chats title` dropping `save`'s answer** (`chat_history.cpp:474`). After this item, `load` admits only a file that `session_path(chat_id)` names, so `save` answers `Saved::Deleted` only when the file is deleted between the load and the save. A note only.
 - **The Mac app passing chat ids after `--`**: [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name). Ids the CLI mints never begin with `-`.
 - **CLI-59d's need for its own rule for path arguments** (an aside of the same investigation). Fixing chats here does not make [59d](../v0.2.3/reads-and-commands-over-the-network.md)'s door safe for `datasets prepare --out <path>`, `embed ingest <path>` or `train run --dataset <path>`.
-- **The same rule for collections and datasets**: [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md) and [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md).
+- **The same rule for collections and datasets**: [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27) and [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md).
 
 ## Links
 
@@ -251,7 +251,7 @@ Hermetic: a temporary `APOGEE_HOME` three levels deep, with `sessions/`, `attach
   - [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), which edits `rename_session_backend` in the same `session.cpp`; there is no gate, and either can land first;
   - [CLI-M52](a-refused-scaffold-writes-nothing.md), [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) and [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), the investigation's other items, on other seams.
 - **Relates to:**
-  - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), whose escape-only read rule this rule takes its shape from;
+  - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), whose escape-only read rule this rule takes its shape from;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which would run `chats delete` and `chats title` from a paired device;
   - CLI-63b (v0.2.4, [personal data has an owner](../v0.2.4/personal-data-has-an-owner.md)), which moves sessions, attachments and recall per person;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose CLI asides opened this investigation, and [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name), the Mac app's Sessions argv;

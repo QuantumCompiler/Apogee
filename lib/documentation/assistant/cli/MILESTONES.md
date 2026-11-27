@@ -4690,6 +4690,45 @@ One of those needed a second attempt: the first "leak into history" mutation cha
 
 **Retrieval quality is the lexical floor's, honestly.** Targeted terms rank well; a question padded with common words dilutes and ranks the right chunk lower. That is inherent to BM25 over an OR of every word, and it is precisely what `embedding-clients` and `vector-hybrid-rerank` exist to improve — the floor is meant to be a floor.
 
+### 2026-11-27 — `a-collection-is-named-not-pathed-at-every-reader` (maintenance item M45): a collection is named, not pathed, at every reader
+
+**Why.** CLI-M42's probes, then a sandboxed investigation, two skeptics and a critic (2026-11-22), found that `embed` refused a collection named by a path, as its docs promised, while the reader behind `--rag` checked nothing.
+- **A read wrote outside the home.** `apogee complete -m echo --rag <dir>/outside/foreign "fox"` opened an unrelated SQLite file, wrote Apogee's schema into it (its `sqlite_master` went from 1 entry to 49) and left `-wal` and `-shm` beside it, exit 0. `auto_rag`, an agent's collection and `serve --rag` reached the same unchecked `retrieve_for_collection`, and `agents create --collection` and `POST /v1/admin/agents` accepted a path.
+- **The rule was copied by hand six times** (`embed`, `graph`, `knowledge`, `graph_members` and two admin routes), never into that reader. The graph tools took any file on disk.
+- **The rag tools had a third, stricter rule**: `search_documents` and `collection_info` refused a registered `my notes` or a 129-character name that `list_collections` listed and `embed query` read.
+- **Completion offered names the verbs split or misread**: a store named `a\nb` as `a` and `b`, `c,d` in a comma list, and `-x` where the verb reads a flag.
+
+Every input was local (a flag, the config, an admin-token call), so it was a data-integrity fix, not a network exposure.
+
+**What was built**
+
+- [x] **One read rule, in contracts** (`contracts/collection_name.h/.cpp`). `name_leaves_folder` refuses only what could leave `embeddings/` once `.db` is appended: the empty name, `..` as the whole name, a `/` or a `\` on every platform, a NUL, and a root name (`std::filesystem::path(name).has_root_name()`, so a Windows `D:x`; a POSIX `a:b` reads). `collection_read_error` gives embed's words: `'<name>' is not a plain collection name`. No character set and no length, so every store that exists keeps reading.
+- [x] **Every reader asks it before a path is built.**
+  - `retrieve_for_collection` refuses, setting `RagResult::refused`, and every surface fails on it: `complete` and `analyze` exit 1, the HTTP handler answers 400.
+  - Where each run starts: `complete`, `analyze` and `serve` refuse the flag or the config value at start (`rag_choice_refusal`), exit 1, before anything is built. `chat`, `execute` and the shell refuse a `--rag` path at the session's opening. An `auto_rag` path, read again each turn, refuses that turn before compaction or any model call: a notice, an `error` in machine mode, the session untouched, and the session goes on. An interactive analyze's `/rag <path>` is refused in place. A refused config value says where it came from: `-- from auto_rag in the config; 'apogee check' names the fix`, or the agent's `agents.<name>.collection`.
+  - The rag tools take the read rule and keep their existence check, so everything `list_collections` lists is searched and described. `list_collections` lists only names the rule takes; `tools::valid_collection_name` is gone.
+  - The graph tools: a graph or collection named by a path is refused, and so is a named graph whose member is written as one. `graph build`, `stats`, `show` and their HTTP twins never open such a member (`open_graph_members` maps it to null), and a `graphs:` key written as a path never covers a collection at retrieval (`named_graph_covering`).
+  - The six copies call the shared predicate, each keeping its words (`not a plain graph or collection name`, `not a plain graph name`, the admin routes' 400s).
+  - `scaffold::create_agent` refuses a collection written as a path before any file, for `agents create` and `POST`/`PUT /v1/admin/agents` alike: exit 1 or 400, the config unchanged.
+  - `check` fails an `auto_rag`, an agent's collection, a named graph's member and a `graphs:` key written as a path, each naming the key and the hand edit. An older config holding one still loads (ADR 0006).
+- [x] **Completion offers what the verbs read** (ADR 0007). The walk reads `--`: past it every word is a positional, a dash-led word being typed is offered as the positional, no subcommand is offered and nothing is past the last positional. The collection and graph kinds drop names holding a line break or refused by the rule, and a dash-led name unless the line has reached `--` (so the Mac app's `__complete graph stats -- ''`, APP-M21, keeps every name). A comma list never offers an item holding `,`. The record kind never opens a `--db` written as a path.
+- [x] **Tests**, each failing on the old code: the rule's table (`contracts/collection_name_test`, Windows root names under `_WIN32`); `retrieval_test` (paths refused with a foreign store's bytes and folder kept; `my notes`, `a..b`, `a@b`, a 244-byte name and a case-folded `Notes` reading; the config-key words); `machine_mode_test` (an `auto_rag` path refusing its turn with no model called, and the next turn running); `rag_query_test`, `navigate_test`, `graph_named_test`, the new `operations/graph_members_test`, `scaffold/agent_test`, `admin_agents_test`, `check_test` and `complete_sources_test`; and `cli.config_lifecycle` on the real binary: `--rag ../foreign` and an absolute path refused by `complete`, `analyze`, `chat`, `serve` (bounded) and `embed query`, `/rag` in an interactive analyze, `foreign.db`'s hash and listing unchanged; a pathed `auto_rag` and agent collection loading, refusing and failing `check`; `agents create --collection ../foreign` writing nothing; and `my notes` and `a..b` reading.
+- [x] **Docs.** CLAUDE.md's codebase map (`collection_name.h`); DEVELOPER.md's `collection_name`, `embed`, `retrieval`, `rag_query`, `complete_protocol` and `complete_sources` rows, the test rows and the `cli.config_lifecycle` notes; [tools.md](../../reference/cli/tools.md)'s rag and graph tools; [http-api.md](../../reference/cli/http-api.md)'s `serve --rag` and agent routes. SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - A config value that is already a path loads; the reader refuses at use, `check` fails the row, new values are refused at add.
+  - The rag tools keep no stricter rule of their own.
+  - A dash-led store name is offered only where the walk knows the word follows `--`, and dropped elsewhere, a flag's value included.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **`..` is refused as the whole name, not as a substring.** With `/` and `\` refused, `a..b` cannot leave the folder, and it read at `--rag` and the rag tools before. `embed`, `graph`, `knowledge` and their HTTP twins, which refused any name holding `..`, now take it. A NUL is refused too (CLI-M55's escape check names it).
+  - **The agent door's refusal sits at the top of `create_agent`**, one place for both doors, still ahead of CLI-M52's first write.
+  - **Where each surface refuses**, as above: at start for a run whose turns all read the value; at the turn for a chat's `auto_rag`, decided first, before compaction.
+  - **A graph's name and members are held to the same rule where the config supplies them**, and completion's record kind and the listings follow it (found by the build's review).
+  - **`knowledge.db`'s load-time check is left as it is** (any `..`, `/` or `\` refused at load), outside this item's files and ADR 0006's load contract. So `--db a..b` reads while `knowledge.db: a..b` still fails the load, and a Windows root name there is the load check's to take up.
+
+**Verified.** The full gate, `lib/scripts/cicd.sh --test`. A Windows root name is proven by CI's Windows rows.
+
 ---
 
 ## Milestone R — Embedding clients

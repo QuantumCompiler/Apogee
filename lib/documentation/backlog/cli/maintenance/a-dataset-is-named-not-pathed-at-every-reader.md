@@ -181,7 +181,7 @@ Paths under `lib/src/cli/`.
 
 | File | Change |
 |---|---|
-| `source/data/contracts/collection_name.h`, `.cpp` (CLI-M45's, if it has landed), or a new `source/data/contracts/plain_name.h`, `.cpp` | One escape check both read rules call. It is true for the empty name, `..`, a `/`, a `\`, a NUL, and `std::filesystem::path(name).has_root_name()`, which fires only on Windows, so a macOS `a:b` keeps reading. If CLI-M45 has landed, its check is lifted out of `collection_read_error` into this predicate. If not, this item adds it here, and CLI-M45 builds its rule on it. |
+| `source/data/contracts/collection_name.h`, `.cpp` (CLI-M45's) | One escape check both read rules call. It is true for the empty name, `..`, a `/`, a `\`, a NUL, and `std::filesystem::path(name).has_root_name()`, which fires only on Windows, so a macOS `a:b` keeps reading. CLI-M45 landed it (2026-11-27) as `harness::name_leaves_folder` in `contracts/collection_name.h`, the predicate `collection_read_error` asks, so this item calls it as it is. |
 | `source/business/training/datasets.h`, `.cpp` | `dataset_read_error(std::string_view name)` strips one `.jsonl`, as `write` does (`:153-156`), then applies the escape check. It answers `'<name>' is not a dataset name -- a name, never a path`, or empty. For a refused name, `exists` answers false, `info` nullopt and `remove` those words, so `path_for` is never handed one. The check `write` runs (`:153-161`) is lifted into a function synth can call first, with today's words. |
 | `source/presentation/cli/datasets.cpp` | `info` (`:580`) and `delete` (`:599`) call `dataset_read_error` first and fail with its words, before any existence check or `path_for`. synth runs the write check as its first step, before `store.exists` (`:451`), the kit (`:455`) and the teacher (`:469`). `info` and `delete` register their name with the names-only kind. |
 | `source/presentation/httpserver/admin_datasets.cpp` | `GET` (`:168`) and `DELETE` (`:179`) take `dataset_read_error`, answering 400 with its words. POST create (`:131`) and synth (`:228`) keep `plain_name`, the write rule. |
@@ -285,7 +285,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
 
 - **Blocked by:** — · **Blocks:** [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), which narrows the create rule once this item has moved the readers off it
 - **Relates to:**
-  - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), the same read rule for collections: whichever lands second shares the escape check;
+  - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), the same read rule for collections: whichever lands second shares the escape check;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose door would run these verbs: best landed first, though this item does not make that door safe for paths;
   - [CLI-M57](a-saved-chat-names-only-its-own-files.md), the same before-59d priority for a saved chat's id;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the full-screen shell's delete of a dash-led dataset;

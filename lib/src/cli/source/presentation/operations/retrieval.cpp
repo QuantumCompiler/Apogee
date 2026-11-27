@@ -1,7 +1,11 @@
 #include "operations/retrieval.h"
 
+#include <string>
+#include <utility>
+
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
+#include "contracts/collection_name.h"
 #include "operations/collections.h"
 
 namespace apogee::commands {
@@ -12,6 +16,15 @@ agentloop::RagResult retrieve_for_collection(
     std::string_view rerank_flag, const harness::CancellationToken& cancellation,
     std::string_view conversation, const agentloop::TurnBudget& budget, std::int64_t share_used,
     const agentloop::SideCallSink& on_side_call) {
+    // A collection is named, never pathed (CLI-M45): the name is checked
+    // before a path is built from it, so no surface's flag, config key or
+    // agent can open a file outside the home.
+    if (std::string refused = harness::collection_read_error(collection); !refused.empty()) {
+        agentloop::RagResult result;
+        result.error = std::move(refused);
+        result.refused = true;
+        return result;
+    }
     agentloop::RagTurn turn;
     // Its embedder and judge said where the surface says them (26n).
     turn.on_side_call = on_side_call;
@@ -62,6 +75,16 @@ RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
         choice.source = RagSource::Config;
     }
     return choice;
+}
+
+std::string rag_choice_refusal(const RagChoice& choice, std::string_view config_key) {
+    std::string refused =
+        choice.active() ? harness::collection_read_error(choice.collection) : std::string{};
+    if (!refused.empty() && choice.source == RagSource::Config) {
+        refused +=
+            " -- from " + std::string{config_key} + " in the config; 'apogee check' names the fix";
+    }
+    return refused;
 }
 
 namespace {

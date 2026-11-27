@@ -158,6 +158,10 @@ struct CompletionContext {
     /// run, which a session verb's `/suite` can move (CLI-M36). Empty at the
     /// top level and on a session's own line.
     std::vector<std::string> command{};
+    /// The line reached `--`: every word after it is a positional, so a name
+    /// starting with a dash is read as a name there and nowhere else -- what
+    /// a kind offering such names asks before it offers one (CLI-M45).
+    bool options_ended = false;
 };
 
 /// The names of one kind that exist now.

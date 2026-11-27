@@ -5,6 +5,7 @@
 #include <set>
 #include <system_error>
 
+#include "contracts/collection_name.h"
 #include "graph/code_languages.h"
 #include "operations/collections.h"
 #include "operations/graph_sources.h"
@@ -47,6 +48,12 @@ bool GraphMembers::any_data() const {
 GraphMembers open_graph_members(const harness::NamedGraphConfig& named) {
     GraphMembers out;
     for (const std::string& collection : named.collections) {
+        // A member written as a path is never opened (CLI-M45): it maps to
+        // null, as a missing one does, and `check` names it.
+        if (harness::name_leaves_folder(collection)) {
+            out.stores[collection] = nullptr;
+            continue;
+        }
         const std::filesystem::path path = collection_path(collection);
         out.stores[collection] =
             file_exists(path) ? std::make_unique<embedstore::Store>(path) : nullptr;
@@ -61,8 +68,8 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
         out.error = "a graph needs a name";
         return out;
     }
-    if (name.find("..") != std::string_view::npos || name.find('/') != std::string_view::npos ||
-        name.find('\\') != std::string_view::npos) {
+    // The collections' read rule (CLI-M45), in the graph's own words.
+    if (harness::name_leaves_folder(name)) {
         out.error = "'" + std::string{name} + "' is not a plain graph name";
         return out;
     }
@@ -73,9 +80,7 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
         return out;
     }
     for (const std::string& collection : graph.collections) {
-        if (collection.empty() || collection.find("..") != std::string::npos ||
-            collection.find('/') != std::string::npos ||
-            collection.find('\\') != std::string::npos) {
+        if (harness::name_leaves_folder(collection)) {
             out.error = "'" + collection + "' is not a plain collection name";
             return out;
         }

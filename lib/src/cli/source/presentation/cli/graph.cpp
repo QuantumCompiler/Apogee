@@ -23,6 +23,7 @@
 #include "cli/graph_artifacts.h"
 #include "cli/graph_navigate.h"
 #include "cli/helpers.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
@@ -56,10 +57,10 @@ namespace {
 }
 
 /// Why `name` cannot name a graph or collection, in the command's words;
-/// empty when it can.
+/// empty when it can. The rule is the collections' read rule
+/// (`contracts/collection_name.h`, CLI-M45).
 [[nodiscard]] std::string name_problem(std::string_view name) {
-    if (name.empty() || name.find("..") != std::string_view::npos ||
-        name.find('/') != std::string_view::npos || name.find('\\') != std::string_view::npos) {
+    if (harness::name_leaves_folder(name)) {
         return "'" + std::string{name} + "' is not a plain graph or collection name";
     }
     return {};

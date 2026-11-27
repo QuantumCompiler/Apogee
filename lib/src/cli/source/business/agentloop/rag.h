@@ -54,6 +54,11 @@ struct RagResult {
     /// Set when retrieval could not run at all — a missing collection, say.
     /// A reason to tell the user, not a reason to fail the turn.
     std::string error;
+    /// Set, with `error` in the read rule's words, when the collection's name
+    /// was refused before anything was opened -- a path, never a name
+    /// (CLI-M45). Unlike a missing collection, a reason to refuse the turn:
+    /// the surface asked to read a file outside the home.
+    bool refused = false;
 
     /// Whether a judge's ranking was actually applied. False on every rerank
     /// degradation, so the claim and the ordering come from one place.

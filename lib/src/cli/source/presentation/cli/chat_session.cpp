@@ -985,6 +985,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     const std::optional<harness::AttachmentGraphMethod> launch_graph =
         harness::attachment_graph_method_from_string(flags->graph);
+    // A collection is named, never pathed (CLI-M45): `--rag` holds for the
+    // whole session, so a path is refused before anything is built for it.
+    // The config's auto_rag is read again each turn, and refused there.
+    if (const std::string refused = rag_choice_refusal(
+            choose_rag_collection(flags->rag_option->count() > 0, flags->rag, {}));
+        !refused.empty()) {
+        fail_user(mode, refused);
+    }
 
     // Unset follows --output-format: a driver asking for machine output is
     // a machine, and a human asking for text is a human, so the two

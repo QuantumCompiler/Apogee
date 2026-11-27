@@ -504,8 +504,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             retrieve_for_collection(harness, config, rag_choice.collection, prompt, flags.rag_limit,
                                     flags.retriever, flags.rerank, {}, model, budget, share_used);
         // Explicitly asked for and impossible -- an `--retriever vector` with
-        // no vectors -- is the user's request failing, not a fallback.
-        if (!rag.error.empty() && !flags.retriever.empty()) {
+        // no vectors -- is the user's request failing, not a fallback; and so
+        // is a name the read rule refused (CLI-M45).
+        if (!rag.error.empty() && (rag.refused || !flags.retriever.empty())) {
             fail_user(rag.error);
         }
         // Otherwise a missing collection is reported, not fatal: answering
@@ -764,6 +765,14 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             config = harness::load_config(config_path);
         } catch (const harness::ConfigError& e) {
             fail_user(e.what());
+        }
+        // A collection is named, never pathed (CLI-M45): `--rag`, else the
+        // config's auto_rag -- this run's one turn -- refused before anything
+        // is built, opened or asked.
+        if (const std::string refused = rag_choice_refusal(
+                choose_rag_collection(flags->rag_option->count() > 0, flags->rag, config.auto_rag));
+            !refused.empty()) {
+            fail_user(refused);
         }
 
         // A model that is neither a backend key nor an entry's `model:` may be a

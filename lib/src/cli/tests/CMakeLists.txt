@@ -72,6 +72,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_spec_test.cpp
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
+    data/contracts/collection_name_test.cpp
     data/contracts/server_tools_test.cpp
     data/contracts/mcp_serve_test.cpp
     data/contracts/config_adapters_test.cpp
@@ -373,6 +374,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/chat_attachments_test.cpp
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
+    presentation/operations/graph_members_test.cpp
     presentation/operations/renames_test.cpp
     presentation/operations/store_references_test.cpp
     presentation/operations/backend_fields_test.cpp

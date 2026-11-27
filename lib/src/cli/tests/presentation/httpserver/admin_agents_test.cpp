@@ -125,6 +125,25 @@ TEST_CASE("an HTTP-created agent is byte-identical to a CLI-created one: files a
               .status == 400);
 }
 
+TEST_CASE("a pathed collection is refused at POST and PUT as the CLI refuses it",
+          "[httpserver][admin][agents][parity][M45]") {
+    // CLI-M45, mode parity: the route refuses with the CLI verb's words, a
+    // 400, and the config and the tree stay as they were.
+    const Fixture fixture;
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse posted = admin_create_agent(
+        fixture.context(),
+        with_body("POST", nlohmann::json{{"name", "reader"}, {"collection", "../x"}}));
+    CHECK(posted.status == 400);
+    CHECK(parsed(posted)["error"]["message"] == "'../x' is not a plain collection name");
+    const HttpResponse put = admin_put_agent(
+        fixture.context(), "reader", with_body("PUT", nlohmann::json{{"collection", "/etc/x"}}));
+    CHECK(put.status == 400);
+    CHECK(parsed(put)["error"]["message"] == "'/etc/x' is not a plain collection name");
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+    CHECK_FALSE(std::filesystem::exists(fixture.home.path() / "http" / "prompts" / "reader.txt"));
+}
+
 TEST_CASE("list shows the bundled seven and the entries; get inlines the bodies",
           "[httpserver][admin][agents]") {
     const Fixture fixture;

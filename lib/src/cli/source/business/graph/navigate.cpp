@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "agentloop/graph_context.h"
+#include "contracts/collection_name.h"
 #include "contracts/layout.h"
 #include "embedstore/graph_communities.h"
 #include "graph/extract.h"
@@ -70,9 +71,10 @@ using Kind = NavigationError::Kind;
     return std::filesystem::exists(path, code);
 }
 
+/// The collections' read rule (CLI-M45), for a graph's name as for a
+/// collection's: any name under the folder, never a path.
 [[nodiscard]] bool plain_name(std::string_view name) {
-    return !name.empty() && name.find("..") == std::string_view::npos &&
-           name.find('/') == std::string_view::npos && name.find('\\') == std::string_view::npos;
+    return !harness::name_leaves_folder(name);
 }
 
 [[nodiscard]] std::filesystem::path collection_db(std::string_view name) {
@@ -570,6 +572,11 @@ namespace {
                 "graph '" + name + "' has not been built yet -- " + target.build_hint);
         }
         for (const std::string& collection : named->collections) {
+            // A member hand-written as a path is refused, never opened.
+            if (!plain_name(collection)) {
+                throw NavigationError(Kind::InvalidArgument,
+                                      "'" + collection + "' is not a plain collection name");
+            }
             target.databases[collection] = collection_db(collection);
         }
         target.hops = named->hops;

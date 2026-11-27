@@ -400,7 +400,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
   - CLI-M48 to CLI-M57, specced in the same pass from the same probes' asides (the remedy-names and made-thing-names seams).
 - **Relates to:**
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), built one after the other with this item: its notes keep the house voice, and they are routed through `say_note` by whichever lands second;
-  - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), which shares `embed.cpp` and `graph.cpp` with no gate;
+  - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), which shares `embed.cpp` and `graph.cpp` with no gate;
   - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose deferred stdout question this item answers, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md), which reads a remote job's notes;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose Constraints carry the relay rule (2026-11-26);

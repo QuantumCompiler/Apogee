@@ -4,6 +4,7 @@
 #include <system_error>
 
 #include "contracts/assets.h"
+#include "contracts/collection_name.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 
@@ -101,6 +102,15 @@ AgentResult create_agent(const std::filesystem::path& config_path, const AgentSp
                                      "' (want: auto | json | markdown)");
         }
         entry.output_format = *format;
+    }
+    // Read by every run of the agent, so a collection is named, never pathed
+    // (CLI-M45): refused here, before any file, for the CLI verb and the
+    // admin routes alike.
+    if (!spec.collection.empty()) {
+        if (const std::string refused = harness::collection_read_error(spec.collection);
+            !refused.empty()) {
+            throw std::runtime_error(refused);
+        }
     }
     entry.collection = spec.collection;
     entry.questions = spec.questions;

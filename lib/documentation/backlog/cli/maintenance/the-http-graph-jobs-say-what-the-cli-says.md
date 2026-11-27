@@ -253,7 +253,7 @@ The `admin.job.completed` event already carries every result field (`jobs.cpp:10
 
 **Shared files and shared words.**
 - **CLI-M58** routes the CLI's graph notes through its stderr writer. Whichever of CLI-M58 and this item lands second reuses the first one's producer, with no second wording.
-- **[CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md)** (the plain-name check at `admin_graph.cpp:39-42`) and **[CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md)** (`config_warning`'s words, the graph toggle's status) edit the same file. They are built one after the other.
+- **[CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader)** (shipped 2026-11-27) (the plain-name check at `admin_graph.cpp:39-42`) and **[CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md)** (`config_warning`'s words, the graph toggle's status) edit the same file. They are built one after the other.
 
 **Reference.** The in-house precedents:
 - `validate_named_graph`'s warnings (`graph_members.cpp:136-147`), which `POST /v1/admin/graphs` answers as `"warnings"?: […]` (`http-api.md:1092-1100`): the field's shape, plain strings with no prefix;
@@ -316,7 +316,7 @@ Hermetic: the in-process plane over a temporary home, mock backends, no network 
 - **The CLI's own stream for these notes**: moving them to stderr in the house voice, and saying the member fact once: [CLI-M58](a-runs-notes-are-said-once-on-stderr.md).
 - **The models verbs' notes**: [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md).
 - **`config_warning`'s words and the graph toggle's status codes**: [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md).
-- **The plain-name check on `{id}`** (`admin_graph.cpp:39-42`): [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md).
+- **The plain-name check on `{id}`** (`admin_graph.cpp:39-42`): [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27).
 - **The Mac app filling a remote job's notes from these `warnings`**: [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md).
 - **Who may see a graph's members over the admin plane**: [CLI-63b](../v0.2.4/personal-data-has-an-owner.md).
 - **A structured face (`--output-format json` or `stream-json`) for `graph build`, `update` and `communities` on the CLI.** [CLI-59d](../v0.2.3/reads-and-commands-over-the-network.md) records giving those verbs their own stream-json as their own work.
@@ -327,7 +327,7 @@ Hermetic: the in-process plane over a temporary home, mock backends, no network 
 - **Blocked by:** — · **Blocks:** —
 - **Sibling** (the same investigation's seams): [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), the CLI's notes said once on stderr, whose producer this item shares; [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md), the models verbs' notes.
 - **Relates to:**
-  - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md) and [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), which also edit `admin_graph.cpp`: built one after the other;
+  - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27) and [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), which also edit `admin_graph.cpp`: built one after the other;
   - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose stdout-warnings question this investigation answered, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md), which reads these `warnings` as a remote graph job's notes;
   - [CLI-59d](../v0.2.3/reads-and-commands-over-the-network.md), whose door runs `graph build|update|communities` as text jobs, and [CLI-63b](../v0.2.4/personal-data-has-an-owner.md), which changes whom the graph admin twins answer.

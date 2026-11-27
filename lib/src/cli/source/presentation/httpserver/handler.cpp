@@ -503,8 +503,10 @@ Handler::TurnOutcome Handler::run_turn(TurnPlan& plan, agentloop::Reporter& repo
                                         options_.rag_collection));
         }
         // Explicitly asked for and impossible -- `?retriever=vector` with no
-        // vectors -- is the client's request failing, not a fallback.
-        if (!rag.error.empty() && plan.explicit_retriever) {
+        // vectors -- is the client's request failing, not a fallback; and so
+        // is a name the read rule refused (CLI-M45), which serve's start
+        // refuses first.
+        if (!rag.error.empty() && (rag.refused || plan.explicit_retriever)) {
             throw HttpError{.message = rag.error};
         }
         if (rag.error.empty() && !rag.prefix.empty()) {

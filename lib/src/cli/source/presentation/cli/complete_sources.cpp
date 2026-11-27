@@ -25,6 +25,7 @@
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
+#include "contracts/collection_name.h"
 #include "contracts/host.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -505,6 +506,21 @@ void voice_models(const models::StoreRoots& roots, NameList& list) {
     return list;
 }
 
+/// Leaves out of a collection or graph kind's names each one the verb
+/// would not read as that one name (CLI-M45, ADR 0007): one the read rule
+/// refuses (a hand-made `a\b.db` on POSIX), one holding a line break, which
+/// a stub would offer as two candidates, and -- unless the line has reached
+/// `--` -- one starting with a dash, which the parser would take for a flag.
+/// A comma list's split is the protocol's, for every list. Whether any name
+/// was there at all is the caller's to say: `none` is for no store.
+void drop_misread_names(std::vector<std::string>& names, const CompletionContext& context) {
+    std::erase_if(names, [&context](const std::string& name) {
+        return harness::name_leaves_folder(name) ||
+               name.find_first_of("\r\n") != std::string::npos ||
+               (!context.options_ended && name.starts_with('-'));
+    });
+}
+
 [[nodiscard]] std::vector<std::string> kit_names() {
     std::vector<std::string> out;
     for (const harness::BundledKit& kit : harness::bundled_kits()) {
@@ -525,13 +541,19 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
 
     if (kind == kCollectionValue || kind == kCollectionListValue) {
         list.names = collection_names();
-        list.none = "none yet -- 'apogee embed ingest <name> <path>' makes one";
+        if (list.names.empty()) {
+            list.none = "none yet -- 'apogee embed ingest <name> <path>' makes one";
+        }
+        drop_misread_names(list.names, context);
     } else if (kind == kGraphValue) {
         list.names = config.graph_names();
         for (std::string& name : collection_names()) {
             list.names.push_back(std::move(name));
         }
-        list.none = "no named graphs or collections yet";
+        if (list.names.empty()) {
+            list.none = "no named graphs or collections yet";
+        }
+        drop_misread_names(list.names, context);
     } else if (kind == kModelSuiteValue) {
         list.names = config.suite_names();
         list.none = "no suites -- 'apogee config add-suite' makes one";
@@ -934,7 +956,10 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             knowledge_collection(config, db == context.flags.end() ? "" : db->second);
         const std::filesystem::path path = collection_path(name);
         std::error_code code;
-        if (std::filesystem::is_regular_file(path, code)) {  // opening would create it
+        // Never a `--db` written as a path (CLI-M45): opening writes the
+        // schema into whatever it opens.
+        if (!harness::name_leaves_folder(name) &&
+            std::filesystem::is_regular_file(path, code)) {  // opening would create it
             for (const knowledge::Record& record : knowledge::Store{path, {}}.list()) {
                 list.names.push_back(record.id);
             }

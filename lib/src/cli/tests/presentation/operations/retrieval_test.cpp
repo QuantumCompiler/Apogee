@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <system_error>
@@ -14,6 +16,8 @@
 #include "contracts/config.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
+#include "operations/collections.h"
+#include "support/env_guard.h"
 
 /// The surfaces' retrieval choice, carried through the loop: `auto_rag` with
 /// no flag picks the collection, and what it injects rides the request and
@@ -135,4 +139,113 @@ TEST_CASE("context injected by auto_rag reaches the request and never persisted 
     INFO("persisted history:\n" << persisted);
     CHECK(persisted.find(kSecret) == std::string::npos);
     CHECK(persisted.find("what does the protocol require?") != std::string::npos);
+}
+
+namespace {
+
+[[nodiscard]] std::string bytes_of(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+}  // namespace
+
+TEST_CASE("a collection named by a path is refused before any file is opened",
+          "[operations][rag][collection_name][M45]") {
+    // CLI-M45: `--rag <abs>/foreign` once opened any SQLite file on the
+    // machine and wrote the store's whole schema into it. The one reader
+    // behind --rag, auto_rag, an agent's collection and serve --rag now
+    // refuses the name, in embed's words, and opens nothing.
+    const apogee::testing::TempDir root{"m45-retrieval-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard home{"APOGEE_HOME", (root.path() / "home").string()};
+    std::filesystem::create_directories(root.path() / "home" / "embeddings");
+    const std::filesystem::path foreign = root.path() / "foreign.db";
+    {
+        Store store{foreign};
+        store.replace_source("a.md", {"the fox"});
+    }
+    const std::string before = bytes_of(foreign);
+    REQUIRE_FALSE(before.empty());
+
+    const apogee::harness::Harness harness{apogee::harness::Config{}};
+    const apogee::harness::Config config;
+    for (const std::string& name :
+         {(root.path() / "foreign").string(), std::string{"../../foreign"}, std::string{"a/b"},
+          std::string{".."}}) {
+        INFO(name);
+        const RagResult result =
+            apogee::commands::retrieve_for_collection(harness, config, name, "fox", 4, {}, {}, {});
+        CHECK(result.refused);
+        CHECK(result.error == "'" + name + "' is not a plain collection name");
+        CHECK(result.chunks == 0);
+        CHECK(result.prefix.empty());
+    }
+    CHECK(bytes_of(foreign) == before);
+    CHECK_FALSE(std::filesystem::exists(root.path() / "foreign.db-wal"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "foreign.db-shm"));
+    CHECK_FALSE(std::filesystem::exists(root.path() / "home" / "embeddings" / "a"));
+
+    // A plain name that names nothing is still a reason to tell, never a
+    // refusal: answering without context beats refusing to answer.
+    const RagResult missing =
+        apogee::commands::retrieve_for_collection(harness, config, "absent", "fox", 4, {}, {}, {});
+    CHECK_FALSE(missing.refused);
+    CHECK_FALSE(missing.error.empty());
+
+    // Every store under the folder reads, whatever its name.
+    for (const std::string name : {"my notes", "a..b", "a@b"}) {
+        INFO(name);
+        {
+            Store store{apogee::commands::collection_path(name)};
+            store.replace_source("a.md", {"the quick fox"});
+        }
+        const RagResult found =
+            apogee::commands::retrieve_for_collection(harness, config, name, "fox", 4, {}, {}, {});
+        CHECK_FALSE(found.refused);
+        CHECK(found.error.empty());
+        CHECK(found.chunks == 1);
+    }
+#ifndef _WIN32
+    // The longest name a POSIX folder holds beside its `.db` and `-wal`:
+    // no length is in the read rule.
+    const std::string longest(244, 'n');
+    {
+        Store store{apogee::commands::collection_path(longest)};
+        store.replace_source("a.md", {"the quick fox"});
+    }
+    CHECK(apogee::commands::retrieve_for_collection(harness, config, longest, "fox", 4, {}, {}, {})
+              .chunks == 1);
+#endif
+    // Nor is case: where the filesystem folds it, `Notes` reaches notes.db
+    // exactly as before.
+    {
+        Store store{apogee::commands::collection_path("notes")};
+        store.replace_source("a.md", {"the quick fox"});
+    }
+    if (std::filesystem::exists(apogee::commands::collection_path("NOTES"))) {
+        const RagResult folded = apogee::commands::retrieve_for_collection(harness, config, "Notes",
+                                                                           "fox", 4, {}, {}, {});
+        CHECK_FALSE(folded.refused);
+        CHECK(folded.chunks == 1);
+    }
+}
+
+TEST_CASE("a refused config value says which key holds it; a refused flag says only the words",
+          "[operations][rag][collection_name][M45]") {
+    // CLI-M45: an older config's pathed auto_rag or agent collection is a
+    // value nobody typed this run, so its refusal names the key and the
+    // doctor; the words themselves are the read rule's on every surface.
+    using apogee::commands::choose_rag_collection;
+    using apogee::commands::rag_choice_refusal;
+    CHECK(rag_choice_refusal(choose_rag_collection(true, "../x", "notes")) ==
+          "'../x' is not a plain collection name");
+    CHECK(rag_choice_refusal(choose_rag_collection(false, {}, "../x")) ==
+          "'../x' is not a plain collection name -- from auto_rag in the config; 'apogee "
+          "check' names the fix");
+    CHECK(rag_choice_refusal(choose_rag_collection(false, {}, "/x"), "agents.h.collection") ==
+          "'/x' is not a plain collection name -- from agents.h.collection in the config; "
+          "'apogee check' names the fix");
+    CHECK(rag_choice_refusal(choose_rag_collection(false, {}, "my notes")).empty());
+    CHECK(rag_choice_refusal(choose_rag_collection(true, "", "../x")).empty());  // --rag ""
+    CHECK(rag_choice_refusal(choose_rag_collection(false, {}, {})).empty());
 }

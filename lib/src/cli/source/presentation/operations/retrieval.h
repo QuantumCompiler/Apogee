@@ -47,6 +47,17 @@ struct RagChoice {
 [[nodiscard]] RagChoice choose_rag_collection(bool flag_given, std::string_view flag_value,
                                               std::string_view auto_rag);
 
+/// Why a run may not read `choice`'s collection, in the read rule's words
+/// (`contracts/collection_name.h`): a path, never a name (CLI-M45). Empty
+/// when it may, and when the choice reads nothing. A value from the config
+/// -- nobody typed it this run -- is named by `config_key` (`auto_rag`, or
+/// an agent's `agents.<name>.collection`), with `check` as the way to the
+/// fix. Every surface asks it where its runs start -- the flag at once, a
+/// config value at the turn that reads it -- so a refused name opens nothing
+/// and calls no model.
+[[nodiscard]] std::string rag_choice_refusal(const RagChoice& choice,
+                                             std::string_view config_key = "auto_rag");
+
 /// What to tell the user about a turn's retrieval, without the surface's own
 /// tag or framing.
 ///

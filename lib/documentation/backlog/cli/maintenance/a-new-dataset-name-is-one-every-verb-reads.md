@@ -268,7 +268,7 @@ Hermetic: a temp `APOGEE_HOME`, the scripted mock teacher, and no Python environ
 - **Blocked by:** [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), whose read rule this item's create rule includes · **Blocks:** —
 - **Relates to:**
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), the same create-rule shape for collections, sharing the device-name list;
-  - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), the read and create split this item copies;
+  - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), the read and create split this item copies;
   - [CLI-M52](a-refused-scaffold-writes-nothing.md) and [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md), the same seam's refusals for agents, MCP servers and dash-named symphonies;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's delete of a dash-led row;
   - [CLI-M48](a-suggested-command-runs-as-printed.md), the printed `--dataset` lines;

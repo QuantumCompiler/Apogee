@@ -28,6 +28,8 @@ apogee_add_module(contracts
     contracts/symphony_walk.cpp
     contracts/host.h
     contracts/host.cpp
+    contracts/collection_name.h
+    contracts/collection_name.cpp
     contracts/utf8.h
     contracts/utf8.cpp
     contracts/todo.h

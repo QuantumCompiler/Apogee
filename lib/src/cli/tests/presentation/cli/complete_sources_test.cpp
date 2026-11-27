@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <random>
@@ -398,6 +399,116 @@ TEST_CASE("collections, datasets, kits, regimes, recipes and runs complete from 
     CHECK(has(home.names(c::kRunValue).names, "20260924-090000"));
 
     CHECK(home.names(c::kServerValue).names == std::vector<std::string>{"files"});
+}
+
+TEST_CASE("a collection or graph word offers only names the verb reads as one name",
+          "[commands][completion][sources][M45]") {
+    // ADR 0007's offer-is-a-contract rule, for collections (CLI-M45): a
+    // store named with a line break is never offered (a stub reads one
+    // candidate per line, so `a\nb` was offered as `a` and `b`), a comma
+    // list never offers a name holding a comma (the verb splits `c,d`), and
+    // a dash-led name only after `--`, where the verb reads it as a name --
+    // the Mac app's Graph list asks `graph stats -- ''` that way (APP-M21).
+    const Home home;
+    for (const std::string name : {"notes", "c,d", "-x"}) {
+        const apogee::embedstore::Store store{c::collection_path(name)};
+    }
+#ifndef _WIN32
+    {
+        const apogee::embedstore::Store store{c::collection_path("a\nb")};
+    }
+    // A hand-made `a\b.db`, legal on POSIX, which no reader takes.
+    {
+        const apogee::embedstore::Store store{apogee::harness::embeddings_dir() / "a\\b.db"};
+    }
+#endif
+    const auto offered = [](std::vector<std::string> words) {
+        words.insert(words.begin(), "__complete");
+        std::string said;
+        REQUIRE(run_apogee(words, &said) == 0);
+        std::vector<std::string> lines;
+        std::istringstream in{said};
+        for (std::string line; std::getline(in, line);) {
+            lines.push_back(line);
+        }
+        return lines;
+    };
+    const auto check_never_split = [](const std::vector<std::string>& lines) {
+        CHECK_FALSE(has(lines, "a"));
+        CHECK_FALSE(has(lines, "b"));
+        CHECK_FALSE(has(lines, "a\\b"));
+    };
+
+    const std::vector<std::string> plain = offered({"embed", "query", ""});
+    CHECK(has(plain, "notes"));
+    CHECK(has(plain, "c,d"));
+    CHECK_FALSE(has(plain, "-x"));
+    check_never_split(plain);
+
+    const std::vector<std::string> ended = offered({"embed", "query", "--", ""});
+    CHECK(has(ended, "notes"));
+    CHECK(has(ended, "c,d"));
+    CHECK(has(ended, "-x"));
+    check_never_split(ended);
+    // After `--` a dash-led word is a name being typed, never a flag.
+    CHECK(offered({"embed", "query", "--", "-"}) == std::vector<std::string>{"-x"});
+
+    const std::vector<std::string> graphs = offered({"graph", "stats", "--", ""});
+    CHECK(has(graphs, "notes"));
+    CHECK(has(graphs, "c,d"));
+    CHECK(has(graphs, "-x"));
+    check_never_split(graphs);
+    const std::vector<std::string> graphs_plain = offered({"graph", "stats", ""});
+    CHECK(has(graphs_plain, "notes"));
+    CHECK_FALSE(has(graphs_plain, "-x"));
+    check_never_split(graphs_plain);
+
+    // A flag's value cannot follow `--`: a dash-led name is left out there.
+    const std::vector<std::string> rag = offered({"chat", "--rag", ""});
+    CHECK(has(rag, "notes"));
+    CHECK_FALSE(has(rag, "-x"));
+    check_never_split(rag);
+
+    const std::vector<std::string> list =
+        offered({"config", "add-graph", "g", "--collections", ""});
+    CHECK(list == std::vector<std::string>{"notes"});
+    CHECK(offered({"config", "add-graph", "g", "--collections", "notes,"}).empty());
+
+    // Past `--`, the words left are positionals: a verb's subcommands are
+    // not offered there, and past the last positional nothing is, no flag.
+    CHECK(offered({"embed", "--", ""}).empty());
+    CHECK(offered({"config", "add-graph", "--", "g", ""}).empty());
+    CHECK_FALSE(offered({"config", "add-graph", "g", ""}).empty());  // its flags, before `--`
+}
+
+TEST_CASE("names that exist but none of which the verb reads are not none yet",
+          "[commands][completion][sources][M45]") {
+    const Home home;
+    {
+        const apogee::embedstore::Store store{c::collection_path("-x")};
+    }
+    const c::NameList dashed = home.names(c::kCollectionValue);
+    CHECK(dashed.names.empty());
+    CHECK(dashed.none.empty());
+}
+
+TEST_CASE("completing a record id never opens a --db written as a path",
+          "[commands][completion][sources][M45]") {
+    // CLI-M45: the record kind opened `--db`'s store to list its ids, and a
+    // store open writes the schema into what it opens -- a <TAB> after
+    // `--db ../app` would have rewritten a database outside the home.
+    const Home home;
+    // An empty file is a database SQLite would write a schema into.
+    const std::filesystem::path foreign = home.home / "outside" / "foreign.db";
+    write_file(foreign, "");
+    std::filesystem::create_directories(apogee::harness::embeddings_dir());
+    for (const std::string& pathed :
+         {std::string{"../outside/foreign"}, (foreign.parent_path() / "foreign").string()}) {
+        INFO(pathed);
+        CHECK(home.names(c::kRecordValue, {}, {{"--db", pathed}}).names.empty());
+    }
+    CHECK(std::filesystem::file_size(foreign) == 0);
+    CHECK_FALSE(std::filesystem::exists(foreign.parent_path() / "foreign.db-wal"));
 }
 
 TEST_CASE("completing a record id never creates the collection it looks in",

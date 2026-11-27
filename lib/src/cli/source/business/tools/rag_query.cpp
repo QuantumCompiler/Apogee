@@ -1,7 +1,6 @@
 #include "tools/rag_query.h"
 
 #include <algorithm>
-#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <system_error>
@@ -9,6 +8,7 @@
 
 #include "agentloop/embed_func.h"
 #include "agentloop/retriever.h"
+#include "contracts/collection_name.h"
 #include "contracts/layout.h"
 #include "embedstore/store.h"
 #include "tools/args.h"
@@ -57,15 +57,6 @@ std::vector<std::string> collection_names() {
 
 }  // namespace
 
-bool valid_collection_name(std::string_view name) noexcept {
-    if (name.empty() || name.size() > 128) {
-        return false;
-    }
-    return std::all_of(name.begin(), name.end(), [](unsigned char c) {
-        return std::isalnum(c) != 0 || c == '.' || c == '_' || c == '-';
-    });
-}
-
 void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* harness,
                         const harness::Config* config) {
     agent::Tool search;
@@ -88,8 +79,12 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
         if (query.empty()) {
             return error("query is required");
         }
-        if (!valid_collection_name(collection)) {
+        if (collection.empty()) {
             return error("collection is required: a name like the ones list_collections shows");
+        }
+        if (const std::string refused = harness::collection_read_error(collection);
+            !refused.empty()) {
+            return error(refused);
         }
         const std::int64_t top_k = args->integer("top_k").value_or(5);
         if (top_k < 1 || top_k > 20) {
@@ -204,7 +199,12 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
     list.description = "List the ingested collections that can be searched.";
     list.parameters_schema = R"({"type":"object","properties":{}})";
     list.run = [](std::string_view) -> agent::ToolOutcome {
-        const std::vector<std::string> names = collection_names();
+        std::vector<std::string> names = collection_names();
+        // Only what the tools can search is listed (CLI-M45): a store whose
+        // name the read rule refuses -- a hand-made `a\b.db` on POSIX -- is
+        // no collection to them.
+        std::erase_if(names,
+                      [](const std::string& name) { return harness::name_leaves_folder(name); });
         if (names.empty()) {
             return ok("No collections yet. Create one with 'apogee embed ingest <name> <path>'.");
         }
@@ -237,8 +237,12 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
             return failure;
         }
         const std::string collection = args->string("collection");
-        if (!valid_collection_name(collection)) {
+        if (collection.empty()) {
             return error("collection is required");
+        }
+        if (const std::string refused = harness::collection_read_error(collection);
+            !refused.empty()) {
+            return error(refused);
         }
         const std::filesystem::path path = collection_path(collection);
         std::error_code code;

@@ -683,6 +683,58 @@ TEST_CASE("check rejects a retriever typo on a collection", "[commands][check][e
     CHECK(row->detail.find("lexical, vector, hybrid, auto") != std::string::npos);
 }
 
+TEST_CASE("check fails an auto_rag or an agent collection that is a path, naming the key",
+          "[commands][check][embeddings][M45]") {
+    // CLI-M45: an older config holding a path still loads -- the turn that
+    // would read it refuses -- and check fails the row, naming the key and
+    // the hand edit, never building a path from the name.
+    const Install install;
+    const CheckReport report = run_checks(
+        inputs_with_config(install,
+                           "backends:\n  mock:\n    type: mock\nauto_rag: ../foreign\n"
+                           "agents:\n  pathed:\n    prompts: [prompts/security-review.txt]\n"
+                           "    collection: /etc/foreign\n"));
+    const apogee::commands::CheckRow* auto_rag = row_with(report, "auto_rag");
+    REQUIRE(auto_rag != nullptr);
+    CHECK(auto_rag->status == Status::Fail);
+    CHECK(auto_rag->detail.find("'../foreign' is not a plain collection name") !=
+          std::string::npos);
+    CHECK(auto_rag->remedy.find("auto_rag") != std::string::npos);
+    bool named = false;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.name == "agent: pathed" &&
+            row.detail.find("'/etc/foreign' is not a plain collection name") != std::string::npos) {
+            named = true;
+            CHECK(row.status == Status::Fail);
+            CHECK(row.remedy.find("agents.pathed.collection") != std::string::npos);
+        }
+    }
+    CHECK(named);
+    CHECK_FALSE(report.passed());
+
+    // A named graph's name or member written as a path fails its row too,
+    // never joined to the home and reported ok because a file exists there.
+    const std::filesystem::path foreign = install.root / "foreign.db";
+    std::ofstream{foreign, std::ios::binary} << "x";
+    const CheckReport graphs = run_checks(inputs_with_config(
+        install, "backends:\n  mock:\n    type: mock\ngraphs:\n  work:\n    collections: [" +
+                     (install.root / "foreign").generic_string() +
+                     "]\n  ../foreign:\n    collections: [notes]\n"));
+    const apogee::commands::CheckRow* member = row_with(graphs, "named graph: work");
+    REQUIRE(member != nullptr);
+    CHECK(member->status == Status::Fail);
+    CHECK(member->detail.find("is not a plain collection name") != std::string::npos);
+    const apogee::commands::CheckRow* pathed = row_with(graphs, "named graph: ../foreign");
+    REQUIRE(pathed != nullptr);
+    CHECK(pathed->status == Status::Fail);
+    CHECK(pathed->detail.find("is not a plain graph name") != std::string::npos);
+
+    // A plain auto_rag has no row of its own: nothing to say.
+    const CheckReport plain = run_checks(
+        inputs_with_config(install, "backends:\n  mock:\n    type: mock\nauto_rag: my notes\n"));
+    CHECK(row_with(plain, "auto_rag") == nullptr);
+}
+
 TEST_CASE(
     "the doctor's Graph section: an unconfigured extractor fails, an enabled graph that is "
     "not built warns, a built one reports its shape",
