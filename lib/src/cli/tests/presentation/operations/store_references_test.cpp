@@ -364,3 +364,23 @@ TEST_CASE("a delete lets each reference go byte for byte as its own command woul
           "apogee config set-backend local --adapters " +
               apogee::harness::shell_word((store.lora / "style.gguf").string() + ":0.5"));
 }
+
+TEST_CASE("a kept reference on a backend the editors refuse is let go after the rename",
+          "[store_references][delete][M50]") {
+    // 57e refuses every edit of a name outside 55f's rule; only
+    // `rename-backend` reaches it, so the door says that first (CLI-M50).
+    apogee::harness::Config config;
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::Mlx;
+    entry.model_path = "/models/base";
+    entry.draft = "/models/drafter";
+    config.backends["-x"] = entry;
+    const StoreReference draft{.backend = "-x",
+                               .field = "draft",
+                               .value = "/models/drafter",
+                               .index = 0,
+                               .weights = false};
+    CHECK(apogee::commands::clear_door(config, {draft}, draft) ==
+          "rename it first: apogee config rename-backend -- -x <new name>, then apogee config "
+          "set-backend <new name> --draft \"\"");
+}

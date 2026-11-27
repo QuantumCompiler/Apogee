@@ -284,6 +284,39 @@ struct RunFixture {
 
 }  // namespace
 
+TEST_CASE("a promote's set-backend doors on a backend the editors refuse name the rename first",
+          "[commands][train][promote][adapters][M50]") {
+    // CLI-M50: `foo@home` and `bare@home` are outside 55f's rule, so in the
+    // JSONC config every editor refuses them (57e) and only `rename-backend`
+    // reaches them; the door reads neither the config nor its format, so on
+    // this YAML one too each door naming `config set-backend` says it first.
+    const std::string pin(64, 'a');
+    const RunFixture fixture{"A",
+                             "  foo@home:\n    type: llamacpp\n    model_path: /srv/base-F16.gguf\n"
+                             "    adapters:\n      - path: /srv/loras/tone.gguf\n"
+                             "        base_sha256: " +
+                                 pin + "\n  bare@home:\n    type: llamacpp\n"};
+    const std::string id = fixture.trained();
+    (void)fixture.evaluated(id);
+    const std::string config = read_file(fixture.base.config_path);
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"train", "promote", id, "--as", "foo@home"}, &out, &err) == 1);
+    CHECK(err.find("'foo@home' applies adapters over its model_path (/srv/loras/tone.gguf), and a "
+                   "merged version would replace that base under them -- take them off first: "
+                   "rename it first: apogee config rename-backend foo@home <new name>, then apogee "
+                   "config set-backend <new name> --adapters \"\", or promote under a new "
+                   "name") != std::string::npos);
+    CHECK(fixture.run({"train", "promote", id, "--as", "bare@home", "--adapter"}, &out, &err) == 1);
+    CHECK(
+        err.find(
+            "adapters apply over the entry's model_path, and 'bare@home' names none -- to "
+            "set it, rename it first: apogee config rename-backend bare@home <new name>, "
+            "then apogee config set-backend <new name> --model-path <base>, then promote into <new "
+            "name>") != std::string::npos);
+    CHECK(read_file(fixture.base.config_path) == config);
+}
+
 TEST_CASE("a merged promote into an entry applying hand-pinned adapters is refused before a fuse",
           "[commands][train][promote][adapters]") {
     // 57i, finding 2: adapters added by hand (`config set-backend

@@ -127,7 +127,9 @@ struct StoreReference {
 /// reference is said with: `config set-backend <name> --draft ""`, `config
 /// set-backend <name> --adapters <the adapters it keeps>` (every stranded one
 /// left out, since that flag checks and pins each it is given; `""` when
-/// none is kept), `config set-default-video off`. Empty for a weights
+/// none is kept), `config set-default-video off` -- on a backend the
+/// editors refuse, said with the rename that reaches it first (CLI-M50:
+/// `rename it first: <rename>, then <door>`). Empty for a weights
 /// reference, whose doors are its entry's (`backend_doors`).
 [[nodiscard]] std::string clear_door(const harness::Config& config,
                                      const std::vector<StoreReference>& stranded,

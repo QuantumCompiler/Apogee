@@ -14,6 +14,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/backend_door.h"
 #include "contracts/config_edit.h"
 #include "contracts/sha256.h"
 #include "contracts/suggested_command.h"
@@ -137,13 +138,22 @@ private:
 
 /// The command that writes an entry's adapters, `set` its one value -- or,
 /// as a `placeholder`, what the person fills in -- by the one renderer
-/// (CLI-M48).
-[[nodiscard]] std::string retake(const AdapterCheck& check, const std::string& set,
-                                 bool placeholder = false) {
-    return harness::render({.verbs = {"config", "set-backend"},
-                            .parts = {harness::operand(check.backend),
-                                      placeholder ? harness::option_placeholder("--adapters", set)
-                                                  : harness::option("--adapters", set)}});
+/// (CLI-M48); on a name the editors refuse, after the rename that reaches
+/// it (CLI-M50), each sentence below saying the two its own way.
+[[nodiscard]] std::vector<harness::SuggestedCommand> retake(const AdapterCheck& check,
+                                                            const std::string& set,
+                                                            bool placeholder = false) {
+    return harness::set_backend_door(check.backend,
+                                     {placeholder ? harness::option_placeholder("--adapters", set)
+                                                  : harness::option("--adapters", set)});
+}
+
+/// `door` said after `purpose`, where a sentence names it with no quotes of
+/// its own: `<purpose> with <command>`, or `to <purpose>, rename it first:
+/// <rename>, then <command>`.
+[[nodiscard]] std::string retake_with(std::string_view purpose,
+                                      const std::vector<harness::SuggestedCommand>& door) {
+    return harness::backend_door_with(purpose, door, "");
 }
 
 /// Why `adapter` is not the kind of file its runtime reads, or empty: its
@@ -152,19 +162,26 @@ private:
                                        const AdapterCheck& check) {
     switch (adapter_files(adapter, check)) {
         case AdapterFiles::Missing:
-            return "the adapter " + adapter.path +
-                   " is not there -- restore it, or take the adapters off with " +
-                   retake(check, "");
-        case AdapterFiles::WrongKind:
+            return "the adapter " + adapter.path + " is not there -- restore it, or " +
+                   retake_with("take the adapters off", retake(check, ""));
+        case AdapterFiles::WrongKind: {
             if (check.directories) {
+                const std::vector<harness::SuggestedCommand> door =
+                    retake(check, "<directory>", true);
                 return "the adapter " + adapter.path + " is not an mlx-lm adapter directory (" +
-                       adapter_kind_gap(adapter, check) +
-                       ") -- name the directory its training wrote, with " +
-                       retake(check, "<directory>", true);
+                       adapter_kind_gap(adapter, check) + ") -- " +
+                       (harness::renames_first(door)
+                            ? retake_with("name the directory its training wrote", door)
+                            : "name the directory its training wrote, with " +
+                                  harness::backend_door_said(door));
             }
+            const std::vector<harness::SuggestedCommand> door = retake(check, "<file.gguf>", true);
             return "the adapter " + adapter.path +
-                   " is not a file -- a llamacpp entry applies a GGUF LoRA file, named with " +
-                   retake(check, "<file.gguf>", true);
+                   " is not a file -- a llamacpp entry applies a GGUF LoRA file" +
+                   (harness::renames_first(door)
+                        ? "; " + retake_with("name one", door)
+                        : ", named with " + harness::backend_door_said(door));
+        }
         case AdapterFiles::Pinned:
         case AdapterFiles::Unpinned:
             break;
@@ -321,8 +338,12 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
             return refused;
         }
         if (adapter.base_sha256.empty()) {
+            const std::vector<harness::SuggestedCommand> door =
+                retake(check, join_adapters(adapters));
             return "the adapter " + adapter.path + " is pinned to no base -- " +
-                   retake(check, join_adapters(adapters)) + " records the base each applies over";
+                   (harness::renames_first(door)
+                        ? retake_with("record the base each applies over", door)
+                        : harness::backend_door_said(door) + " records the base each applies over");
         }
     }
     const std::string base = weights_sha256(check.base, check.hashing);
@@ -337,9 +358,8 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
                    short_hash(adapter.base_sha256) + ") than " + check.base.string() +
                    " holds now (" + short_hash(base) +
                    ") -- an adapter applies only over the weights it was trained on: point "
-                   "model_path back at them, or, if these are the ones it was made for, pin it "
-                   "again with " +
-                   retake(check, join_adapters(adapters));
+                   "model_path back at them, or, if these are the ones it was made for, " +
+                   retake_with("pin it again", retake(check, join_adapters(adapters)));
         }
     }
     return {};

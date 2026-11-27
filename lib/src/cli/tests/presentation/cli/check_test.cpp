@@ -31,6 +31,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "httpserver/admin_auth.h"
 #include "knowledge/record.h"
@@ -3507,6 +3508,44 @@ TEST_CASE(
                                         " to apply it at scale 1");
 }
 
+TEST_CASE(
+    "an adapter row's scale and point-back doors on a backend the editors refuse rename first",
+    "[commands][check][adapters][M50]") {
+    // CLI-M50: the two doors no replayed scenario reaches -- the scale a
+    // config read another way holds, and the weights the store keeps apart
+    // from the base -- on an entry renamed by hand to `my local`.
+    const AdapterInstall fixture;
+    fixture.install.write("models/m/gguf/" + fixture.pin.substr(0, 12) + "/m-F16.gguf",
+                          fixture.base_bytes);
+    const std::filesystem::path stored =
+        fixture.install.root / "models" / "m" / "gguf" / fixture.pin.substr(0, 12) / "m-F16.gguf";
+    const auto renamed = [](CheckInputs inputs) {
+        auto node = inputs.config.backends.extract("local");
+        node.key() = "my local";
+        inputs.config.backends.insert(std::move(node));
+        return inputs;
+    };
+    const std::string rename =
+        "apogee config rename-backend \"my local\" <new name> && apogee "
+        "config set-backend <new name> ";
+    CheckInputs scaled = renamed(fixture.with(fixture.item("style.gguf")));
+    scaled.config.backends.at("my local").adapters.front().scale = 3.0;
+    const std::vector<apogee::commands::CheckRow> strong = adapters_section(run_checks(scaled));
+    REQUIRE(strong.size() == 1);
+    CHECK(strong[0].remedy == rename + "--adapters " +
+                                  printed((fixture.loras / "style.gguf").string()) +
+                                  " to apply it at scale 1");
+    fixture.install.write("local/m-Q4_K_M.gguf", apogee::testing::minimal_gguf("qwen2"));
+    const std::vector<apogee::commands::CheckRow> moved =
+        adapters_section(run_checks(renamed(fixture.with(fixture.item("style.gguf")))));
+    REQUIRE(moved.size() == 1);
+    CHECK(moved[0].remedy == rename + "--model-path " + printed(stored.string()) +
+                                 " to run it over the weights it was pinned to, or " + rename +
+                                 "--adapters " + printed((fixture.loras / "style.gguf").string()) +
+                                 " to pin the set to these weights, if they are the ones it was "
+                                 "made for");
+}
+
 TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory's weights",
           "[commands][check][adapters][mlx]") {
     Install install;
@@ -4809,4 +4848,230 @@ TEST_CASE("the doctor's git row is skipped, saying why, where no program can be 
 
     // The default is this build's own answer.
     CHECK(CheckInputs{}.child_processes == apogee::platform::supports_child_processes());
+}
+
+// --- a backend the editors refuse: every door leads with the rename (CLI-M50) ----------
+
+namespace {
+
+/// A JSONC config -- the format `config init` writes -- holding `backends`
+/// as a hand edit leaves them.
+[[nodiscard]] std::string jsonc_with(const nlohmann::ordered_json& backends) {
+    return "// my config\n" + nlohmann::ordered_json{{"backends", backends}}.dump(2) + "\n";
+}
+
+/// The rows `check --output-format json` prints for `home`.
+[[nodiscard]] nlohmann::json check_rows(const apogee::testing::CliHome& home) {
+    std::string out;
+    std::string err;
+    (void)home.run({"check", "--output-format", "json"}, &out, &err);
+    return nlohmann::json::parse(out).at("rows");
+}
+
+/// The row named `name` in `rows`, or null.
+[[nodiscard]] nlohmann::json row_named(const nlohmann::json& rows, const std::string& name) {
+    for (const nlohmann::json& row : rows) {
+        if (row.at("name") == name) {
+            return row;
+        }
+    }
+    return nullptr;
+}
+
+/// `text` with every `mark` replaced by `value`.
+[[nodiscard]] std::string filled(std::string text, const std::string& mark,
+                                 const std::string& value) {
+    for (std::size_t at = text.find(mark); at != std::string::npos; at = text.find(mark)) {
+        text.replace(at, mark.size(), value);
+    }
+    return text;
+}
+
+/// Runs `door` -- one door of a remedy, the commands it chains with ` && `
+/// in order -- against `home`: each as the exec line reads it, and
+/// `/bin/sh` where this host has one, which must agree, its program word
+/// dropped. Every step must exit 0.
+void run_door(const apogee::testing::CliHome& home, const std::string& door) {
+    for (const std::string& step : apogee::testing::door_steps(door)) {
+        INFO("step: " << step);
+        apogee::commands::LineTokens tokens = apogee::commands::line_tokens(step);
+        REQUIRE(tokens.error.empty());
+        if (const std::optional<std::vector<std::string>> sh = apogee::testing::sh_words(step)) {
+            CHECK(*sh == tokens.words);
+        }
+        REQUIRE_FALSE(tokens.words.empty());
+        REQUIRE(tokens.words.front() == "apogee");
+        tokens.words.erase(tokens.words.begin());
+        std::string out;
+        std::string err;
+        const int code = home.run(tokens.words, &out, &err);
+        INFO(out << err);
+        CHECK(code == 0);
+    }
+}
+
+/// The bug as a fixture: hand-written llamacpp backends `-gone` and `a b`
+/// whose models are gone, `-bare` naming none, and a plain `gone` beside
+/// them, in the JSONC config whose editor never finds a quoted key.
+[[nodiscard]] std::unique_ptr<apogee::testing::CliHome> refused_home() {
+    return std::make_unique<apogee::testing::CliHome>(
+        jsonc_with({{"-gone", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/x.gguf"}}},
+                    {"a b", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/y.gguf"}}},
+                    {"-bare", {{"type", "llamacpp"}}},
+                    {"gone", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/z.gguf"}}}}),
+        "config.json");
+}
+
+}  // namespace
+
+TEST_CASE("check's doors for a backend the editors refuse rename it first, and each runs",
+          "[commands][check][M50]") {
+    const std::unique_ptr<apogee::testing::CliHome> home = refused_home();
+    const nlohmann::json rows = check_rows(*home);
+    const std::vector<std::pair<std::string, std::string>> expected{
+        {"-gone",
+         "apogee config rename-backend -- -gone <new name> && apogee config set-backend <new name> "
+         "--model-path <an existing .gguf> to repoint it, or apogee config rename-backend -- -gone "
+         "<new name> && apogee config delete-backend <new name> to remove it"},
+        {"a b",
+         "apogee config rename-backend \"a b\" <new name> && apogee config set-backend <new name> "
+         "--model-path <an existing .gguf> to repoint it, or apogee config rename-backend \"a b\" "
+         "<new name> && apogee config delete-backend <new name> to remove it"},
+        {"-bare",
+         "apogee config rename-backend -- -bare <new name> && apogee config set-backend <new name> "
+         "--model-path <file.gguf>"},
+        // A plain name's doors beside them, byte for byte.
+        {"gone",
+         "apogee config set-backend gone --model-path <an existing .gguf> to repoint it, or "
+         "apogee config delete-backend gone to remove it"},
+    };
+    std::string text;
+    std::string err;
+    (void)home->run({"check", "--no-color"}, &text, &err);
+    for (const auto& [name, remedy] : expected) {
+        INFO("backend [" << name << "]");
+        const nlohmann::json row = row_named(rows, "backend: " + name);
+        REQUIRE(row.is_object());
+        CHECK(row.value("remedy", "") == remedy);
+        // The text report's `run:` line says the same words.
+        CHECK(text.find("run: " + remedy + "\n") != std::string::npos);
+        if (name == "gone") {
+            continue;
+        }
+        // Each door run alone on the state it was named for, its blanks
+        // filled: every step exits 0, and the doctor then fails no row of it.
+        for (const std::string& door : apogee::testing::remedy_doors(remedy)) {
+            INFO("door: " << door);
+            const std::unique_ptr<apogee::testing::CliHome> state = refused_home();
+            const std::filesystem::path gguf = state->home() / "models dir" / "m.gguf";
+            std::filesystem::create_directories(gguf.parent_path());
+            std::ofstream{gguf, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+            std::string step = filled(door, "<new name>", "renamed2");
+            for (const std::string mark : {"<an existing .gguf>", "<file.gguf>"}) {
+                step = filled(step, mark, apogee::harness::shell_word(gguf.string()));
+            }
+            run_door(*state, step);
+            const nlohmann::json after = check_rows(*state);
+            CHECK(row_named(after, "backend: " + name).is_null());
+            const nlohmann::json renamed = row_named(after, "backend: renamed2");
+            CHECK((renamed.is_null() || renamed.at("status") != "fail"));
+        }
+    }
+}
+
+TEST_CASE("in a YAML config a backend outside the name rule is still renamed first",
+          "[commands][check][M50]") {
+    // One rule, by name, in both formats: the YAML line editor finds a
+    // hand-written `qwen@home`, but the door reads neither the config nor
+    // its format, and every step it names still runs.
+    const auto make = [] {
+        return std::make_unique<apogee::testing::CliHome>(
+            "backends:\n  qwen@home:\n    type: llamacpp\n    model_path: "
+            "/nonexistent-m50/q.gguf\n");
+    };
+    const std::unique_ptr<apogee::testing::CliHome> home = make();
+    const std::string remedy =
+        row_named(check_rows(*home), "backend: qwen@home").value("remedy", "");
+    CHECK(remedy ==
+          "apogee config rename-backend qwen@home <new name> && apogee config set-backend <new "
+          "name> --model-path <an existing .gguf> to repoint it, or apogee config rename-backend "
+          "qwen@home <new name> && apogee config delete-backend <new name> to remove it");
+    const std::vector<std::string> doors = apogee::testing::remedy_doors(remedy);
+    REQUIRE(doors.size() == 2U);
+    const std::unique_ptr<apogee::testing::CliHome> state = make();
+    const std::filesystem::path gguf = state->home() / "m.gguf";
+    std::ofstream{gguf, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+    run_door(*state, filled(filled(doors.front(), "<new name>", "qwen-home"), "<an existing .gguf>",
+                            apogee::harness::shell_word(gguf.string())));
+    const apogee::harness::Config after = apogee::harness::load_config(state->config_path());
+    CHECK(after.backends.contains("qwen-home"));
+    CHECK_FALSE(after.backends.contains("qwen@home"));
+}
+
+namespace {
+
+/// DoorHome's scenario in JSONC, its entry named `my local` -- a name the
+/// editors refuse -- applying `adapters` (`{loras}` and `{pin}` as there).
+struct RefusedDoorHome {
+    apogee::testing::CliHome home{"", "config.json"};
+    std::filesystem::path base = home.home() / "local" / "m-Q4_K_M.gguf";
+    std::string pin = apogee::models::sha256_hex(apogee::testing::minimal_gguf("llama"));
+    std::filesystem::path loras = home.home() / "loras";
+
+    explicit RefusedDoorHome(const std::vector<std::pair<std::string, bool>>& adapters) {
+        std::filesystem::create_directories(base.parent_path());
+        std::ofstream{base, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        std::filesystem::create_directories(loras);
+        std::ofstream{loras / "style.gguf", std::ios::binary} << "a style";
+        std::ofstream{loras / "tone.gguf", std::ios::binary} << "a tone";
+        nlohmann::ordered_json list = nlohmann::ordered_json::array();
+        for (const auto& [file, pinned] : adapters) {
+            nlohmann::ordered_json adapter{{"path", (loras / file).string()}};
+            if (pinned) {
+                adapter["base_sha256"] = pin;
+            }
+            list.push_back(adapter);
+        }
+        std::ofstream{home.config_path(), std::ios::binary} << jsonc_with(
+            {{"my local",
+              {{"type", "llamacpp"}, {"model_path", base.string()}, {"adapters", list}}}});
+    }
+};
+
+}  // namespace
+
+TEST_CASE("an adapter row's doors on a backend the editors refuse rename it first, and each runs",
+          "[commands][check][adapters][doors][M50]") {
+    const std::vector<std::pair<std::string, std::vector<std::pair<std::string, bool>>>> scenarios{
+        {"missing", {{"style.gguf", true}, {"gone.gguf", true}}},
+        {"unpinned", {{"style.gguf", true}, {"tone.gguf", false}}},
+    };
+    for (const auto& [scenario, adapters] : scenarios) {
+        INFO(scenario);
+        const RefusedDoorHome named{adapters};
+        std::vector<nlohmann::json> failing;
+        for (const nlohmann::json& row : check_rows(named.home)) {
+            if (row.at("section") == "Adapters" && row.at("status") != "ok") {
+                failing.push_back(row);
+            }
+        }
+        REQUIRE(failing.size() == 1U);
+        const std::string remedy = failing.front().value("remedy", "");
+        const std::vector<std::string> doors = apogee::testing::remedy_doors(remedy);
+        REQUIRE(doors.size() == 1U);
+        CHECK(
+            doors.front().starts_with("apogee config rename-backend \"my local\" <new name> && "
+                                      "apogee config set-backend <new name> --adapters "));
+        const RefusedDoorHome state{adapters};
+        run_door(state.home, filled(doors.front(), "<new name>", "my-local"));
+        std::size_t passing = 0;
+        for (const nlohmann::json& row : check_rows(state.home)) {
+            if (row.at("section") == "Adapters") {
+                CHECK(row.at("status") == "ok");
+                CHECK(row.at("name").get<std::string>().starts_with("my-local: "));
+                ++passing;
+            }
+        }
+        CHECK(passing >= 1U);
+    }
 }

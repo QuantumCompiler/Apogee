@@ -32,6 +32,8 @@ apogee_add_module(contracts
     contracts/collection_name.cpp
     contracts/suggested_command.h
     contracts/suggested_command.cpp
+    contracts/backend_door.h
+    contracts/backend_door.cpp
     contracts/utf8.h
     contracts/utf8.cpp
     contracts/todo.h

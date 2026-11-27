@@ -40,6 +40,7 @@
 #include "cli/provider_offer.h"
 #include "cli/train.h"
 #include "contracts/assets.h"
+#include "contracts/backend_door.h"
 #include "contracts/collection_name.h"
 #include "contracts/config_edit.h"
 #include "contracts/config_migrate.h"
@@ -94,6 +95,20 @@ namespace {
 /// missing-key error rather than inventing a second convention: a doctor that
 /// names a different variable than the failure message does is worse than one
 /// that stays quiet.
+
+/// `config set-backend` on configured backend `name` -- the key as stored
+/// -- with `options` after it, as one door of a remedy: led, for a name the
+/// editors refuse, by the rename that reaches it, chained with ` && `
+/// (CLI-M50).
+[[nodiscard]] std::string set_backend_remedy(std::string_view name,
+                                             const std::vector<harness::CommandPart>& options) {
+    return harness::backend_door_remedy(harness::set_backend_door(name, options));
+}
+
+/// `config delete-backend` on configured backend `name`, the same way.
+[[nodiscard]] std::string delete_backend_remedy(std::string_view name) {
+    return harness::backend_door_remedy(harness::delete_backend_door(name));
+}
 
 void add(CheckReport& report, Status status, std::string section, std::string name,
          std::string detail, std::string remedy = {}) {
@@ -545,7 +560,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 // The entry exists: a door the binary accepts on it (M14).
                 add(report, Status::Warn, "Config", label,
                     std::string{type} + " -- model_path not set",
-                    "apogee config set-backend " + name + " --model-path <file.gguf>");
+                    set_backend_remedy(
+                        name, {harness::option_placeholder("--model-path", "<file.gguf>")}));
                 continue;
             }
             const std::filesystem::path model = harness::expand_env(backend.model_path);
@@ -558,14 +574,9 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 // is refused, so the hint never names it.
                 add(report, Status::Fail, "Config", label,
                     "model_path does not exist: " + model.string(),
-                    harness::render({.verbs = {"config", "set-backend"},
-                                     .parts = {harness::operand(name),
-                                               harness::option_placeholder(
-                                                   "--model-path", "<an existing .gguf>")}}) +
-                        " to repoint it, or " +
-                        harness::render({.verbs = {"config", "delete-backend"},
-                                         .parts = {harness::operand(name)}}) +
-                        " to remove it");
+                    set_backend_remedy(name, {harness::option_placeholder("--model-path",
+                                                                          "<an existing .gguf>")}) +
+                        " to repoint it, or " + delete_backend_remedy(name) + " to remove it");
                 continue;
             }
             // A full header read rather than the 4-byte magic check this used
@@ -1125,9 +1136,15 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
             .base = base,
             .directories = mlx,
             .hashing = {.memo = inputs.home / "cache" / "weight-hashes.json", .remember = false}};
-        const std::string set_backend = "apogee config set-backend " + name;
-        const std::string pin_all =
-            set_backend + " --adapters " + backends::spell_adapters(backend.adapters);
+        // Each door names `config set-backend` on the entry: renamed first
+        // where the editors refuse its name (CLI-M50).
+        const auto set_backend = [&entry = name](const std::vector<harness::CommandPart>& options) {
+            return set_backend_remedy(entry, options);
+        };
+        const auto with_adapters = [&set_backend](const std::vector<harness::AdapterConfig>& set) {
+            return set_backend({harness::option("--adapters", backends::join_adapters(set))});
+        };
+        const std::string pin_all = with_adapters(backend.adapters);
 
         // The run a promoted version came from (53b's ledger), while its
         // manifest is still there to promote it from again.
@@ -1187,8 +1204,7 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
                 (named.has_filename() ? named : named.parent_path()).filename().string();
             std::vector<harness::AdapterConfig> rest = backend.adapters;
             rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(index));
-            const std::string take_off =
-                set_backend + " --adapters " + backends::spell_adapters(rest) + " to take it off";
+            const std::string take_off = with_adapters(rest) + " to take it off";
             const std::string run = promoted_from(adapter);
             if (!run.empty() && !serving.has_value()) {
                 serving = serving_base(name, backend);
@@ -1210,8 +1226,7 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
                         (mlx ? " -- mlx-lm applies an adapter at the scale its training wrote, "
                                "so an mlx entry's is 1"
                              : " -- a scale is above 0 and at most 2"),
-                    set_backend + " --adapters " + backends::spell_adapters(plain) +
-                        " to apply it at scale 1");
+                    with_adapters(plain) + " to apply it at scale 1");
                 continue;
             }
             switch (backends::adapter_files(adapter, check)) {
@@ -1246,7 +1261,7 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
                 const std::filesystem::path pinned = stored_base(adapter.base_sha256);
                 return pinned.empty()
                            ? std::string{}
-                           : set_backend + " --model-path " + harness::shell_word(pinned.string()) +
+                           : set_backend({harness::option("--model-path", pinned.string())}) +
                                  " to run it over the weights it was pinned to";
             };
             if (backend.model_path.empty()) {

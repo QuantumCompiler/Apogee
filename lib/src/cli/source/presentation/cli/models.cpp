@@ -1877,8 +1877,9 @@ std::string render_model_info(const harness::Config& config, std::string_view na
     if (value.type == harness::BackendType::Mlx) {
         // A model directory run by the MLX driver (27a): the ladder's answer,
         // what the directory says, and how it samples -- all from files.
+        // The key as stored names the entry in a remedy's door (CLI-M50).
         const backends::MlxReadiness readiness =
-            backends::probe_mlx_backend(name, value, backends::MlxHost::current());
+            backends::probe_mlx_backend(entry->first, value, backends::MlxHost::current());
         const std::filesystem::path dir{harness::expand_env_and_home(value.model_path)};
         out << "model_path:   " << (value.model_path.empty() ? "(unset)" : dir.string()) << "\n";
         out << "runtime:      "

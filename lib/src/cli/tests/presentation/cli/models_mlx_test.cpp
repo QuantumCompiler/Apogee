@@ -3329,3 +3329,44 @@ TEST_CASE(
     CHECK(out.find("models.default") == std::string::npos);
     CHECK(apogee::harness::load_config(scanned.config_path()).models.default_backend.empty());
 }
+
+TEST_CASE("models info's drafter door renames the entry as the config stores it",
+          "[commands][models][mlx][drafter][M50]") {
+    // CLI-M50: an entry stored `-x`, asked for as `-X` (the config's lookup
+    // folds case), whose draft cannot run beside it: the take-off door leads
+    // with the rename -- of `-x`, the key `rename-backend` matches exactly.
+    if (apogee::platform::host_target() != "macos-arm64" ||
+        apogee::platform::find_on_path("python3").empty()) {
+        SKIP("the mlx runtime is Apple silicon's, and the driver needs a python3");
+    }
+    CliHome home{"backends:\n  m:\n    type: mock\n"};
+    REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
+    fake_mlx_runtime(home.home());
+    (void)fake_mlx_vlm(home.home());
+    store_assistants(home);
+    const StoreRoots roots = StoreRoots::at(home.models());
+    std::string out;
+    // The E4B's drafter, and the 12B's base it was never made for.
+    REQUIRE(
+        home.run({"models", "convert", "Gemma4-E4B-Assistant/safetensors/aaaaaaaaaaaa", "--mlx"},
+                 &out) == 0);
+    const std::filesystem::path drafter =
+        mlx_made_by(roots, "Gemma4-E4B-Assistant", "mlx_vlm.convert bf16");
+    REQUIRE_FALSE(drafter.empty());
+    REQUIRE(home.run({"models", "convert", "Gemma4-12B-Instruct", "--mlx", "--register",
+                      "--base-name", "g12b"},
+                     &out) == 0);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    REQUIRE(config.backends.contains("g12b-4bit"));
+    {
+        std::ofstream file{home.config_path(), std::ios::binary | std::ios::trunc};
+        file << "backends:\n  m:\n    type: mock\n  '-x':\n    type: mlx\n    model_path: "
+             << config.backends.at("g12b-4bit").model_path << "\n    draft: " << drafter.string()
+             << "\n";
+    }
+    REQUIRE(home.run({"models", "info", "-q", "--", "-X"}, &out) == 0);
+    CHECK(out.find("runtime:      cannot run -- its draft cannot run beside it: ") !=
+          std::string::npos);
+    CHECK(out.find(" -- apogee config rename-backend -- -x <new name> && apogee config set-backend "
+                   "<new name> --draft \"\"\n") != std::string::npos);
+}

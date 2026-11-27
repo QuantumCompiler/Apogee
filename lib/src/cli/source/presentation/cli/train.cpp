@@ -33,6 +33,7 @@
 #include "cli/job_stream.h"
 #include "cli/models_pull.h"
 #include "cli/train_stream.h"
+#include "contracts/backend_door.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
@@ -551,9 +552,15 @@ struct PromoteChecks {
             return checks;
         }
         if (existing->model_path.empty()) {
+            // Renamed first where the editors refuse the name (CLI-M50).
+            const std::vector<harness::SuggestedCommand> door = harness::set_backend_door(
+                checks.existing_key, {harness::option_placeholder("--model-path", "<base>")});
             checks.error = "adapters apply over the entry's model_path, and '" +
-                           checks.existing_key + "' names none -- set it with 'apogee config " +
-                           "set-backend " + checks.existing_key + " --model-path <base>'";
+                           checks.existing_key + "' names none -- " +
+                           harness::backend_door_with("set it", door) +
+                           (harness::renames_first(door)
+                                ? ", then promote into " + std::string{harness::kNewBackendName}
+                                : std::string{});
             return checks;
         }
         if (!request.quantize.empty() || request.keep_fused) {
@@ -1054,12 +1061,14 @@ struct PromotionHold {
     }
     for (const harness::AdapterConfig& adapter : adapters) {
         if (!same_path(adapter.path, version_path)) {
+            // Renamed first where the editors refuse the name (CLI-M50).
+            const std::vector<harness::SuggestedCommand> door =
+                harness::set_backend_door(key, {harness::option("--adapters", "")});
             return "'" + key + "' is an mlx entry, which applies one adapter, and it already " +
-                   "applies " + adapter.path + " -- take it off with '" +
-                   harness::render(
-                       {.verbs = {"config", "set-backend"},
-                        .parts = {harness::operand(key), harness::option("--adapters", "")}}) +
-                   "', then promote again";
+                   "applies " + adapter.path + " -- " +
+                   harness::backend_door_with("take it off", door) + ", then promote again" +
+                   (harness::renames_first(door) ? " into " + std::string{harness::kNewBackendName}
+                                                 : std::string{});
         }
     }
     return {};

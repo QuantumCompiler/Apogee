@@ -99,8 +99,10 @@ struct DeletePlan {
     const std::function<std::optional<std::string>(const std::string& question)>& ask,
     const std::vector<std::string>& cleared = {});
 
-/// The two doors for a backend whose model is gone -- each a command the
-/// binary accepts on that state: repoint it, or remove it.
+/// The two doors for configured backend `name` (the key as stored) whose
+/// model is gone -- each a command the binary accepts on that state:
+/// repoint it, or remove it; for a name the editors refuse, each said with
+/// the rename that reaches it first (CLI-M50).
 [[nodiscard]] std::string backend_doors(const std::string& name);
 
 /// What the delete does about `backends` once the weights are gone: with

@@ -1,6 +1,7 @@
 #include "cli/models_pull.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <system_error>
 #include <vector>
 
+#include "cli/line_tokens.h"
 #include "contracts/config.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
@@ -20,6 +22,7 @@
 #include "support/file_time.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
+#include "support/printed_command.h"
 
 /// The mutating verbs over the model store, and the boundary they must never
 /// cross.
@@ -946,4 +949,135 @@ TEST_CASE("the ask names what a delete clears beside the entries it removes",
     CHECK(remove_backends_too(true, {}, answer("n"), {"models.default_video"}));  // the flag
     CHECK(asked.empty());
     CHECK_FALSE(remove_backends_too(true, {}, answer("y"), {}));  // nothing to settle
+}
+
+// --- a backend the editors refuse: the rename first (CLI-M50) ---------------------------
+
+namespace {
+
+/// A JSONC config -- the format `config init` writes -- holding `backends`
+/// as a hand edit leaves them: names outside 55f's rule among them.
+[[nodiscard]] std::string jsonc_backends(const nlohmann::ordered_json& backends) {
+    return "// my config\n" + nlohmann::ordered_json{{"backends", backends}}.dump(2) + "\n";
+}
+
+/// The bug as a fixture: a hand-written mock `-x`, a llamacpp `-gone` and
+/// `a b` whose models are gone, and a plain `gone` beside them.
+struct RefusedNames {
+    apogee::testing::CliHome home;
+
+    RefusedNames()
+        : home{jsonc_backends(
+                   {{"-x", {{"type", "mock"}}},
+                    {"-gone", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/x.gguf"}}},
+                    {"a b", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/y.gguf"}}},
+                    {"gone", {{"type", "llamacpp"}, {"model_path", "/nonexistent-m50/z.gguf"}}}}),
+               "config.json"} {}
+};
+
+/// Each of `commands` -- printed for a person to paste -- run against
+/// `home` as a shell reads it, `<new name>` filled as `renamed` and the
+/// program word dropped: the exec line's reading, and `/bin/sh`'s where the
+/// host has one, which must agree. Every step must exit 0.
+void run_as_pasted(const apogee::testing::CliHome& home, const std::vector<std::string>& commands,
+                   const std::string& renamed) {
+    for (std::string command : commands) {
+        const std::string mark = "<new name>";
+        for (std::size_t at = command.find(mark); at != std::string::npos;
+             at = command.find(mark)) {
+            command.replace(at, mark.size(), renamed);
+        }
+        INFO("pasted: " << command);
+        apogee::commands::LineTokens tokens = apogee::commands::line_tokens(command);
+        REQUIRE(tokens.error.empty());
+        if (const std::optional<std::vector<std::string>> sh = apogee::testing::sh_words(command)) {
+            CHECK(*sh == tokens.words);
+        }
+        REQUIRE_FALSE(tokens.words.empty());
+        REQUIRE(tokens.words.front() == "apogee");
+        tokens.words.erase(tokens.words.begin());
+        std::string out;
+        std::string err;
+        const int code = home.run(tokens.words, &out, &err);
+        INFO(out << err);
+        CHECK(code == 0);
+    }
+}
+
+/// The two commands `rename it first: <rename>, then <door>` names.
+[[nodiscard]] std::vector<std::string> renamed_then(const std::string& said) {
+    const std::string first = "rename it first: ";
+    const std::string then = ", then ";
+    const std::size_t start = said.find(first);
+    REQUIRE(start != std::string::npos);
+    const std::size_t split = said.find(then, start);
+    REQUIRE(split != std::string::npos);
+    return {said.substr(start + first.size(), split - start - first.size()),
+            said.substr(split + then.size())};
+}
+
+}  // namespace
+
+TEST_CASE("models delete's door for a hand-written -x renames it first, and both steps run",
+          "[commands][models][delete][backend][M50]") {
+    const RefusedNames refused;
+    std::string out;
+    std::string err;
+    REQUIRE(refused.home.run({"models", "delete", "--yes", "--", "-x"}, &out, &err) == 1);
+    // The house voice: one stderr line, `apogee models: `.
+    CHECK(err ==
+          "apogee models: backend '-x' (mock) has no model file to delete -- to remove the "
+          "backend itself, rename it first: apogee config rename-backend -- -x <new name>, then "
+          "apogee config delete-backend <new name>\n");
+    CHECK(out.empty());
+    std::string line = err;
+    line.pop_back();
+    run_as_pasted(refused.home, renamed_then(line), "x2");
+    const apogee::harness::Config after = apogee::harness::load_config(refused.home.config_path());
+    CHECK_FALSE(after.backends.contains("-x"));
+    CHECK_FALSE(after.backends.contains("x2"));
+    CHECK(after.backends.contains("gone"));
+    CHECK(after.backends.contains("-gone"));
+}
+
+TEST_CASE("models delete's rename door names the backend as the config stores it",
+          "[commands][models][delete][backend][M50]") {
+    // `rename-backend` matches the key exactly (until CLI-M54), and the
+    // config's lookup folds case: `-X` finds `-x`, and the door names `-x`.
+    const RefusedNames refused;
+    std::string out;
+    std::string err;
+    REQUIRE(refused.home.run({"models", "delete", "--yes", "--", "-X"}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee models: backend '-X' (mock) has no model file to delete -- "));
+    CHECK(err.find("rename it first: apogee config rename-backend -- -x <new name>, then apogee "
+                   "config delete-backend <new name>\n") != std::string::npos);
+    std::string line = err;
+    line.pop_back();
+    run_as_pasted(refused.home, renamed_then(line), "x2");
+    CHECK_FALSE(apogee::harness::load_config(refused.home.config_path()).backends.contains("-x"));
+}
+
+TEST_CASE("a kept backend the editors refuse is said with the rename before each door",
+          "[commands][models][delete][backends][M50]") {
+    const apogee::testing::CliHome home{"", "config.json"};
+    const std::filesystem::path file =
+        home.models() / "org--m" / "gguf" / "aaaaaaaaaaaa" / "m-Q4_K_M.gguf";
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream{file, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+    std::ofstream{home.config_path(), std::ios::binary}
+        << jsonc_backends({{"-first", {{"type", "llamacpp"}, {"model_path", file.string()}}},
+                           {"second", {{"type", "llamacpp"}, {"model_path", file.string()}}}});
+    const std::string before = home.config_text();
+    std::string out;
+    REQUIRE(home.run({"models", "delete", "org--m/gguf/aaaaaaaaaaaa", "--yes"}, &out) == 0);
+    CHECK(home.config_text() == before);
+    CHECK(out.find("kept backend '-first', which points at nothing now -- repoint it: rename it "
+                   "first: apogee config rename-backend -- -first <new name>, then apogee config "
+                   "set-backend <new name> --model-path <file>; or remove it: rename it first: "
+                   "apogee config rename-backend -- -first <new name>, then apogee config "
+                   "delete-backend <new name>\n") != std::string::npos);
+    // A plain name's doors beside it, byte for byte.
+    CHECK(out.find("kept backend 'second', which points at nothing now -- repoint it: apogee "
+                   "config set-backend second --model-path <file>; or remove it: apogee config "
+                   "delete-backend second\n") != std::string::npos);
 }

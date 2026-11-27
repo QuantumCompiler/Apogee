@@ -607,6 +607,39 @@ TEST_CASE("a name another backend holds refuses the chain before anything runs",
     CHECK(home.converter_calls().empty());
 }
 
+TEST_CASE("a hand-written name the editors refuse leads the register refusal with its rename",
+          "[commands][models][convert][register][M50]") {
+    // CLI-M50: `"my text-F16"` is outside 55f's rule, so every editor
+    // refuses it (57e) and only `rename-backend` reaches it. The refusal
+    // keeps its other way -- registering this one by hand -- and following
+    // the door leaves 55f's own add rule refusing the chain's name.
+    const Home home;
+    home.add_snapshot("org--text", false);
+    // The JSONC config `config init` writes; its content decides its format.
+    write_file(home.config_path,
+               "// my config\n{\n  \"backends\": {\n    \"my text-F16\": {\"type\": "
+               "\"llamacpp\", \"model_path\": \"/elsewhere/model.gguf\"}\n  }\n}\n");
+    const std::string before = read_file(home.config_path);
+    std::string out;
+    CHECK(home.run({"models", "convert", "org--text", "--register", "--base-name", "my text"},
+                   &out) == 1);
+    CHECK(out.find("backend 'my text-F16' already exists and points at /elsewhere/model.gguf -- "
+                   "to remove it, rename it first: apogee config rename-backend \"my text-F16\" "
+                   "<new name>, then apogee config delete-backend <new name>; or register this "
+                   "one by hand under another name") != std::string::npos);
+    CHECK(home.converter_calls().empty());
+    CHECK(read_file(home.config_path) == before);
+    // The door, followed: renamed, then removed.
+    REQUIRE(home.run({"config", "rename-backend", "my text-F16", "text2"}, &out) == 0);
+    REQUIRE(home.run({"config", "delete-backend", "text2"}, &out) == 0);
+    // Guard, today's rule: the chain's own name is refused before it runs.
+    CHECK(home.run({"models", "convert", "org--text", "--register", "--base-name", "my text"},
+                   &out) == 1);
+    CHECK(out.find("backend name 'my text-F16' is not one both config formats can edit") !=
+          std::string::npos);
+    CHECK(home.converter_calls().empty());
+}
+
 TEST_CASE("a chain with no config to register into refuses before anything runs",
           "[commands][models][convert][register]") {
     const Home home;

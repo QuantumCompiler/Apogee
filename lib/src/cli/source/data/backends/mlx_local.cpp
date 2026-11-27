@@ -17,6 +17,7 @@
 #include "backends/native_tool_calls.h"
 #include "backends/think_filter.h"
 #include "contracts/assets.h"
+#include "contracts/backend_door.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -580,10 +581,11 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
             !draft.pairs()) {
             readiness.refusal = MlxRefusal::Draft;
             readiness.reason = "its draft cannot run beside it: " + draft.reason;
+            // The take-off, renamed first where the editors refuse the
+            // entry's name (CLI-M50): a remedy, so chained.
             readiness.remedy = draft.remedy.empty()
-                                   ? harness::render({.verbs = {"config", "set-backend"},
-                                                      .parts = {harness::operand(name),
-                                                                harness::option("--draft", "")}})
+                                   ? harness::backend_door_remedy(harness::set_backend_door(
+                                         name, {harness::option("--draft", "")}))
                                    : draft.remedy;
             return readiness;
         }

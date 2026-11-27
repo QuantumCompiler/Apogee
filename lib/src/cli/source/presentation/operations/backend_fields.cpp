@@ -13,6 +13,7 @@
 
 #include "backends/adapters.h"
 #include "backends/mlx_local.h"
+#include "contracts/backend_door.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
@@ -46,19 +47,21 @@ namespace {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
         const harness::Config edited = harness::parse_edited_config(trial);
-        const harness::BackendConfig* entry = edited.find_backend(name);
-        if (entry == nullptr) {
+        const auto found = edited.backends.find(std::string{name});
+        if (found == edited.backends.end()) {
             return "no backend named '" + std::string{name} + "'";
         }
-        if (entry->model_path.empty()) {
+        const harness::BackendConfig& entry = found->second;
+        if (entry.model_path.empty()) {
             return "adapters apply over the entry's model_path, and it names none -- set it "
                    "with --model-path";
         }
-        pinned = entry->adapters;
-        const std::filesystem::path base{harness::expand_env_and_home(entry->model_path)};
-        const backends::AdapterCheck check{.backend = std::string{name},
+        pinned = entry.adapters;
+        const std::filesystem::path base{harness::expand_env_and_home(entry.model_path)};
+        // The key as stored names the entry in a refusal's door (CLI-M50).
+        const backends::AdapterCheck check{.backend = found->first,
                                            .base = base,
-                                           .directories = entry->type == harness::BackendType::Mlx,
+                                           .directories = entry.type == harness::BackendType::Mlx,
                                            .hashing = {.memo = harness::weight_hash_cache_path()}};
         if (std::string refused = backends::pin_adapters(pinned, check); !refused.empty()) {
             return refused;
@@ -70,28 +73,23 @@ namespace {
     }
 }
 
-/// `apogee config set-backend <name>` with `edits` as flags, each value
-/// one word -- the parts the one renderer orders (CLI-M48), so a door that
-/// adds a flag adds a part, never text after a rendered `-- <name>`.
-[[nodiscard]] harness::SuggestedCommand set_backend_parts(
-    std::string_view name, const std::vector<BackendFieldEdit>& edits) {
-    harness::SuggestedCommand command{.verbs = {"config", "set-backend"},
-                                      .parts = {harness::operand(name)}};
-    for (const BackendFieldEdit& edit : edits) {
-        std::string flag = edit.field;
-        std::ranges::replace(flag, '_', '-');
-        command.parts.push_back(harness::option("--" + flag, edit.value));
-    }
-    return command;
-}
-
-/// The same with `--adapters <set>` after the edits, the set one word.
+/// `apogee config set-backend <name>` on configured backend `name` (the key
+/// as stored) with `edits` as flags, then `--adapters <set>`, each value one
+/// word -- the parts the one renderer orders (CLI-M48), so a door that adds
+/// a flag adds a part, never text after a rendered `-- <name>` -- as a
+/// sentence says it: on a name the editors refuse, after the rename that
+/// reaches it (CLI-M50).
 [[nodiscard]] std::string with_adapters(std::string_view name,
                                         const std::vector<BackendFieldEdit>& edits,
                                         const std::string& set) {
-    harness::SuggestedCommand command = set_backend_parts(name, edits);
-    command.parts.push_back(harness::option("--adapters", set));
-    return harness::render(command);
+    std::vector<harness::CommandPart> options;
+    for (const BackendFieldEdit& edit : edits) {
+        std::string flag = edit.field;
+        std::ranges::replace(flag, '_', '-');
+        options.push_back(harness::option("--" + flag, edit.value));
+    }
+    options.push_back(harness::option("--adapters", set));
+    return harness::backend_door_said(harness::set_backend_door(name, options));
 }
 
 /// The adapters an entry keeps checked against the base `edits` move it
@@ -116,11 +114,14 @@ namespace {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
         const harness::Config edited = harness::parse_edited_config(trial);
-        const harness::BackendConfig* entry = edited.find_backend(name);
-        if (entry == nullptr || entry->adapters.empty()) {
+        const auto found = edited.backends.find(std::string{name});
+        if (found == edited.backends.end() || found->second.adapters.empty()) {
             return {};
         }
-        const std::string take_off = adapters_take_off(name, edits);
+        // The key as stored names the entry in the doors (CLI-M50).
+        const std::string& key = found->first;
+        const harness::BackendConfig* entry = &found->second;
+        const std::string take_off = adapters_take_off(key, edits);
         if (entry->model_path.empty()) {
             return "'" + std::string{name} +
                    "' applies adapters over its model_path, and this edit leaves it none -- "
@@ -129,7 +130,7 @@ namespace {
         }
         const std::filesystem::path base{harness::expand_env_and_home(entry->model_path)};
         std::vector<harness::AdapterConfig> repinned = entry->adapters;
-        const backends::AdapterCheck check{.backend = std::string{name},
+        const backends::AdapterCheck check{.backend = key,
                                            .base = base,
                                            .directories = entry->type == harness::BackendType::Mlx,
                                            .hashing = {.memo = harness::weight_hash_cache_path()}};
@@ -153,7 +154,7 @@ namespace {
                    " -- an adapter applies only over the weights it was trained on, so nothing "
                    "was edited; if these are the weights they were made for, re-pin them in the "
                    "same edit: " +
-                   with_adapters(name, edits, backends::join_adapters(entry->adapters)) +
+                   with_adapters(key, edits, backends::join_adapters(entry->adapters)) +
                    ", or take them off: " + take_off;
         }
         said = base.string() + " (sha256 " + now + ")";

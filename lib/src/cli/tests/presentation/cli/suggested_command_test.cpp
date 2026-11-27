@@ -291,11 +291,14 @@ TEST_CASE("a backend door for a hand-written name reaches the verb, never anothe
     std::string out;
     std::string err;
 
-    // check's row for `-gone`: the options first, then `--`, in the text and
-    // the JSON `remedy`, and each door, its placeholder filled, reaches the verb.
+    // check's row for `-gone`: each door leads with the rename that reaches
+    // the name (CLI-M50), its `--` before the name, in the text and the JSON
+    // `remedy`; each step, its placeholders filled, runs on the state the
+    // door was named for -- a fresh copy per door.
     const std::string doors =
-        "apogee config set-backend --model-path <an existing .gguf> -- -gone to repoint it, or "
-        "apogee config delete-backend -- -gone to remove it";
+        "apogee config rename-backend -- -gone <new name> && apogee config set-backend <new "
+        "name> --model-path <an existing .gguf> to repoint it, or apogee config rename-backend -- "
+        "-gone <new name> && apogee config delete-backend <new name> to remove it";
     (void)odd.home.run({"check", "--no-color"}, &out, &err);
     CHECK(out.find(doors) != std::string::npos);
     (void)odd.home.run({"check", "--output-format", "json"}, &out, &err);
@@ -307,30 +310,56 @@ TEST_CASE("a backend door for a hand-written name reaches the verb, never anothe
         }
     }
     CHECK(remedy == doors);
-    const fs::path gguf = odd.home.home() / "models dir" / "m.gguf";
-    fs::create_directories(gguf.parent_path());
-    std::ofstream{gguf, std::ios::binary} << apogee::testing::minimal_gguf("llama");
-    for (std::string door : apogee::testing::remedy_doors(remedy)) {
-        const std::string mark = "<an existing .gguf>";
-        if (const std::size_t at = door.find(mark); at != std::string::npos) {
-            door.replace(at, mark.size(), apogee::harness::shell_word(gguf.string()));
+    const auto fill = [](std::string text, const std::string& mark, const std::string& value) {
+        for (std::size_t at = text.find(mark); at != std::string::npos; at = text.find(mark)) {
+            text.replace(at, mark.size(), value);
         }
+        return text;
+    };
+    for (const std::string& door : apogee::testing::remedy_doors(remedy)) {
+        const OddHome state;
+        const fs::path gguf = state.home.home() / "models dir" / "m.gguf";
+        fs::create_directories(gguf.parent_path());
+        std::ofstream{gguf, std::ios::binary} << apogee::testing::minimal_gguf("llama");
+        const std::vector<std::string> steps = apogee::testing::door_steps(
+            fill(fill(door, "<an existing .gguf>", apogee::harness::shell_word(gguf.string())),
+                 "<new name>", "gone2"));
         INFO("door: " << door);
-        const Pasted pasted = paste(odd.home, door, odd.scratch.path());
-        CHECK(pasted.words.at(pasted.words.size() - 2) == "--");
-        CHECK(pasted.words.back() == "-gone");
+        REQUIRE(steps.size() == 2U);
+        const Pasted renamed = paste(state.home, steps[0], state.scratch.path());
+        CHECK(renamed.words == std::vector<std::string>{"apogee", "config", "rename-backend", "--",
+                                                        "-gone", "gone2"});
+        CHECK(renamed.code == 0);
+        const Pasted then = paste(state.home, steps[1], state.scratch.path());
+        CHECK(then.words.at(3) == "gone2");
+        CHECK(then.code == 0);
+        const apogee::harness::Config after =
+            apogee::harness::load_config(state.home.config_path());
+        CHECK(after.find_backend("-gone") == nullptr);
+        CHECK(after.find_backend("a") != nullptr);
+        CHECK(after.find_backend("a;b") != nullptr);
     }
 
-    // models delete's remedy for `a;b`: pasted, it never touches backend `a`.
+    // models delete's remedy for `a;b`: the rename reaches it, and pasted,
+    // neither step ever touches backend `a`.
     REQUIRE(odd.home.run({"models", "delete", "--yes", "--", "a;b"}, &out, &err) != 0);
     CHECK(err.starts_with("apogee models: "));
-    CHECK(err.find("remove the backend itself with 'apogee config delete-backend \"a;b\"'") !=
-          std::string::npos);
-    const std::size_t start = err.find("with '") + 6;
-    const std::string command = err.substr(start, err.rfind('\'') - start);
-    const Pasted pasted = paste(odd.home, command, odd.scratch.path());
-    CHECK(pasted.words == std::vector<std::string>{"apogee", "config", "delete-backend", "a;b"});
-    CHECK(apogee::harness::load_config(odd.home.config_path()).find_backend("a") != nullptr);
+    const std::string said =
+        "to remove the backend itself, rename it first: apogee config rename-backend \"a;b\" <new "
+        "name>, then apogee config delete-backend <new name>";
+    REQUIRE(err.find(said) != std::string::npos);
+    const std::string rename =
+        fill("apogee config rename-backend \"a;b\" <new name>", "<new name>", "ab2");
+    const Pasted renamed = paste(odd.home, rename, odd.scratch.path());
+    CHECK(renamed.words ==
+          std::vector<std::string>{"apogee", "config", "rename-backend", "a;b", "ab2"});
+    CHECK(renamed.code == 0);
+    const Pasted deleted = paste(odd.home, "apogee config delete-backend ab2", odd.scratch.path());
+    CHECK(deleted.code == 0);
+    const apogee::harness::Config after = apogee::harness::load_config(odd.home.config_path());
+    CHECK(after.find_backend("a") != nullptr);
+    CHECK(after.find_backend("a;b") == nullptr);
+    CHECK(after.find_backend("ab2") == nullptr);
 }
 
 TEST_CASE("a path under a home whose folder holds a space and a quote is one word",

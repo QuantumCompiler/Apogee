@@ -92,7 +92,9 @@ struct BackendFieldsOutcome {
 /// `apogee config set-backend <name>`, each edit a flag, then
 /// `--adapters ""`, one command rendered by the one renderer (CLI-M48) --
 /// the door every move of an entry's base under the adapters it keeps
-/// names: 55e's refusals and a merged promote's (57i).
+/// names: 55e's refusals and a merged promote's (57i). `name` is the key as
+/// stored; one the editors refuse is said with the rename that reaches it
+/// first (CLI-M50: `rename it first: <rename>, then <edit>`).
 [[nodiscard]] std::string adapters_take_off(std::string_view name,
                                             const std::vector<BackendFieldEdit>& edits = {});
 

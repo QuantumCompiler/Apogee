@@ -691,3 +691,59 @@ TEST_CASE("delete_backend_text clears every role that names the entry, and only 
     CHECK(apogee::harness::parse_config(cased.text, "<after>").models.default_utility == "kept");
     CHECK_THROWS(apogee::commands::delete_backend_text(mixed, "nothing"));
 }
+
+TEST_CASE("set-backend's doors on a backend the editors refuse rename it first, and they run",
+          "[set-backend][cli][adapters][repin][M50]") {
+    // CLI-M50: in a YAML config the line editor finds a hand-written
+    // `qwen@home`, so 55e's refusal reaches it -- and its doors lead with the
+    // rename, one rule by name in both formats, every step still running.
+    const AdapterFiles files;
+    const std::filesystem::path other = files.dir.path() / "other.gguf";
+    std::ofstream{other, std::ios::binary} << "other weights";
+    const apogee::testing::CliHome home{
+        "backends:\n  qwen@home:\n    type: llamacpp\n"
+        "    model_path: " +
+        files.base.string() + "\n"};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run(
+                {"config", "set-backend", "qwen@home", "--adapters", files.style.string() + ":0.5"},
+                &out, &err) == 0);
+    const std::string before = slurp(home.config_path());
+    CHECK(home.run({"config", "set-backend", "qwen@home", "--model-path", other.string()}, &out,
+                   &err) == 1);
+    const std::string rename =
+        "rename it first: apogee config rename-backend qwen@home <new name>, "
+        "then apogee config set-backend <new name> --model-path " +
+        printed(other.string()) + " --adapters ";
+    CHECK_THAT(err, ContainsSubstring("re-pin them in the same edit: " + rename +
+                                      printed(files.style.string() + ":0.5") +
+                                      ", or take them off: " + rename + "\"\""));
+    CHECK(slurp(home.config_path()) == before);
+    // The re-pin door, followed: the rename, then the edit on the new name.
+    REQUIRE(home.run({"config", "rename-backend", "qwen@home", "qwen-home"}, &out, &err) == 0);
+    REQUIRE(home.run({"config", "set-backend", "qwen-home", "--model-path", other.string(),
+                      "--adapters", files.style.string() + ":0.5"},
+                     &out, &err) == 0);
+    const apogee::harness::Config after = apogee::harness::load_config(home.config_path());
+    REQUIRE(after.find_backend("qwen-home") != nullptr);
+    CHECK(after.find_backend("qwen-home")->adapters.front().base_sha256 ==
+          apogee::models::file_sha256(other));
+}
+
+TEST_CASE("the take-off door and a replaced base's refusal name the rename first",
+          "[set-backend][adapters][M50]") {
+    apogee::harness::BackendConfig entry;
+    entry.type = apogee::harness::BackendType::LlamaCpp;
+    entry.model_path = "/srv/base.gguf";
+    entry.adapters = {apogee::harness::AdapterConfig{.path = "/srv/tone.gguf"}};
+    CHECK(apogee::commands::adapters_take_off("local") ==
+          "apogee config set-backend local --adapters \"\"");
+    CHECK(apogee::commands::adapters_take_off("-x") ==
+          "rename it first: apogee config rename-backend -- -x <new name>, then apogee config "
+          "set-backend <new name> --adapters \"\"");
+    CHECK(apogee::commands::base_replaced_under_adapters("-x", entry, "it moves", "stop") ==
+          "'-x' applies adapters over its model_path (/srv/tone.gguf), and it moves -- take them "
+          "off first: rename it first: apogee config rename-backend -- -x <new name>, then apogee "
+          "config set-backend <new name> --adapters \"\", or stop");
+}

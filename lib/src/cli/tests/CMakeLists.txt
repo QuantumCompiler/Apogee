@@ -76,6 +76,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/host_test.cpp
     data/contracts/collection_name_test.cpp
     data/contracts/suggested_command_test.cpp
+    data/contracts/backend_door_test.cpp
     data/contracts/server_tools_test.cpp
     data/contracts/mcp_serve_test.cpp
     data/contracts/config_adapters_test.cpp

@@ -28,6 +28,7 @@
 #include "cli/model_chain.h"
 #include "cli/models.h"
 #include "cli/models_migrate.h"
+#include "contracts/backend_door.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
@@ -70,11 +71,17 @@ namespace {
     return harness::printed_program() + " train setup --with mlx-audio";
 }
 
-/// `apogee config delete-backend <name>`, by the one renderer (CLI-M48): a
-/// hand-written backend `a;b` is deleted as itself, never `a`.
-[[nodiscard]] std::string delete_backend_command(const std::string& name) {
-    return harness::render(
-        {.verbs = {"config", "delete-backend"}, .parts = {harness::operand(name)}});
+/// The way past configured backend `key` (as stored) that a resumed chain
+/// finds pointing elsewhere: remove it, then resume. A name the editors
+/// refuse is reached by the rename first (CLI-M50), and the chain cannot
+/// register under it either (55f's add rule refuses it on the resume), so
+/// its other way is the one `check_registrations` names: registering this
+/// one by hand under another name.
+[[nodiscard]] std::string remove_then_resume(const std::string& key) {
+    const std::vector<harness::SuggestedCommand> door = harness::delete_backend_door(key);
+    return harness::backend_door_with("remove it", door) +
+           (harness::renames_first(door) ? "; or register this one by hand under another name"
+                                         : ", then resume");
 }
 
 /// `apogee config add-backend <name> --type mlx --model-path <dir>`, the
@@ -436,11 +443,10 @@ bool remove_backends_too(
 }
 
 std::string backend_doors(const std::string& name) {
-    return "repoint it: " +
-           harness::render({.verbs = {"config", "set-backend"},
-                            .parts = {harness::operand(name),
-                                      harness::option_placeholder("--model-path", "<file>")}}) +
-           "; or remove it: " + delete_backend_command(name);
+    const std::vector<harness::SuggestedCommand> repoint =
+        harness::set_backend_door(name, {harness::option_placeholder("--model-path", "<file>")});
+    return "repoint it: " + harness::backend_door_said(repoint) +
+           "; or remove it: " + harness::backend_door_said(harness::delete_backend_door(name));
 }
 
 std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
@@ -894,8 +900,9 @@ DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& c
     plan.error = backend->second.model_path.empty()
                      ? "backend '" + std::string{name} + "' (" +
                            std::string{harness::to_string(backend->second.type)} +
-                           ") has no model file to delete -- remove the backend itself with '" +
-                           delete_backend_command(std::string{name}) + "'"
+                           ") has no model file to delete -- " +
+                           harness::backend_door_with("remove the backend itself",
+                                                      harness::delete_backend_door(backend->first))
                      : "backend '" + std::string{name} + "' points at " +
                            harness::expand_env_and_home(backend->second.model_path) +
                            ", outside the model store -- Apogee deletes only what is in it";
@@ -2892,10 +2899,13 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
         });
         if (!ours) {
             const std::filesystem::path path = configured_path(found->second.model_path);
+            const std::vector<harness::SuggestedCommand> door =
+                harness::delete_backend_door(found->first);
             fail("backend '" + name + "' already exists" +
-                 (path.empty() ? std::string{} : " and points at " + path.string()) +
-                 " -- remove it with '" + delete_backend_command(name) +
-                 "' first, or register this one by hand under another name");
+                 (path.empty() ? std::string{} : " and points at " + path.string()) + " -- " +
+                 harness::backend_door_with("remove it", door) +
+                 (harness::renames_first(door) ? "; or" : " first, or") +
+                 " register this one by hand under another name");
         }
     }
 }
@@ -2936,9 +2946,8 @@ void register_backends(const std::filesystem::path& config_path,
                 configured_path(found->second.model_path) == entry.file.lexically_normal() &&
                 configured_path(found->second.mmproj_path) == entry.projector.lexically_normal();
             if (!same) {
-                fail("backend '" + entry.name +
-                     "' already exists and points elsewhere -- remove it with '" +
-                     delete_backend_command(entry.name) + "', then resume");
+                fail("backend '" + entry.name + "' already exists and points elsewhere -- " +
+                     remove_then_resume(found->first));
             }
             std::cout << "already registered: " << entry.name << "\n";
         } else {
@@ -3219,8 +3228,8 @@ void register_mlx_backend(const std::filesystem::path& config_path, const std::s
     if (const auto found = config.backends.find(name); found != config.backends.end()) {
         if (found->second.type != harness::BackendType::Mlx ||
             configured_path(found->second.model_path) != dir.lexically_normal()) {
-            fail("backend '" + name + "' already exists and points elsewhere -- remove it with '" +
-                 delete_backend_command(name) + "', then resume");
+            fail("backend '" + name + "' already exists and points elsewhere -- " +
+                 remove_then_resume(found->first));
         }
         std::cout << "already registered: " << name << "\n";
     } else {

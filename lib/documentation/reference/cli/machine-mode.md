@@ -1721,7 +1721,16 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   `--dev` -- so a host that runs a door through the binary strips the program
   word it finds, not `apogee` alone. Until CLI-M61 moves the rest onto the
   same renderer, a door completed by a name (`apogee models repair <name>`)
-  still begins `apogee` from every build, so a host meets both forms. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
+  still begins `apogee` from every build, so a host meets both forms. Since
+  CLI-M50, for a backend whose name is outside the add rule (`-x`, `a b`,
+  `qwen@home`: written by hand, or kept from a config older than 2026-10-25,
+  which every editor refuses), a door naming `config set-backend` or
+  `config delete-backend` chains `config rename-backend <name> <new name>`
+  before its command with ` && ` -- `apogee config rename-backend -- -gone
+  <new name> && apogee config set-backend <new name> --model-path <an
+  existing .gguf> to repoint it` -- `<new name>` a blank the person fills,
+  so a host splits a door's commands at ` && ` outside quotes, and still
+  reads one door before its ` to `. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
   rows say each set's installed version against its floor, and two rows join
   them, `video` (mlx-video, its commit against its pin) and `voice`
   (mlx-audio) -- read from the environment's `*.dist-info` records, nothing

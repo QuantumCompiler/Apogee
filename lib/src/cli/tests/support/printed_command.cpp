@@ -1,6 +1,11 @@
 #include "support/printed_command.h"
 
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
+#include <system_error>
+
+#include "platform/child_process.h"
 
 namespace apogee::testing {
 namespace {
@@ -45,6 +50,45 @@ std::vector<std::string> remedy_doors(const std::string& remedy) {
         start = end + 5;
     }
     return doors;
+}
+
+std::vector<std::string> door_steps(const std::string& door) {
+    std::vector<std::string> steps;
+    std::size_t start = 0;
+    for (std::size_t end = find_outside_quotes(door, " && ", start); end != std::string::npos;
+         end = find_outside_quotes(door, " && ", start)) {
+        steps.push_back(door.substr(start, end - start));
+        start = end + 4;
+    }
+    steps.push_back(door.substr(start));
+    return steps;
+}
+
+std::optional<std::vector<std::string>> sh_words(const std::string& command) {
+    std::error_code code;
+    if (!platform::supports_child_processes() || !std::filesystem::exists("/bin/sh", code) ||
+        !std::filesystem::exists("/usr/bin/env", code)) {
+        return std::nullopt;
+    }
+    platform::ChildCommand child;
+    child.program = "/usr/bin/env";
+    child.arguments = {"-i", "PATH=/usr/bin:/bin", "/bin/sh", "-c", "printf '%s\\0' " + command};
+    const platform::CapturedRun ran = platform::run_captured(
+        child, platform::CapturedLimits{.timeout = std::chrono::seconds{30}});
+    if (ran.status != 0) {
+        return std::vector<std::string>{};
+    }
+    std::vector<std::string> words;
+    std::string word;
+    for (const char c : ran.out) {
+        if (c == '\0') {
+            words.push_back(word);
+            word.clear();
+        } else {
+            word += c;
+        }
+    }
+    return words;
 }
 
 }  // namespace apogee::testing

@@ -1883,6 +1883,11 @@ TEST_CASE(
                                 wide.string() + " is a 3840-wide gemma4 model") !=
           std::string::npos);
     CHECK(readiness.remedy == "apogee config set-backend local --draft \"\"");
+    // On a backend the editors refuse, the remedy leads with the rename that
+    // reaches it, chained (CLI-M50).
+    CHECK(apogee::backends::probe_mlx_backend("-x", runtime.entry, runtime.host).remedy ==
+          "apogee config rename-backend -- -x <new name> && apogee config set-backend <new name> "
+          "--draft \"\"");
     const std::filesystem::path custom = models / "Gemma4-E4B-Custom" / "mlx" / "dddddddddddd";
     std::filesystem::create_directories(custom);
     std::ofstream{custom / "config.json"} << apogee::testing::kGemma4BaseE4BConfig;

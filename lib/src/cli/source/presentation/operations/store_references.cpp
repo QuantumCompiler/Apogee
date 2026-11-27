@@ -4,7 +4,9 @@
 #include <array>
 #include <sstream>
 #include <system_error>
+#include <utility>
 
+#include "contracts/backend_door.h"
 #include "contracts/config_edit.h"
 #include "contracts/suggested_command.h"
 #include "modelstore/hf_ref.h"
@@ -406,10 +408,10 @@ std::string clear_door(const harness::Config& config, const std::vector<StoreRef
     if (reference.backend.empty()) {
         return harness::printed_program() + " config set-default-video off";
     }
+    // On a name the editors refuse, said with the rename first (CLI-M50).
     const auto set_backend = [&reference](std::string_view flag, const std::string& value) {
-        return harness::render(
-            {.verbs = {"config", "set-backend"},
-             .parts = {harness::operand(reference.backend), harness::option(flag, value)}});
+        return harness::backend_door_said(
+            harness::set_backend_door(reference.backend, {harness::option(flag, value)}));
     };
     if (reference.field != "adapters") {
         return set_backend("--" + reference.field, "");

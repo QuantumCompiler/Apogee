@@ -426,3 +426,42 @@ TEST_CASE("a set is spelled as set-backend takes it back, an empty one as a quot
     CHECK(join_adapters({{.path = "/my loras/a.gguf", .scale = 0.5}, {.path = "/l/b.gguf"}}) ==
           "/my loras/a.gguf:0.5,/l/b.gguf");
 }
+
+TEST_CASE("each adapter refusal on a backend the editors refuse names the rename first",
+          "[backends][adapters][refusal][M50]") {
+    // CLI-M50: a load of `-x` refuses its adapters with doors naming
+    // `config set-backend` -- which, on a name outside 55f's rule, every
+    // editor refuses (57e) -- so each door leads with the rename.
+    Scratch scratch;
+    const fs::path lora = scratch.dir.path() / "style.gguf";
+    write(lora, "lora");
+    const std::string base = apogee::models::sha256_hex("base weights");
+    const AdapterConfig pinned{.path = lora.string(), .scale = 0.5, .base_sha256 = base};
+    const auto odd = [&scratch](bool directories = false) {
+        AdapterCheck check = scratch.check(directories);
+        check.backend = "-x";
+        return check;
+    };
+    const std::string rename =
+        "rename it first: apogee config rename-backend -- -x <new name>, then apogee config "
+        "set-backend <new name> --adapters ";
+    CHECK_THAT(adapter_refusal({pinned, {.path = "/gone/tone.gguf", .base_sha256 = base}}, odd()),
+               ContainsSubstring("the adapter /gone/tone.gguf is not there -- restore it, or to "
+                                 "take the adapters off, " +
+                                 rename + "\"\""));
+    CHECK_THAT(adapter_refusal({{.path = scratch.dir.path().string(), .base_sha256 = base}}, odd()),
+               ContainsSubstring("is not a file -- a llamacpp entry applies a GGUF LoRA file; to "
+                                 "name one, " +
+                                 rename + "<file.gguf>"));
+    CHECK_THAT(adapter_refusal({pinned}, odd(true)),
+               ContainsSubstring(") -- to name the directory its training wrote, " + rename +
+                                 "<directory>"));
+    CHECK_THAT(adapter_refusal({{.path = lora.string(), .scale = 0.5}}, odd()),
+               ContainsSubstring(" is pinned to no base -- to record the base each applies over, " +
+                                 rename + printed(lora.string() + ":0.5")));
+    write(scratch.base, "other base weights");
+    CHECK_THAT(adapter_refusal({pinned}, odd()),
+               ContainsSubstring("point model_path back at them, or, if these are the ones it was "
+                                 "made for, to pin it again, " +
+                                 rename + printed(lora.string() + ":0.5")));
+}
