@@ -165,7 +165,7 @@ Paths under `lib/src/cli/`.
 
 The fix takes the folded lookup the rename already makes at its door and makes it the only reading of the name. The operation resolves the stored key once, so every later step works on the file's own spelling, and the success line names the backend as the file wrote it. In the editor, the key match folds for a caller that passes a case variant, and the reference matches fold for references written in another case, whoever the caller. Because `models rename` reaches the same editor and sweep (`renames.cpp:485`, `:691`, `:510`, `:723`), its backend renames gain the fold with no change of their own. The agent GET keeps its loop, so a bundled agent and an entry overriding one are found as today, in any case.
 
-[CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) rewrites the YAML key loop (`:2823-2840`) to recognise a quoted key and refuse it by name. Whichever item lands second merges the folded match into the other's loop. No other item owns a decision this one takes.
+[CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27) rewrites the YAML key loop (`:2823-2840`) to recognise a quoted key and refuse it by name. Whichever item lands second merges the folded match into the other's loop. No other item owns a decision this one takes.
 
 **Reference.** `delete_backend_text` (`backend_fields.cpp:401-422`), which clears role pointers "case aside, as the roles resolve". `find_entry_line` (`config_edit.cpp:629-650`), the editor's own folded entry lookup. `find_bundled_agent` (`assets.cpp:21-29`), a folded compare inside a loop over named entries. 46a's goldens and their traps (`config_edit_test.cpp:1708-1809`), the shape the case-variant goldens copy.
 
@@ -221,7 +221,7 @@ Each fixture fails on today's binary unless marked as a guard. Every case runs h
 - **Commands echoing the typed spelling instead of the entry's.** `GET /v1/admin/mcp-servers/FOO` returns `"name":"FOO"`, and `config delete-backend FOO` says `removed backend 'FOO'`. The HTTP rename's `renamed` field likewise echoes the path as sent. An aside, not in this item.
 - **`config get` covering only some sections.** `config get agents.bar` and `config get symphonies.-x` answer `no such config key`, while `backends.*` works and folds. An aside.
 - **`config delete-backend -- " foo"` for an absent name** pointing at a rename of nothing (57e's recorded words, `missing_entry`, `config_edit.cpp:682-699`). An aside.
-- **Quoted keys in the YAML key lookup**: [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md).
+- **Quoted keys in the YAML key lookup**: [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27).
 - **The agent create's refusals and their HTTP mapping**, in the same `admin_agents.cpp`: [CLI-M52](a-refused-scaffold-writes-nothing.md).
 - **The Mac app passing `--` before a backend in its rename row**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed).
 
@@ -229,7 +229,7 @@ Each fixture fails on today's binary unless marked as a guard. Every case runs h
 
 - **Blocked by:** — · **Blocks:** —
 - **Relates to:**
-  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), which rewrites the same YAML key loop: whichever lands second merges;
+  - [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27), which rewrites the same YAML key loop: whichever lands second merges;
   - [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md), the symphony delete's lookup, found by the same sweep, and [CLI-M52](a-refused-scaffold-writes-nothing.md), which edits the agent create beside this item's GET;
   - [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) and [CLI-M57](a-saved-chat-names-only-its-own-files.md), the other made-thing-name items from the same investigation; M57 changes the logger's loader and path join in the same `session.cpp` as this item's sweep, with no gate either way;
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), whose rename door runs this verb on the stored key, which works today and keeps working;

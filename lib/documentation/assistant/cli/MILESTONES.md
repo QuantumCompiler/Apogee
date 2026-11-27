@@ -348,6 +348,104 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,317 tests, one skipped for want of `pdftotext`, the chat and execute help goldens among them with `-m`'s new type. `make format-check` is clean for every file touched.
 
+### 2026-11-27 — `yaml-editor-refuses-the-layouts-it-does-not-write` (maintenance item M44): the YAML editor refuses, by name, the layouts it does not write
+
+**Why.** CLI-M40's skeptic, then a sandboxed investigation and a skeptic's re-run (2026-11-22), found that the YAML line editor read only the layout it writes: section headers bare at column 0, entries at 2, fields at 4. On any other valid `config.yaml` it misread the file.
+- **A 4-space file** (Go's yaml.v3 form): 22 of 25 verbs refused it. Twelve said "not valid YAML", and ten said an entry `config get` lists was missing.
+- **A 1-space file**: `add-backend` landed the new entry as a field of another backend and printed success.
+- **A quoted or spaced header** (`"backends":`, `models :`) and **a `...` end marker**: each sent an edit where the loader never reads it.
+- **A UTF-16 file**: it took UTF-8 appended to it.
+
+The re-parse caught a broken file, but not one that parsed and read differently. Its words, `<edited config>: not valid YAML`, read as "your file is broken". YAML has been the legacy format since 28i, so the people hit are those whose older file was rewritten by another tool or edited by hand. CLI-M43 had already fixed the gate's three edits; this item covers every other editor.
+
+**What was built**
+
+- [x] **Every editor measures the section it edits** (`contracts/config_edit.cpp`, `require_layout`, called from `find_section`).
+  - Every mapping level of the section must sit 2 spaces in from its key, the layout the editor writes (`kLevelStep`, `kEntryIndent`, `kFieldIndent`).
+  - Values are never measured: a list's `- ` items at their key's own indent or deeper, and what sits under an item; a block scalar's text; a scalar on the lines below its key, or one carried on; a quoted scalar left open until its quote closes.
+  - Any other indent is refused, naming the level, the indent measured, the editor's indent and `apogee config migrate`: `the lines under backends: are indented 4 spaces, where the editor writes 2 -- it edits the 2-space layout Apogee writes, each level 2 spaces in from its key; re-indent the file so, or carry it to JSONC with 'apogee config migrate', whose every form the editor edits`.
+  - A section the edit does not look up is never measured. So on the investigation's mixed file, the backend verbs land while the models and tools verbs are refused.
+- [x] **Keys are read as YAML reads them** (`refuse_key_spelling`, built on `key_token_end` and `key_text`, which moved up from the rename walk).
+  - Every lookup refuses the key it looks for when that key is written quoted or spaced, naming the spelling and `config migrate`, and never writes a second key beside it.
+  - The lookups covered: a section header, an entry (`find_entry_line`, `rename_backend`'s key), a section scalar, `tools.search`'s block, `allowed_hosts`, a backend's field, `enabled`, `graph`, and a suite's `members`, role and fields.
+  - A name that no plain key can spell keeps its lookup's own words, which point to rename-backend. Rename reaches it however it is written, a spaced key now too.
+- [x] **The editor edits the document the loader reads** (`yaml_text_of`, `in_yaml_document`; used in every format wrapper, in `rename_backend` and in `section_entry_names`).
+  - A YAML config's first document is the one edited, with a UTF-8 byte-order mark kept before it.
+  - A new section goes before a final `...`, so `config get` reads it.
+  - A later document holding content is refused, naming its line and asking for a hand edit.
+- [x] **The encoding is checked** (`refuse_encoding`, in `in_format`, `rename_backend` and `format_config`). A UTF-16 or UTF-32 text (detected by YAML's own table) or a NUL byte is refused in either format, naming the encoding: `this config is UTF-16 text (little-endian), and the editor edits UTF-8 alone -- save it as UTF-8; nothing was changed`.
+- [x] **An edit whose result would not load says so** (`parse_edited_config`, in `config_edit.h`).
+  - It covers `edit_config_file`'s re-parse and `config set-backend`'s trial reads (`operations/backend_fields.cpp`, including `serve_refusal`).
+  - Each throws a `ConfigEditError`: `the edit was not applied because its result would not load, so nothing was changed: <the loader's detail>`. It never says `<edited config>: not valid YAML`.
+  - A config that was already broken keeps the loader's own words, named by its path.
+- [x] **Every surface follows.**
+  - The verbs: every `config` verb, `mcp create`, `enable` and `disable`, `agents create` and `delete`, `embed ingest`'s registration, `graph build`'s mark, and the prompt's `always`.
+  - The HTTP twins: a refused layout and a would-not-load edit each answer `400` `invalid_request_error` in the CLI's words. No new mapping was needed; the would-not-load case used to answer `config_error`.
+  - CLI-M43's read-back stays behind these refusals. Its words now name what still reaches it: a key written twice, and YAML's explicit `? key` form.
+- [x] **Docs.**
+  - CLAUDE.md's ⚠ One config mutation path: a new sub-rule (the YAML editor edits the layout it writes, and refuses another by name), CLI-M43's list revised, and the enforcement line.
+  - DEVELOPER.md: the `config_edit` row, the `complete_sources` row (completion's recorded default), the `config_edit_test`, `config_cmd_test` and `admin_config_test` rows, and the `cli.config_lifecycle` notes.
+  - [tools.md](../../reference/cli/tools.md)'s lines on the config verbs; `config_edit.h`'s header and the gate edits' comments.
+  - No file was added or moved, and SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - Another indent is refused, naming `config migrate`, never edited in place (57e's rule, and ADR 0006's).
+  - A quoted or spaced header or key that the verb looks for is refused by name, naming `config migrate`.
+  - New sections go before a final `...`. A file whose later document holds content is refused, naming the hand edit.
+  - Completion keeps offering the names the loader reads on a file whose layout the editors refuse; recorded in DEVELOPER.md's `complete_sources` row.
+  - `check` grows no row; its compat-read row already names `config migrate`.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **The layout is measured over the whole section an edit looks up, every mapping level at any depth.** So an add into a section whose entries' fields sit at 3 is refused, just as an edit of an existing entry is (acceptance criterion 1: any verb that edits that section). Values are never measured, and neither is a section the edit does not look up (acceptance criterion 2).
+  - **`rename-backend` finds a plain name only when it is written bare**, as every other editor does. A quoted or spaced `"m":` is now refused, where rename used to read a quoted one. A name that no plain key can spell is still found however it is written.
+  - **A UTF-8 byte-order mark is kept, and the text after it is edited.** The item did not name this case. Before, the header on the first line read as absent behind the mark, and an add wrote a second section that the loader never reads.
+  - **`config format` refuses a non-UTF-8 file too.** It used to append a byte to a UTF-16 file's last line. It tidies every other layout as before.
+  - **The would-not-load words are one wording** wherever an edit's result is read before it lands (`parse_edited_config`).
+  - **CLI-M43's read-back words name what still reaches it.** M43's cases for the quoted, spaced and later-document shapes now assert this item's refusals. The read-back itself is held by the two shapes that still reach it.
+  - **Document markers:** a `---` before any node is the first document's own start (Psych's dump). A later `---`, or any `...`, ends the first document. After the end, blank lines, comments, and markers followed by a comment are allowed.
+  - **The encoding is read by YAML's own detection table**: a byte-order mark or the zero bytes of the first character, UTF-32 checked before UTF-16. Any other NUL byte is named with its offset.
+
+**Verified.**
+- **Test-first.**
+  - The sweep, the document, encoding and file-layer cases were written first and seen failing before their code. The twin, command-tree and e2e cases came after the code.
+  - Then HEAD's `config_edit.cpp`, `config_edit.h` and `backend_fields.cpp` were put back alone, with a passthrough `parse_edited_config` so the tests compiled. Nine cases failed, 578 of the 1,708 assertions under `[CLI-M43]` and `[CLI-M44]`, and `cli.config_lifecycle` failed at the quoted header, before its M44 part.
+  - With this item's files restored (`shasum` equal), all of them passed. Only the compact-list guard passed on HEAD as well, which is expected: it pins today's behaviour.
+  - The review's three findings were written as a failing case first, which failed on the pre-review build, then fixed.
+- **The cases** (`[CLI-M44]`, 8 test cases):
+  - **`config_edit_test`:**
+    - The sweep: thirty editors over ten shapes. Each lands its exact effect on YAML's reading with no key written twice, or is refused naming the indent or key and `config migrate`, never `not valid YAML`, `not found` or `is not in`. Refusals happen exactly where the shape writes a looked-up section or key another way.
+    - The words pinned, including a suite's members one level in, and a name that no plain key can spell reached by rename.
+    - Values never measured: a compact list, a block scalar, a list of mappings, a scalar below its key, quoted scalars carried on, and a tab inside a block scalar.
+    - Documents: a section added before `...` (with CRLF, Psych's start and a trailing comment), and a later document refused by five verbs.
+    - Encoding: every exported transform on the legacy template as UTF-16 (both byte orders, and without its mark), as UTF-32, and with a NUL byte, each refused naming the encoding; a UTF-8 mark kept.
+    - The file layer: a 4-space edit refused with the bytes kept, and the would-not-load words for a typed failure and a syntax failure.
+  - **`[CLI-M43]`'s read-back** now holds a key written twice and the `? key` form.
+  - **`config_cmd_test`:** the deny that would not land is now a key written twice; a quoted header is refused by its spelling.
+  - **`admin_config_test`:** on a 4-space file, the host `PUT` and `DELETE` and a backend `DELETE` each answer `400` `invalid_request_error` in the transform's words. A `PATCH` whose result would not load answers `400` in the same words.
+  - **`cli.config_lifecycle`:** a 4-space file's `add-allowed-host` is refused, naming the indent and migrate, with the bytes kept; after `config migrate`, the same add lands.
+- **On the built binary** (a scratch `APOGEE_HOME` and `HOME`, `env -i`, stdin `/dev/null`), the item's reproductions:
+  - 4 spaces: `set-default m` and `set-backend m --model q` each exit 1 in the layout words, the bytes unchanged.
+  - 1 space: `add-backend z` exits 1 naming `1 space`.
+  - A quoted header: `add-backend z` exits 1 naming `'"backends":'`.
+  - `...`: `set ui.markdown false` lands before the marker, and `config get ui.markdown` prints `false`.
+  - UTF-16: `set` and `add-allowed-host` exit 1 naming UTF-16, the bytes unchanged.
+  - `set-backend m --max-tokens many` says the edit was not applied and why.
+- **The review** (a fresh reviewer over the working tree against HEAD, which built HEAD's editor beside this one and diffed 30 fixtures × 21 verbs; only the intended bytes changed, and JSONC was identical).
+  - Its important finding: a tab inside a block scalar's text stopped the measuring for the rest of the section. The tab check now runs after the value skips.
+  - Its minor findings, both false refusals against HEAD: a scalar written on the line below its key, and a quoted scalar carried on over lines. Both are now values.
+  - Its declined items are listed under **Not done**.
+- **No warning:** MinGW g++ 16 (the windows-x64 tree's flags) and Homebrew clang 22 (the macos-arm64 tree's), `-fsyntax-only -Wall -Wextra`, over the two changed sources and three changed tests. clang-format 22 leaves every changed file as it is.
+- **The gate**, `lib/scripts/cicd.sh --test` on the final code, with nothing else running: exit 0.
+  - **4,623 ctest cases**, 100% passed: the run's 4,615 before this item plus its eight new cases (the `[CLI-M43]` read-back case, the command-tree case and the e2e script were revised in place). Three were skipped, as before: the `pdftotext` case, the extended-attribute write guard's, and CLI-M37's `[powershell]` case, with no pwsh here.
+  - The suite ran in 677 s, with no compiler warning in the log.
+  - The macOS app built and passed its 1,400 cases (the result bundle's `totalTestCount`), none failed or skipped.
+
+**Not done:**
+- **CI has not run this**, so the Linux and Windows rows wait on the user's push. Neither `make pr-ci` nor the whole-tree `make lint` was run, nor GCC 13 in the Linux container.
+- **Shapes outside this item:** a section header written in YAML's explicit form (`? backends`) still takes an add it never reads, as it did before. A tagged key (`!!str backends:`) is also out of scope.
+- **`config migrate`'s own gaps**, which these refusals name as the way out: CLI-M47.
+- **The Mac app's Settings and the design prototype** call the same twins and CLI verbs, so they take the fix with nothing of their own.
+
 ## Milestone C — The harness core
 
 **Goal.** The interface layer everything else is written against: one provider interface, one canonical message IR, one router. After this, "add a backend" means implementing an interface, and no surface, loop, or session file learns that a fifth vendor exists. Streaming, cancellation, multimodal content, and tool structures have to be in the interface on day one — adding any of them later means touching every implementation and every caller at once.

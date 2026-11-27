@@ -187,7 +187,7 @@ Each case fails on today's binary unless marked as a control (measured 2026-11-2
 
 ## Out of scope
 
-- **The line editor on a UTF-16 config**, which prints success and appends UTF-8 bytes it never reads back. That is the editor's, and is folded into [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) as one more layout refused by name. CLI-M43's read-back covers the three gate edits.
+- **The line editor on a UTF-16 config**, which prints success and appends UTF-8 bytes it never reads back. That is the editor's, and is folded into [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27) as one more layout refused by name. CLI-M43's read-back covers the three gate edits.
 - **A list's column taken from its first item's value line** when the item sits on the line after its dash (`:469`), so a closing comment at the dash's column leaves the list. Nothing is lost, so it is a note only.
 - **Counting the installs still on `config.yaml`.**
 
@@ -195,6 +195,6 @@ Each case fails on today's binary unless marked as a control (measured 2026-11-2
 
 - **Blocked by:** — · **Blocks:** —
 - **Relates to:**
-  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) and [CLI-M43](../../../assistant/cli/MILESTONES.md#2026-11-27--gate-edits-land-or-say-they-did-not-maintenance-item-m43-the-gates-config-edits-land-or-say-they-did-not) (shipped 2026-11-27), whose refusals name `migrate` as the way out;
+  - [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) and [CLI-M43](../../../assistant/cli/MILESTONES.md#2026-11-27--gate-edits-land-or-say-they-did-not-maintenance-item-m43-the-gates-config-edits-land-or-say-they-did-not) (both shipped 2026-11-27), whose refusals name `migrate` as the way out;
   - 28i (2fbe6749), `config migrate`'s record;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which plans `migrate` from a paired device.

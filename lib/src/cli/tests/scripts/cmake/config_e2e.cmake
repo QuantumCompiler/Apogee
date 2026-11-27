@@ -974,7 +974,7 @@ endif()
 # a website in it is revoked with exactly its line gone, and an add then a
 # delete gives back the bytes. A deny under a quoted `permissions` header,
 # which the loader would not read, is refused naming `config migrate`, and
-# the file is left as it was.
+# the file is left as it was -- since CLI-M44 by the header's own spelling.
 set(PSYCH_FILE "${APOGEE_WORK_DIR}/psych/config.yaml")
 set(PSYCH_KEPT "---\nbackends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\ntools:\n  allowed_hosts:\n  - docs.python.org\n")
 file(WRITE "${PSYCH_FILE}" "${PSYCH_KEPT}  - example.com\n")
@@ -1000,8 +1000,8 @@ set(QUOTED_FILE "${APOGEE_WORK_DIR}/quoted/config.yaml")
 set(QUOTED_TEXT "backends:\n  m:\n    type: mock\n    model: m\n\"permissions\":\n  run_command: allow\n")
 file(WRITE "${QUOTED_FILE}" "${QUOTED_TEXT}")
 apogee_run(1 --config "${QUOTED_FILE}" config set-permission run_command deny)
-if(NOT APOGEE_ERR MATCHES "would not take effect" OR NOT APOGEE_ERR MATCHES "apogee config migrate"
-   OR APOGEE_OUT MATCHES "= deny")
+if(NOT APOGEE_ERR MATCHES "the key permissions is written" OR
+   NOT APOGEE_ERR MATCHES "apogee config migrate" OR APOGEE_OUT MATCHES "= deny")
     message(FATAL_ERROR "a deny under a quoted header was not refused by name:\n"
                         "stdout: ${APOGEE_OUT}\nstderr: ${APOGEE_ERR}")
 endif()
@@ -1009,6 +1009,31 @@ file(READ "${QUOTED_FILE}" QUOTED_AFTER)
 if(NOT QUOTED_AFTER STREQUAL QUOTED_TEXT)
     message(FATAL_ERROR "a refused set-permission changed the file:\n${QUOTED_AFTER}")
 endif()
+
+# --- CLI-M44: the YAML editor refuses, by name, the layouts it does not write
+# A 4-space YAML config, the form Go's yaml.v3 writes: an edit is refused
+# naming the indent and `config migrate`, never "not valid YAML", the bytes
+# as they were. Migrated, the same edit lands.
+set(FOUR_FILE "${APOGEE_WORK_DIR}/four/config.yaml")
+set(FOUR_TEXT "backends:\n    m:\n        type: mock\n        model: m\nmodels:\n    default: m\ntools:\n    allowed_hosts:\n        - docs.python.org\n")
+file(WRITE "${FOUR_FILE}" "${FOUR_TEXT}")
+apogee_run(1 --config "${FOUR_FILE}" config add-allowed-host pypi.org)
+if(NOT APOGEE_ERR MATCHES "indented 4 spaces, where the editor writes 2" OR
+   NOT APOGEE_ERR MATCHES "apogee config migrate" OR APOGEE_ERR MATCHES "not valid YAML" OR
+   APOGEE_OUT MATCHES "includes")
+    message(FATAL_ERROR "add-allowed-host on a 4-space file was not refused by its layout:\n"
+                        "stdout: ${APOGEE_OUT}\nstderr: ${APOGEE_ERR}")
+endif()
+file(READ "${FOUR_FILE}" FOUR_AFTER)
+if(NOT FOUR_AFTER STREQUAL FOUR_TEXT)
+    message(FATAL_ERROR "a refused add-allowed-host changed the file:\n${FOUR_AFTER}")
+endif()
+apogee_run(0 --config "${FOUR_FILE}" config migrate)
+set(FOUR_JSON "${APOGEE_WORK_DIR}/four/config.json")
+apogee_run(0 --config "${FOUR_JSON}" config add-allowed-host pypi.org)
+apogee_run(0 --config "${FOUR_JSON}" config get tools.allowed_hosts)
+string(REPLACE "\r\n" "\n" FOUR_LISTED "${APOGEE_OUT}")
+expect_equal("${FOUR_LISTED}" "docs.python.org\npypi.org" "the add once the file is migrated")
 
 # On JSONC: a multi-line prompt reads back with its newlines, and a
 # number-looking name, default and model stay text -- check names no

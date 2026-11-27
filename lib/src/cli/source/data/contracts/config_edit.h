@@ -45,6 +45,23 @@
 ///
 /// All three live in edit_config_file(), which is the only thing here that
 /// writes.
+///
+/// # The layouts the line editor edits (CLI-M44)
+///
+/// The transforms are defined over YAML text in the layout they write: every
+/// mapping level 2 spaces in from its key (entries under a section at 2, their
+/// fields at 4), a list's `- ` items at their key's own indent or deeper, a key
+/// written bare (`key:`). A section an edit looks up in any other indent, and
+/// a key it looks for written quoted or spaced (`"backends":`, `models :`), is
+/// refused by name with `apogee config migrate` named -- the edit never reads
+/// it as absent, nor writes a second key beside it the loader never reads. A
+/// section the edit does not look up may be in any layout. A YAML config's
+/// first document is the one edited: a new section goes before a final `...`,
+/// and a later document holding content is refused, naming the hand edit. A
+/// text that is not UTF-8 (a UTF-16 or UTF-32 mark or pattern, a NUL byte) is
+/// refused in either format, naming its encoding; a UTF-8 byte-order mark is
+/// kept. A JSONC config reaches the transforms through the bridge, which
+/// writes their layout, so its edits are as before.
 namespace apogee::harness {
 
 /// Raised when an edit cannot be applied: entry missing, name collision,
@@ -426,12 +443,13 @@ struct SettableScalar {
 /// and underscores. Anything else is refused before the file is touched.
 ///
 /// The edit reads its effect back (CLI-M43): when the loader's reading of
-/// the result (`parse_config`) gives the tool another level -- a quoted or
-/// spaced `permissions` header the line editor appends beside, a second
-/// document after `---` or `...` -- or, where the level already read so,
-/// would not read the line the editor writes (the edit tried at another
-/// level), it throws ConfigEditError saying the change would not take effect
-/// and naming `apogee config migrate`, nothing changed. A result that does
+/// the result (`parse_config`) gives the tool another level -- a key written
+/// twice, of which the loader reads the last -- or, where the level already
+/// read so, would not read the line the editor writes (the edit tried at
+/// another level), it throws ConfigEditError saying the change would not take
+/// effect and naming `apogee config migrate`, nothing changed. A quoted or
+/// spaced header or key and a later document are refused by name before it
+/// (CLI-M44), a `...` taking the new section before it. A result that does
 /// not parse is left to `edit_config_file`'s re-parse.
 [[nodiscard]] std::string set_permission(std::string_view content, std::string_view tool,
                                          std::string_view level);
@@ -451,11 +469,12 @@ struct SettableScalar {
 /// refused by name (write each `- host` on one line), never split from it.
 ///
 /// The edit reads its effect back (CLI-M43): when the loader's reading of
-/// the result does not list the host -- a quoted or spaced key or section
-/// the line editor writes a second one beside, a second document after
-/// `---` or `...` -- or, where the text changed, does not read one entry
-/// more, it throws ConfigEditError saying the change would not take effect
-/// and naming `apogee config migrate`, nothing changed.
+/// the result does not list the host -- a key in YAML's explicit `? key`
+/// form, which the line editor writes a second one beside -- or, where the
+/// text changed, does not read one entry more, it throws ConfigEditError
+/// saying the change would not take effect and naming `apogee config
+/// migrate`, nothing changed. A quoted or spaced key or section and a later
+/// document are refused by name before it (CLI-M44).
 [[nodiscard]] std::string add_allowed_host(std::string_view content, std::string_view host);
 
 /// Removes from `tools.allowed_hosts` every entry `host` names
@@ -532,6 +551,14 @@ inline constexpr std::chrono::milliseconds kConfigLockWait{10000};
 [[nodiscard]] platform::FileLock lock_config_file(const std::filesystem::path& path,
                                                   std::chrono::milliseconds wait = kConfigLockWait);
 
+/// `text`, an edit's result, as the loader reads it -- or, when the loader
+/// refuses it, a ConfigEditError saying the edit was not applied because its
+/// result would not load, so nothing was changed, then the loader's own
+/// detail (CLI-M44). The detail names no single cause: the loader refuses YAML
+/// it cannot parse and a typed value alike. Never the bare "<edited config>:
+/// not valid YAML", which read as "your file is broken" on a file that loads.
+[[nodiscard]] Config parse_edited_config(std::string_view text);
+
 /// Reads `path`, applies `transform`, re-parses the result, and writes it
 /// atomically, holding the config's lock (`lock_config_file`) from the read
 /// to the rename.
@@ -542,7 +569,9 @@ inline constexpr std::chrono::milliseconds kConfigLockWait{10000};
 /// write a config file.
 ///
 /// The file is also parsed BEFORE the transform, so "your config is already
-/// broken" and "this edit would break it" are different messages.
+/// broken" and "this edit would break it" are different messages: the first
+/// a ConfigError naming the file, the second `parse_edited_config`'s
+/// ConfigEditError (CLI-M44), answered as every refused edit is.
 ///
 /// The lock is what makes two edits at once both land (55f): without it, each
 /// read the file before the other wrote, and the second rename dropped the
@@ -564,7 +593,7 @@ void edit_config_file(const std::filesystem::path& path, Transform&& transform,
 
     // Validate before writing, never after. A rejected edit must leave the
     // user's file exactly as it was.
-    (void)parse_config(edited, "<edited config>");
+    (void)parse_edited_config(edited);
 
     write_file_atomically(target, edited);
 }

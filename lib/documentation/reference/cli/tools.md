@@ -182,16 +182,24 @@ In an older `config.yaml`, the host verbs read the list nested under its key
 or compact at the key's own indent (`allowed_hosts:` then `- host` lines
 beside it, as PyYAML and Ruby write it), and refuse by name an item written
 over more than one line (`write each - host on one line`).
+Every `config` verb edits an older `config.yaml` in the layout Apogee wrote
+(CLI-M44): each level 2 spaces in from its key, a key written bare. A section
+the verb edits in another indent -- a 4-space file, as Go's yaml.v3 writes it,
+or a 1-space one -- or a key it looks for written quoted or spaced
+(`"backends":`, `models :`) is refused, the file unchanged, naming the indent or
+the key and `apogee config migrate`, after which every verb lands. A new
+section goes before a final `...`; a file whose second document holds content,
+or one saved as UTF-16, is refused naming the hand edit or the encoding. An
+edit whose result would not load says it was not applied and why.
 `add-allowed-host`, `delete-allowed-host` and `set-permission` print a success
 only when Apogee reads the change back from the edited file (CLI-M43): where
-the file writes the list or the level where the editor cannot see it -- a
-quoted or spaced key, a key written twice, a second document after `---` or
-`...` -- the verb exits 1 saying the change would not take effect, the file
-unchanged, and names `apogee config migrate`, after which every verb lands. It
-writes no second copy beside the one Apogee reads, even when the level or the
-host already reads as asked. A host still named by an entry written through a
-variable (`${MY_HOST}`), which Apogee expands, is named for you to edit by
-hand.
+the file writes the list or the level where the editor cannot see it -- a key
+written twice, or in YAML's explicit `? key` form -- the verb exits 1 saying the
+change would not take effect, the file unchanged, and names `apogee config
+migrate`. It writes no second copy beside the one Apogee reads, even when the
+level or the host already reads as asked. A host still named by an entry
+written through a variable (`${MY_HOST}`), which Apogee expands, is named for
+you to edit by hand.
 
 **The question shows what will run, whole and as it is** (57p). The prompt
 for `run_command` shows the whole command, however long, and the folder it

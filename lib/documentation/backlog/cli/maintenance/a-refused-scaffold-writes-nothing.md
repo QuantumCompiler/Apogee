@@ -128,7 +128,7 @@ All measured 2026-11-26 by an investigator, two skeptics and a critic, each in i
     - **The full-screen shell** has no create action: its agents and MCP rows act only with delete, test, enable and disable (`tui_agents.cpp:127-143`, `:201-233`).
     - **What a refusal leaves**: 2 files for an agent, 3 for an MCP server. No reader shows them, and only `rm` cleans them.
     - **Measured to leave files**: a leading `-`; a `.` or `:` mapped to `-`; the null words; a fold collision; a missing config; a 232-byte agent name (229 to 236 bytes by the arithmetic in Evidence 8); the `--force` retry.
-    - **By reading**: a broken config (the unit test), an existing entry whose files are gone, a lock timeout, and [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md)'s layout refusals once it ships.
+    - **By reading**: a broken config (the unit test), an existing entry whose files are gone, a lock timeout, and [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write)'s layout refusals (shipped 2026-11-27).
     - **Who reads the words**: no client parses the words that change (a grep of `lib/src/darwin/source`, `lib/design/prototype` and `lib/src/mod`). The Mac app's Xcode setting holds the register-only words in a recorded refusal (`XcodeSettingsTests.swift:272-274`, `xcode-mcp-create-taken.err`: `apogee mcp: updating config: MCP server 'xcode' already exists; pass --force to replace it`). That path is not changed here.
     - **Who is hit next**: CLI-59d's command door runs `agents create` and `mcp create` from a paired device, since neither is on its refusal list (by reading its Open questions). Today's leftovers would land on the server's disk.
 14. **What already works**, and must stay:
@@ -189,7 +189,7 @@ One set of words changes for a plain duplicate: a second `agents create foo` bes
 
 It consumes decisions from three items:
 - **[CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md)**: the 200-byte cap, and the dry-run-first shape.
-- **[CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md)**: its layout refusals come out of `append_agent` and `append_mcp_server`, so they reach the person through this dry run before any file.
+- **[CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write)** (shipped 2026-11-27): its layout refusals come out of `append_agent` and `append_mcp_server`, so they reach the person through this dry run before any file.
 - **[CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md) and CLI-M46**: their collection refusals for `agents create --collection` and the POST's `collection` sit in `agents_cmd.cpp` and `admin_agents.cpp`, ahead of `create_agent`, so they write nothing as placed. Whichever of them lands after this item keeps them there, or inside the dry run, never after the first write.
 
 **Reference.**
@@ -270,7 +270,7 @@ Every case runs in a throwaway home on mock backends. No model is called.
 - **Relates to:**
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), the same dry-run-first cure for collections, whose collection refusal at `agents create` must land before this item's first write, and whose 200-byte cap this item takes;
   - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), whose read rule joins `agents create --collection` and the POST's `collection`, ahead of `create_agent`;
-  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), whose layout refusals come out of `append_agent` and leave a scaffold until this item ships;
+  - [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27), whose layout refusals come out of `append_agent` and leave a scaffold until this item ships;
   - [CLI-M42](../../../assistant/cli/MILESTONES.md#2026-11-27--stubs-read-the-words-as-the-shell-does-maintenance-item-m42-a-quoted-word-completes-and-a-name-lands-as-one-word-in-every-shell): independent;
   - the siblings from the same probes: [CLI-M48](a-suggested-command-runs-as-printed.md), [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) and [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md);
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes listed this aside; [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), which keeps the house-voice lines; [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name), the app's create forms;

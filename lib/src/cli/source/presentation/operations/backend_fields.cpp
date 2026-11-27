@@ -44,7 +44,7 @@ namespace {
         for (const BackendFieldEdit& edit : edits) {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
-        const harness::Config edited = harness::parse_config(trial, "<edited config>");
+        const harness::Config edited = harness::parse_edited_config(trial);
         const harness::BackendConfig* entry = edited.find_backend(name);
         if (entry == nullptr) {
             return "no backend named '" + std::string{name} + "'";
@@ -99,7 +99,7 @@ namespace {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
         const std::string command = set_backend_command(name, edits);
-        const harness::Config edited = harness::parse_config(trial, "<edited config>");
+        const harness::Config edited = harness::parse_edited_config(trial);
         const harness::BackendConfig* entry = edited.find_backend(name);
         if (entry == nullptr || entry->adapters.empty()) {
             return {};
@@ -219,7 +219,7 @@ namespace {
         for (const BackendFieldEdit& edit : edits) {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
-        const harness::Config edited = harness::parse_config(trial, "<edited config>");
+        const harness::Config edited = harness::parse_edited_config(trial);
         const harness::BackendConfig* entry = edited.find_backend(name);
         if (entry == nullptr || entry->draft.empty()) {
             return {};
@@ -258,7 +258,7 @@ namespace {
                 trial = harness::set_backend_field(trial, name, edit.field, edit.value);
             }
         }
-        const harness::Config edited = harness::parse_config(trial, "<edited config>");
+        const harness::Config edited = harness::parse_edited_config(trial);
         const harness::BackendConfig* entry = edited.find_backend(name);
         return entry == nullptr ? std::string{} : kind_refusal(name, *entry);
     } catch (const std::exception&) {
@@ -276,7 +276,7 @@ namespace {
 /// refuses throws its refusal, as the write's own re-parse would.
 [[nodiscard]] std::string serve_refusal(std::string_view text, std::string_view name,
                                         const MeteredProbe& metered) {
-    const harness::Config edited = harness::parse_config(text, "<edited config>");
+    const harness::Config edited = harness::parse_edited_config(text);
     const harness::BackendConfig* entry = edited.find_backend(name);
     if (entry == nullptr || entry->mcp_serve.empty()) {
         return {};

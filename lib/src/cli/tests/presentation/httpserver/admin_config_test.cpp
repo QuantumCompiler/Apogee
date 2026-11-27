@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -653,6 +654,71 @@ TEST_CASE("the gate twins land on a compact list, and a deny that would not land
     CHECK(denied.status == 400);
     CHECK(parsed(denied)["error"]["message"] == words);
     CHECK(Fixture::bytes(fixture.http_config) == quoted);
+}
+
+TEST_CASE("the twins refuse a YAML layout the editor does not write, a 400 in the CLI's words",
+          "[httpserver][admin][CLI-M44]") {
+    // On a 4-space file the twin answered `config_error` "not valid YAML" to
+    // a PUT, and the GET listed what a DELETE called missing.
+    using apogee::httpserver::admin_delete_allowed_host;
+    using apogee::httpserver::admin_put_allowed_host;
+    const std::string four =
+        "backends:\n    m:\n        type: mock\n        model: m\nmodels:\n    default: m\n"
+        "tools:\n    allowed_hosts:\n        - docs.python.org\n";
+    Fixture fixture;
+    for (const std::filesystem::path& path : {fixture.cli_config, fixture.http_config}) {
+        std::ofstream{path, std::ios::binary | std::ios::trunc} << four;
+    }
+    fixture.startup = apogee::harness::load_config(fixture.http_config);
+    const auto words = [&](const std::function<std::string()>& edit) {
+        try {
+            (void)edit();
+        } catch (const apogee::harness::ConfigEditError& e) {
+            return std::string{e.what()};
+        }
+        return std::string{};
+    };
+    const std::string put_words =
+        words([&] { return apogee::harness::add_allowed_host(four, "pypi.org"); });
+    REQUIRE(put_words.find("indented 4 spaces") != std::string::npos);
+    REQUIRE(put_words.find("apogee config migrate") != std::string::npos);
+    const HttpResponse put = admin_put_allowed_host(fixture.context(), "pypi.org");
+    CHECK(put.status == 400);
+    CHECK(parsed(put)["error"]["type"] == "invalid_request_error");
+    CHECK(parsed(put)["error"]["message"] == put_words);
+    // What the GET lists, a DELETE refuses by the layout -- never a 404.
+    const HttpResponse host = admin_delete_allowed_host(fixture.context(), "docs.python.org");
+    CHECK(host.status == 400);
+    CHECK(parsed(host)["error"]["message"] == put_words);
+    const HttpResponse backend = admin_delete_backend(fixture.context(), "m");
+    CHECK(backend.status == 400);
+    CHECK(parsed(backend)["error"]["type"] == "invalid_request_error");
+    CHECK(parsed(backend)["error"]["message"] ==
+          words([&] { return apogee::harness::delete_backend(four, "m"); }));
+    CHECK(Fixture::bytes(fixture.http_config) == four);
+
+    // An edit whose result would not load: a 400 in the same words the CLI
+    // prints, never `config_error`.
+    const std::string base = "backends:\n  m:\n    type: mock\n    model: m\n";
+    std::ofstream{fixture.http_config, std::ios::binary | std::ios::trunc} << base;
+    HttpRequest edit;
+    edit.method = "PATCH";
+    edit.body = R"({"max_tokens":"many"})";
+    const HttpResponse typed = admin_set_backend_fields(fixture.context(), "m", edit);
+    CHECK(typed.status == 400);
+    CHECK(parsed(typed)["error"]["type"] == "invalid_request_error");
+    const std::string said = parsed(typed)["error"]["message"];
+    CHECK(
+        said.starts_with("the edit was not applied because its result would not load, so "
+                         "nothing was changed: "));
+    CHECK(said == words([&] {
+              return std::string{
+                  apogee::harness::parse_edited_config(
+                      apogee::harness::set_backend_field(base, "m", "max_tokens", "many"))
+                      .backend_names()
+                      .front()};
+          }));
+    CHECK(Fixture::bytes(fixture.http_config) == base);
 }
 
 TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never list env values",

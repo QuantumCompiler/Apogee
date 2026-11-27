@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "contracts/config_yaml.h"
 #include "contracts/layout.h"
 #include "support/env_guard.h"
 #include "support/temp_mode_watch.h"
@@ -1447,50 +1449,68 @@ TEST_CASE("the gate's three edits read their effect back, and refuse one that wo
           "[config_edit][hosts][permissions][CLI-M43]") {
     using apogee::harness::add_allowed_host;
     using apogee::harness::remove_allowed_host;
-    // Each printed success before: a second section appended beside a
-    // quoted or spaced header, a section after a `...` the loader never
-    // reads, a second key beside a quoted one.
-    for (const std::string& text : {std::string{"\"permissions\":\n  run_command: allow\n"},
-                                    std::string{"permissions :\n  run_command: allow\n"},
-                                    std::string{"backends:\n  m:\n    type: mock\n...\n"}}) {
-        INFO(text);
-        require_not_landed([&] { return set_permission(text, "run_command", "deny"); });
-    }
-    for (const std::string& text : {std::string{"tools:\n  \"allowed_hosts\": [docs.python.org]\n"},
-                                    std::string{"tools:\n  allowed_hosts : [docs.python.org]\n"},
-                                    std::string{"\"tools\":\n  allowed_hosts: [docs.python.org]\n"},
-                                    std::string{"backends:\n  m:\n    type: mock\n...\n"}}) {
-        INFO(text);
-        require_not_landed([&] { return add_allowed_host(text, "pypi.org"); });
-    }
+    // Each printed success before. Since CLI-M44 the line editor refuses a
+    // quoted or spaced key and a later document by name first, and adds a
+    // section before a `...`, so the read-back is the defense behind those
+    // refusals: a key written twice, of which the loader reads the last, and
+    // a key written in YAML's explicit form (`? key`), which the line editor
+    // does not see and the loader reads first.
+    require_not_landed([] {
+        return set_permission("permissions:\n  run_command: allow\n  run_command: ask\n",
+                              "run_command", "deny");
+    });
+    require_not_landed([] {
+        return add_allowed_host("tools:\n  ? allowed_hosts\n  : [docs.python.org]\n", "pypi.org");
+    });
     // A remove the line editor finds nothing to do for, while the loader
     // still lists the host: not "not in tools.allowed_hosts".
+    require_not_landed([] {
+        return remove_allowed_host("tools:\n  ? allowed_hosts\n  : [docs.python.org]\n",
+                                   "docs.python.org");
+    });
+    // Where the effect already reads right, an edit the loader would not
+    // read is still never written: no dead key beside the one it reads (57e's
+    // "never shadowed"), which a later hand edit would be lost in.
+    require_not_landed([] {
+        return set_permission("permissions:\n  run_command: allow\n  run_command: deny\n",
+                              "run_command", "deny");
+    });
+    require_not_landed(
+        [] { return add_allowed_host("tools:\n  ? allowed_hosts\n  : [pypi.org]\n", "pypi.org"); });
+    // The shapes the read-back caught first, each refused or landed earlier
+    // now (CLI-M44): a quoted or spaced header or key by name, a later
+    // document naming the hand edit, a `...` with the section before it.
+    for (const std::string& text : {std::string{"\"permissions\":\n  run_command: allow\n"},
+                                    std::string{"permissions :\n  run_command: allow\n"}}) {
+        INFO(text);
+        CHECK_THROWS_WITH(set_permission(text, "run_command", "deny"),
+                          ContainsSubstring("the key permissions is written") &&
+                              ContainsSubstring("'apogee config migrate'"));
+    }
     for (const std::string& text : {std::string{"tools:\n  \"allowed_hosts\": [docs.python.org]\n"},
                                     std::string{"tools:\n  allowed_hosts : [docs.python.org]\n"}}) {
         INFO(text);
-        require_not_landed([&] { return remove_allowed_host(text, "docs.python.org"); });
+        CHECK_THROWS_WITH(add_allowed_host(text, "pypi.org"),
+                          ContainsSubstring("the key tools.allowed_hosts is written"));
+        CHECK_THROWS_WITH(remove_allowed_host(text, "docs.python.org"),
+                          ContainsSubstring("the key tools.allowed_hosts is written"));
     }
-    // Where the effect already reads right, an edit the loader would not
-    // read is still never written: no dead section or key beside the one it
-    // reads (57e's "never shadowed"), which a later hand edit would be lost in.
-    require_not_landed([] {
-        return set_permission("\"permissions\":\n  write_file: allow\n", "run_command", "ask");
-    });
-    require_not_landed([] {
-        return set_permission("\"permissions\":\n  run_command: allow\n", "run_command", "allow");
-    });
-    require_not_landed([] {
-        return set_permission(
-            "backends:\n  m:\n    type: mock\n---\npermissions:\n  run_command: allow\n",
-            "run_command", "ask");
-    });
-    require_not_landed(
-        [] { return add_allowed_host("tools:\n  \"allowed_hosts\": [pypi.org]\n", "pypi.org"); });
-    require_not_landed([] {
-        return remove_allowed_host(
+    CHECK_THROWS_WITH(
+        add_allowed_host("\"tools\":\n  allowed_hosts: [docs.python.org]\n", "pypi.org"),
+        ContainsSubstring("the key tools is written"));
+    CHECK_THROWS_WITH(
+        set_permission("backends:\n  m:\n    type: mock\n---\npermissions:\n  run_command: allow\n",
+                       "run_command", "ask"),
+        ContainsSubstring("holds a second YAML document"));
+    CHECK_THROWS_WITH(
+        remove_allowed_host(
             "backends:\n  m:\n    type: mock\n...\ntools:\n  allowed_hosts: [a.example]\n",
-            "a.example");
-    });
+            "a.example"),
+        ContainsSubstring("holds a second YAML document"));
+    CHECK(set_permission("backends:\n  m:\n    type: mock\n...\n", "run_command", "deny") ==
+          "backends:\n  m:\n    type: mock\n\npermissions:\n  run_command: deny\n...\n");
+    CHECK(add_allowed_host("backends:\n  m:\n    type: mock\n...\n", "pypi.org") ==
+          "backends:\n  m:\n    type: mock\n\ntools:\n  allowed_hosts: [pypi.org]\n...\n");
     // The control: the same edits on a bare header land, as today, a level
     // already set included.
     CHECK(set_permission("permissions:\n  run_command: allow\n", "run_command", "deny") ==
@@ -3163,4 +3183,795 @@ TEST_CASE("an edit keeps the file's mode, and a write never sits wider than it e
         REQUIRE(watch.seen() > 0);
         CHECK(mode_of(fixture.path) == kOwnerOnly);
     }
+}
+
+// --- CLI-M44: the YAML editor refuses, by name, the layouts it does not write
+
+namespace {
+
+/// The sweep's config (CLI-M44): every section an editor writes, in the
+/// 2-space layout the line editor writes, its lists nested under their keys.
+constexpr std::string_view kLayoutBase = R"(# Every editor's section.
+backends:
+  m:
+    type: mock
+    model: m
+  n:
+    type: mock
+    model: nn
+models:
+  default: m
+suites:
+  s:
+    members:
+      chat: m
+mcp_servers:
+  srv:
+    args:
+      - hi
+    command: /bin/echo
+    enabled: true
+permissions:
+  write_file: ask
+tools:
+  allowed_hosts:
+    - docs.python.org
+    - example.com
+  search:
+    provider: searxng
+    url: http://127.0.0.1:8888
+memory:
+  recall: true
+ui:
+  markdown: true
+embeddings:
+  notes:
+    chunk_size: 400
+graphs:
+  g:
+    collections:
+      - notes
+agents:
+  a:
+    tools: read-only
+)";
+
+/// The top-level sections of `kLayoutBase`.
+const std::vector<std::string>& layout_sections() {
+    static const std::vector<std::string> sections{"backends",    "models", "suites", "mcp_servers",
+                                                   "permissions", "tools",  "memory", "ui",
+                                                   "embeddings",  "graphs", "agents"};
+    return sections;
+}
+
+/// `text` with each line's leading spaces counted again by `indent`.
+std::string reindented(std::string_view text,
+                       const std::function<std::size_t(std::size_t)>& indent) {
+    std::string out;
+    std::istringstream in{std::string{text}};
+    for (std::string line; std::getline(in, line);) {
+        const std::size_t at = line.find_first_not_of(' ');
+        out += at == std::string::npos ? line : std::string(indent(at), ' ') + line.substr(at);
+        out += '\n';
+    }
+    return out;
+}
+
+/// `text` with `from` replaced by `to` -- once, and `from` there.
+std::string replaced(std::string text, std::string_view from, std::string_view to) {
+    const std::size_t at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    return text.replace(at, from.size(), to);
+}
+
+/// The config as YAML reads `text`, untyped: what an edit's effect is
+/// measured on -- the first document, every key at its own path.
+nlohmann::json raw_reading(std::string_view text) {
+    return nlohmann::json::parse(
+        apogee::harness::json_of_yaml(text, nlohmann::ordered_json{}).dump());
+}
+
+/// The first key `text` writes twice in one mapping, its path dotted --
+/// quoted and spaced spellings read as YAML reads them -- or "": a key
+/// written twice is a shadow, whichever one the loader takes. Read up to
+/// the end of the first document, lists and their items left out.
+std::string written_twice(std::string_view text) {
+    std::vector<std::pair<std::size_t, std::string>> stack;
+    std::set<std::string> seen;
+    std::istringstream in{std::string{text}};
+    bool started = false;
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.starts_with("---") || line.starts_with("...")) {
+            if (started || line.starts_with("...")) {
+                break;
+            }
+            started = true;
+            continue;
+        }
+        const std::size_t at = line.find_first_not_of(' ');
+        if (at == std::string::npos || line[at] == '#' || line[at] == '-') {
+            continue;
+        }
+        started = true;
+        std::size_t colon = std::string::npos;
+        std::string key;
+        if (line[at] == '"' || line[at] == '\'') {
+            const std::size_t close = line.find(line[at], at + 1);
+            key = line.substr(at + 1, close - at - 1);
+            colon = line.find(':', close);
+        } else {
+            colon = line.find(':', at);
+            key = line.substr(at, colon - at);
+            while (!key.empty() && key.back() == ' ') {
+                key.pop_back();
+            }
+        }
+        if (colon == std::string::npos) {
+            continue;
+        }
+        while (!stack.empty() && stack.back().first >= at) {
+            stack.pop_back();
+        }
+        std::string path;
+        for (const auto& [indent, parent] : stack) {
+            path += parent + ".";
+        }
+        path += key;
+        if (!seen.insert(path).second) {
+            return path;
+        }
+        stack.emplace_back(at, key);
+    }
+    return {};
+}
+
+/// `section` without `name` -- null when it was the last, as YAML reads a
+/// section left with nothing under it.
+void without(nlohmann::json& section, const std::string& name) {
+    section.erase(name);
+    if (section.empty()) {
+        section = nullptr;
+    }
+}
+
+/// One editor, as the sweep runs it: what it looks up -- a section, or a
+/// key under one (`permissions.write_file`) -- and the change to the raw
+/// reading it lands as.
+struct LayoutVerb {
+    std::string name;
+    std::vector<std::string> looks_up;
+    std::function<std::string(std::string_view)> edit;
+    std::function<void(nlohmann::json&)> effect;
+};
+
+/// One layout: its text, and the lookups refused on it, each with a word
+/// the refusal must say (the indent measured, the key as written).
+struct LayoutShape {
+    std::string name;
+    std::string text;
+    std::map<std::string, std::string> refused;
+};
+
+std::vector<LayoutVerb> layout_verbs() {
+    using apogee::harness::AgentConfig;
+    using apogee::harness::McpServerConfig;
+    using apogee::harness::NamedGraphConfig;
+    using apogee::harness::SuiteConfig;
+    using apogee::harness::SuiteMember;
+    using nlohmann::json;
+    namespace h = apogee::harness;
+    BackendConfig z;
+    z.type = BackendType::Mock;
+    z.model = "zz";
+    BackendConfig replacement;
+    replacement.type = BackendType::Mock;
+    replacement.model = "mm";
+    SuiteConfig suite;
+    suite.members["chat"] = SuiteMember{.backend = "n"};
+    McpServerConfig server;
+    server.command = "/bin/true";
+    AgentConfig agent;
+    NamedGraphConfig graph;
+    graph.collections = {"notes"};
+    EmbeddingConfig collection;
+    collection.chunk_size = 300;
+    return {
+        {"add-backend",
+         {"backends"},
+         [z](std::string_view c) { return append_backend(c, "z", z, false); },
+         [](json& j) { j["backends"]["z"] = {{"type", "mock"}, {"model", "zz"}}; }},
+        {"add-backend --force",
+         {"backends"},
+         [replacement](std::string_view c) { return append_backend(c, "m", replacement, true); },
+         [](json& j) { j["backends"]["m"] = {{"type", "mock"}, {"model", "mm"}}; }},
+        {"delete-backend",
+         {"backends"},
+         [](std::string_view c) { return delete_backend(c, "n"); },
+         [](json& j) { without(j["backends"], "n"); }},
+        {"set-backend --model",
+         {"backends"},
+         [](std::string_view c) { return h::set_backend_field(c, "m", "model", "q"); },
+         [](json& j) { j["backends"]["m"]["model"] = "q"; }},
+        {"set-backend --max-tokens",
+         {"backends"},
+         [](std::string_view c) { return h::set_backend_field(c, "m", "max_tokens", "9"); },
+         [](json& j) { j["backends"]["m"]["max_tokens"] = 9; }},
+        {"set-backend --model ''",
+         {"backends"},
+         [](std::string_view c) { return h::set_backend_field(c, "n", "model", ""); },
+         [](json& j) { j["backends"]["n"].erase("model"); }},
+        {"rename-backend",
+         {"backends"},
+         [](std::string_view c) { return h::rename_backend(c, "n", "o"); },
+         [](json& j) {
+             j["backends"]["o"] = j["backends"]["n"];
+             j["backends"].erase("n");
+         }},
+        {"set-default",
+         {"models"},
+         [](std::string_view c) { return set_models_role(c, "default", "n"); },
+         [](json& j) { j["models"]["default"] = "n"; }},
+        {"set-default-utility",
+         {"models"},
+         [](std::string_view c) { return set_models_role(c, "default_utility", "m"); },
+         [](json& j) { j["models"]["default_utility"] = "m"; }},
+        {"set-default-suite",
+         {"models"},
+         [](std::string_view c) { return h::set_default_suite(c, "s"); },
+         [](json& j) { j["models"]["default_suite"] = "s"; }},
+        {"set-permission (replace)",
+         {"permissions", "permissions.write_file"},
+         [](std::string_view c) { return set_permission(c, "write_file", "allow"); },
+         [](json& j) { j["permissions"]["write_file"] = "allow"; }},
+        {"set-permission (insert)",
+         {"permissions", "permissions.run_command"},
+         [](std::string_view c) { return set_permission(c, "run_command", "deny"); },
+         [](json& j) { j["permissions"]["run_command"] = "deny"; }},
+        {"add-suite",
+         {"suites"},
+         [suite](std::string_view c) { return h::append_suite(c, "t", suite, false); },
+         [](json& j) { j["suites"]["t"] = {{"members", {{"chat", "n"}}}}; }},
+        {"set-suite",
+         {"suites"},
+         [](std::string_view c) {
+             return h::set_suite_member(c, "s", "utility", SuiteMember{.backend = "n"});
+         },
+         [](json& j) { j["suites"]["s"]["members"]["utility"] = "n"; }},
+        {"delete-suite",
+         {"suites"},
+         [](std::string_view c) { return h::delete_suite(c, "s"); },
+         [](json& j) { without(j["suites"], "s"); }},
+        {"set memory.recall",
+         {"memory"},
+         [](std::string_view c) { return h::set_scalar(c, "memory.recall", "false"); },
+         [](json& j) { j["memory"]["recall"] = false; }},
+        {"set ui.markdown",
+         {"ui"},
+         [](std::string_view c) { return h::set_scalar(c, "ui.markdown", "false"); },
+         [](json& j) { j["ui"]["markdown"] = false; }},
+        {"set tools.search.url",
+         {"tools"},
+         [](std::string_view c) { return h::set_scalar(c, "tools.search.url", "http://x"); },
+         [](json& j) { j["tools"]["search"]["url"] = "http://x"; }},
+        {"set tools.search.results",
+         {"tools"},
+         [](std::string_view c) { return h::set_scalar(c, "tools.search.results", "5"); },
+         [](json& j) { j["tools"]["search"]["results"] = 5; }},
+        {"add-allowed-host",
+         {"tools", "tools.allowed_hosts"},
+         [](std::string_view c) { return h::add_allowed_host(c, "pypi.org"); },
+         [](json& j) { j["tools"]["allowed_hosts"].push_back("pypi.org"); }},
+        {"delete-allowed-host",
+         {"tools", "tools.allowed_hosts"},
+         [](std::string_view c) { return h::remove_allowed_host(c, "example.com"); },
+         [](json& j) { j["tools"]["allowed_hosts"] = json::array({"docs.python.org"}); }},
+        {"mcp create",
+         {"mcp_servers"},
+         [server](std::string_view c) { return append_mcp_server(c, "srv2", server, false); },
+         [](json& j) { j["mcp_servers"]["srv2"] = {{"command", "/bin/true"}, {"enabled", true}}; }},
+        {"mcp disable",
+         {"mcp_servers"},
+         [](std::string_view c) { return set_mcp_server_enabled(c, "srv", false); },
+         [](json& j) { j["mcp_servers"]["srv"]["enabled"] = false; }},
+        {"delete-mcp-server",
+         {"mcp_servers"},
+         [](std::string_view c) { return delete_mcp_server(c, "srv"); },
+         [](json& j) { without(j["mcp_servers"], "srv"); }},
+        {"add-graph",
+         {"graphs"},
+         [graph](std::string_view c) { return append_graph(c, "g2", graph, false); },
+         [](json& j) { j["graphs"]["g2"] = {{"collections", json::array({"notes"})}}; }},
+        {"delete-graph",
+         {"graphs"},
+         [](std::string_view c) { return delete_graph(c, "g"); },
+         [](json& j) { without(j["graphs"], "g"); }},
+        {"agents create",
+         {"agents"},
+         [agent](std::string_view c) { return append_agent(c, "a2", agent, false); },
+         [](json& j) { j["agents"]["a2"] = {{"tools", "read-only"}}; }},
+        {"agents delete",
+         {"agents"},
+         [](std::string_view c) { return h::delete_agent(c, "a"); },
+         [](json& j) { without(j["agents"], "a"); }},
+        {"embed ingest's registration",
+         {"embeddings"},
+         [collection](std::string_view c) {
+             return append_embedding(c, "notes2", collection, false);
+         },
+         [](json& j) { j["embeddings"]["notes2"] = {{"chunk_size", 300}}; }},
+        {"graph build's mark",
+         {"embeddings"},
+         [](std::string_view c) { return h::set_embedding_graph_enabled(c, "notes", true); },
+         [](json& j) { j["embeddings"]["notes"]["graph"] = {{"enabled", true}}; }},
+    };
+}
+
+/// Every section of `kLayoutBase` refused, saying `word`.
+std::map<std::string, std::string> every_section(const std::string& word) {
+    std::map<std::string, std::string> refused;
+    for (const std::string& section : layout_sections()) {
+        refused[section] = word;
+    }
+    return refused;
+}
+
+std::vector<LayoutShape> layout_shapes() {
+    const std::string base{kLayoutBase};
+    std::string compact = replaced(base, "    args:\n      - hi\n", "    args:\n    - hi\n");
+    compact = replaced(compact, "  allowed_hosts:\n    - docs.python.org\n    - example.com\n",
+                       "  allowed_hosts:\n  - docs.python.org\n  - example.com\n");
+    compact =
+        replaced(compact, "    collections:\n      - notes\n", "    collections:\n    - notes\n");
+    std::map<std::string, std::string> fields3;
+    std::map<std::string, std::string> fields6;
+    for (const std::string section :
+         {"backends", "suites", "mcp_servers", "tools", "embeddings", "graphs", "agents"}) {
+        fields3[section] = "indented 3 spaces";
+        fields6[section] = "indented 6 spaces";
+    }
+    // The investigation's mixed file: backends in the editor's layout, models
+    // and tools at 4 -- the backends' verbs land, the others' refuse.
+    std::string mixed = replaced(base, "models:\n  default: m\n", "models:\n    default: m\n");
+    mixed = replaced(mixed,
+                     "tools:\n  allowed_hosts:\n    - docs.python.org\n    - example.com\n"
+                     "  search:\n    provider: searxng\n    url: http://127.0.0.1:8888\n",
+                     "tools:\n    allowed_hosts:\n        - docs.python.org\n"
+                     "        - example.com\n    search:\n        provider: searxng\n"
+                     "        url: http://127.0.0.1:8888\n");
+    return {
+        {"the editor's own layout", base, {}},
+        {"compact lists", compact, {}},
+        {"a document marked at both ends", "---\n" + base + "...\n# the end\n", {}},
+        {"4 spaces", reindented(base, [](std::size_t n) { return n * 2; }),
+         every_section("indented 4 spaces")},
+        {"1 space", reindented(base, [](std::size_t n) { return n / 2; }),
+         every_section("indented 1 space")},
+        {"fields at 3", reindented(base, [](std::size_t n) { return n >= 4 ? n - 1 : n; }),
+         fields3},
+        {"fields at 6", reindented(base, [](std::size_t n) { return n >= 4 ? n + 2 : n; }),
+         fields6},
+        {"a quoted header and key",
+         replaced(replaced(base, "\nbackends:\n", "\n\"backends\":\n"), "  write_file: ask\n",
+                  "  \"write_file\": ask\n"),
+         {{"backends", "'\"backends\":'"}, {"permissions.write_file", "'\"write_file\":'"}}},
+        {"spaced headers",
+         replaced(replaced(base, "\nmodels:\n", "\nmodels :\n"), "\ntools:\n", "\ntools :\n"),
+         {{"models", "'models :'"}, {"tools", "'tools :'"}}},
+        {"a mixed file", mixed, {{"models", "indented 4 spaces"}, {"tools", "indented 4 spaces"}}},
+    };
+}
+
+}  // namespace
+
+TEST_CASE(
+    "every editor lands its exact effect on the layout it writes, and refuses another by name",
+    "[config_edit][CLI-M44][layout]") {
+    using apogee::harness::parse_config;
+    for (const LayoutShape& shape : layout_shapes()) {
+        INFO("shape: " + shape.name + "\n" + shape.text);
+        REQUIRE_NOTHROW(parse_config(shape.text, "<shape>"));
+        const nlohmann::json before = raw_reading(shape.text);
+        for (const LayoutVerb& verb : layout_verbs()) {
+            INFO("verb: " + verb.name);
+            std::optional<std::string> expected_word;
+            for (const std::string& lookup : verb.looks_up) {
+                if (const auto it = shape.refused.find(lookup); it != shape.refused.end()) {
+                    expected_word = it->second;
+                }
+            }
+            try {
+                const std::string edited = verb.edit(shape.text);
+                INFO("edited:\n" + edited);
+                CHECK_FALSE(expected_word.has_value());
+                // A landed edit is its effect, exactly, as YAML reads it --
+                // never a key written twice, never a file that does not load.
+                bool loads = true;
+                try {
+                    (void)parse_config(edited, "<edited>");
+                } catch (const apogee::harness::ConfigError& e) {
+                    INFO(e.what());
+                    loads = false;
+                }
+                CHECK(loads);
+                CHECK(written_twice(edited).empty());
+                nlohmann::json expected = before;
+                verb.effect(expected);
+                CHECK((loads && raw_reading(edited) == expected));
+            } catch (const ConfigEditError& e) {
+                const std::string said = e.what();
+                INFO("refused: " + said);
+                REQUIRE(expected_word.has_value());
+                CHECK_THAT(said, ContainsSubstring(*expected_word));
+                CHECK_THAT(said, ContainsSubstring("'apogee config migrate'"));
+                // Every name the verbs look for is one the loader lists.
+                CHECK(said.find("not valid YAML") == std::string::npos);
+                CHECK(said.find("not found") == std::string::npos);
+                CHECK(said.find("is not in") == std::string::npos);
+                CHECK(said.find("no backend named") == std::string::npos);
+            }
+        }
+    }
+}
+
+TEST_CASE("a layout refusal names the level, the indent measured, the editor's and the way out",
+          "[config_edit][CLI-M44][layout]") {
+    using apogee::harness::set_backend_field;
+    using apogee::harness::set_scalar;
+    // The investigation's reproductions, each in the words it now says.
+    const std::string four = reindented(kLayoutBase, [](std::size_t n) { return n * 2; });
+    CHECK_THROWS_WITH(set_models_role(four, "default", "m"),
+                      "the lines under models: are indented 4 spaces, where the editor writes 2 "
+                      "-- it edits the 2-space layout Apogee writes, each level 2 spaces in from "
+                      "its key; re-indent the file so, or carry it to JSONC with 'apogee config "
+                      "migrate', whose every form the editor edits");
+    CHECK_THROWS_WITH(set_backend_field(four, "m", "model", "q"),
+                      ContainsSubstring("the lines under backends: are indented 4 spaces"));
+    const std::string one = reindented(kLayoutBase, [](std::size_t n) { return n / 2; });
+    BackendConfig z;
+    z.type = BackendType::Mock;
+    z.model = "zz";
+    CHECK_THROWS_WITH(append_backend(one, "z", z, false),
+                      ContainsSubstring("the lines under backends: are indented 1 space, where "
+                                        "the editor writes 2"));
+    const std::string three =
+        reindented(kLayoutBase, [](std::size_t n) { return n >= 4 ? n - 1 : n; });
+    CHECK_THROWS_WITH(delete_backend(three, "m"),
+                      ContainsSubstring("the lines under backends.m: are indented 3 spaces, "
+                                        "where the editor writes 4"));
+    const std::string six =
+        reindented(kLayoutBase, [](std::size_t n) { return n >= 4 ? n + 2 : n; });
+    CHECK_THROWS_WITH(set_scalar(six, "tools.search.url", "http://x"),
+                      ContainsSubstring("the lines under tools.search: are indented 6 spaces, "
+                                        "where the editor writes 4"));
+    // A level deeper in: a suite's members, a long-form member's fields.
+    CHECK_THROWS_WITH(
+        apogee::harness::set_suite_member("suites:\n  s:\n    members:\n        chat: m\n", "s",
+                                          "utility", apogee::harness::SuiteMember{.backend = "m"}),
+        ContainsSubstring("the lines under suites.s.members: are indented 8 spaces, where the "
+                          "editor writes 6"));
+    // A quoted or spaced key the verb looks for, by its spelling.
+    CHECK_THROWS_WITH(
+        set_permission("permissions:\n  \"write_file\": ask\n", "write_file", "allow"),
+        "the key permissions.write_file is written '\"write_file\":', and the editor finds a key "
+        "only written bare, 'write_file:' -- rewrite it so, or carry the file to JSONC with "
+        "'apogee config migrate', whose every form the editor edits");
+    CHECK_THROWS_WITH(delete_backend("backends:\n  'm' :\n    type: mock\n", "M"),
+                      ContainsSubstring("the key backends.M is written ''m' :'"));
+    CHECK_THROWS_WITH(
+        set_backend_field("backends:\n  m:\n    type: mock\n    model : x\n", "m", "model", "q"),
+        ContainsSubstring("the key backends.m.model is written 'model :'"));
+    CHECK_THROWS_WITH(set_mcp_server_enabled("mcp_servers:\n  srv:\n    command: x\n"
+                                             "    \"enabled\": true\n",
+                                             "srv", false),
+                      ContainsSubstring("the key mcp_servers.srv.enabled is written"));
+    CHECK_THROWS_WITH(
+        apogee::harness::rename_backend("backends:\n  \"n\":\n    type: mock\n", "n", "o"),
+        ContainsSubstring("the key backends.n is written '\"n\":'"));
+    // Another key quoted beside the one looked for is read as YAML reads it.
+    CHECK(set_permission("permissions:\n  \"write_file\": ask\n", "run_command", "deny") ==
+          "permissions:\n  \"write_file\": ask\n  run_command: deny\n");
+    // A name no plain key spells keeps its own words, naming its way out:
+    // rename-backend reaches it however it is written.
+    CHECK_THROWS_WITH(
+        set_backend_field("backends:\n  \"my model\":\n    type: mock\n", "my model", "model", "q"),
+        ContainsSubstring("is not one both config formats can edit"));
+    CHECK(apogee::harness::rename_backend("backends:\n  \"my model\" :\n    type: mock\n",
+                                          "my model",
+                                          "mine") == "backends:\n  mine:\n    type: mock\n");
+}
+
+TEST_CASE("a compact list, a block scalar and a list of mappings are no layout fault",
+          "[config_edit][CLI-M44][layout]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_backend_field;
+    // Lists at their key's own indent, or deeper than the editor writes them;
+    // a block scalar's text and what sits under a list item, unmeasured.
+    const std::string text =
+        "backends:\n  m:\n    type: mock\n    server_tools:\n    - web_search\n"
+        "    system_prompt: |\n        indented text\n          deeper\n"
+        "training:\n  cycle:\n    sources:\n    -   type: sessions\n        backend: m\n"
+        "tools:\n  allowed_hosts:\n        - docs.python.org\n";
+    const std::string edited = set_backend_field(text, "m", "model", "q");
+    CHECK(edited == replaced(text, "    type: mock\n", "    type: mock\n    model: q\n"));
+    CHECK(apogee::harness::add_allowed_host(text, "pypi.org") == text + "        - pypi.org\n");
+    CHECK(apogee::harness::set_scalar(text, "training.python", "/usr/bin/python3")
+              .find("  python: /usr/bin/python3\n") != std::string::npos);
+
+    // A value's own lines, from the review: a scalar on the line below its
+    // key, and a quoted one carried on over lines, are text, never a level.
+    for (const std::string& valued :
+         {std::string{"backends:\n  m:\n    type: mock\n    model:\n        m\n"},
+          std::string{"backends:\n  m:\n    type: mock\n    system_prompt:\n        \"You are\n"
+                      "      helpful\"\n"},
+          std::string{"backends:\n  m:\n    type: mock\n    system_prompt: \"Rules\n    follow:\n"
+                      "        be nice\"\n"},
+          std::string{"backends:\n  m:\n    type: mock\n    system_prompt: 'it''s\n    a: b'\n"}}) {
+        INFO(valued);
+        REQUIRE_NOTHROW(parse_config(valued, "<valued>"));
+        const std::string set = set_backend_field(valued, "m", "max_tokens", "9");
+        CHECK(parse_config(set, "<set>").find_backend("m")->max_tokens == 9);
+        CHECK(written_twice(set).empty());
+        BackendConfig z;
+        z.type = BackendType::Mock;
+        CHECK(parse_config(append_backend(valued, "z", z, false), "<added>").backend_names() ==
+              std::vector<std::string>{"m", "z"});
+    }
+    // A tab inside a block scalar's text is text: the lines after it are
+    // still measured, and a level in another indent there still refused.
+    const std::string tabbed =
+        "backends:\n  m:\n    type: mock\n    system_prompt: |\n      \tcode\n  n:\n"
+        "      type: mock\n      model: n\n";
+    REQUIRE_NOTHROW(parse_config(tabbed, "<tabbed>"));
+    CHECK_THROWS_WITH(set_backend_field(tabbed, "n", "model", "q"),
+                      ContainsSubstring("the lines under backends.n: are indented 6 spaces"));
+    CHECK_THROWS_WITH(delete_backend(tabbed, "m"),
+                      ContainsSubstring("the lines under backends.n: are indented 6 spaces"));
+}
+
+TEST_CASE("an edit adds its section before a final '...', in the document the loader reads",
+          "[config_edit][CLI-M44][documents]") {
+    using apogee::harness::parse_config;
+    using apogee::harness::set_scalar;
+    const std::string doc_end = "backends:\n  m:\n    type: mock\n    model: m\n...\n";
+    const std::string set = set_scalar(doc_end, "ui.markdown", "false");
+    CHECK(set == "backends:\n  m:\n    type: mock\n    model: m\n\nui:\n  markdown: false\n...\n");
+    CHECK(parse_config(set, "<set>").ui.markdown == false);
+    // Psych's start, a trailing comment, CRLF: each kept where it stood.
+    const std::string psych = "---\r\nbackends:\r\n  m:\r\n    type: mock\r\n...\r\n# end\r\n";
+    const std::string denied = set_permission(psych, "run_command", "deny");
+    CHECK(denied ==
+          "---\r\nbackends:\r\n  m:\r\n    type: mock\r\n\r\npermissions:\r\n  run_command: "
+          "deny\r\n...\r\n# end\r\n");
+    CHECK(parse_config(denied, "<denied>").permissions.level("run_command") ==
+          apogee::harness::PermissionLevel::Deny);
+    const std::string hosts = apogee::harness::add_allowed_host(doc_end, "pypi.org");
+    CHECK(hosts ==
+          "backends:\n  m:\n    type: mock\n    model: m\n\ntools:\n"
+          "  allowed_hosts: [pypi.org]\n...\n");
+    // An empty document after the first, a comment after a marker: no content.
+    const std::string empty_later = "backends:\n  m:\n    type: mock\n--- # later\n...\n";
+    CHECK(delete_backend(empty_later, "m") == "backends:\n--- # later\n...\n");
+    // Add then delete is the exact inverse there too.
+    BackendConfig z;
+    z.type = BackendType::Mock;
+    CHECK(delete_backend(append_backend(doc_end, "z", z, false), "z") == doc_end);
+}
+
+TEST_CASE("a config holding a second YAML document with content is refused, naming the hand edit",
+          "[config_edit][CLI-M44][documents]") {
+    using apogee::harness::rename_backend;
+    using apogee::harness::set_scalar;
+    for (const std::string& text :
+         {std::string{"backends:\n  m:\n    type: mock\n...\nui:\n  markdown: true\n"},
+          std::string{"backends:\n  m:\n    type: mock\n---\npermissions:\n  run_command: allow\n"},
+          std::string{"---\n---\nbackends:\n  m:\n    type: mock\n"},
+          std::string{"backends:\n  m:\n    type: mock\n--- later\n"}}) {
+        INFO(text);
+        for (const std::function<std::string()>& edit : std::vector<std::function<std::string()>>{
+                 [&] { return set_scalar(text, "ui.markdown", "false"); },
+                 [&] { return set_permission(text, "run_command", "deny"); },
+                 [&] { return delete_backend(text, "m"); },
+                 [&] { return rename_backend(text, "m", "n"); },
+                 [&] { return apogee::harness::add_allowed_host(text, "pypi.org"); }}) {
+            try {
+                (void)edit();
+                FAIL("an edit of the first document printed a success");
+            } catch (const ConfigEditError& e) {
+                const std::string said = e.what();
+                CHECK_THAT(said, ContainsSubstring("holds a second YAML document"));
+                CHECK_THAT(said, ContainsSubstring("by hand"));
+                CHECK(said.find("config migrate") == std::string::npos);
+            }
+        }
+    }
+    CHECK_THROWS_WITH(set_scalar("backends:\n  m:\n    type: mock\n...\nui:\n  markdown: true\n",
+                                 "ui.markdown", "false"),
+                      "this config holds a second YAML document, after the '...' on line 4, "
+                      "which Apogee never reads -- move what it holds into the first document, "
+                      "or delete it, by hand");
+}
+
+namespace {
+
+/// `text`, UTF-8, as UTF-16 with its byte-order mark: little-endian, or
+/// big-endian when `big` -- a config another editor saved so.
+std::string as_utf16(std::string_view text, bool big) {
+    std::string out = big ? std::string{"\xFE\xFF"} : std::string{"\xFF\xFE"};
+    const auto unit = [&](std::uint32_t value) {
+        const char high = static_cast<char>((value >> 8U) & 0xFFU);
+        const char low = static_cast<char>(value & 0xFFU);
+        out += big ? high : low;
+        out += big ? low : high;
+    };
+    for (std::size_t i = 0; i < text.size();) {
+        const auto byte = static_cast<unsigned char>(text[i]);
+        std::uint32_t code = byte;
+        std::size_t length = 1;
+        if (byte >= 0xF0U) {
+            code = byte & 0x07U;
+            length = 4;
+        } else if (byte >= 0xE0U) {
+            code = byte & 0x0FU;
+            length = 3;
+        } else if (byte >= 0xC0U) {
+            code = byte & 0x1FU;
+            length = 2;
+        }
+        for (std::size_t k = 1; k < length; ++k) {
+            code = (code << 6U) | (static_cast<unsigned char>(text[i + k]) & 0x3FU);
+        }
+        if (code >= 0x10000U) {
+            code -= 0x10000U;
+            unit(0xD800U + (code >> 10U));
+            unit(0xDC00U + (code & 0x3FFU));
+        } else {
+            unit(code);
+        }
+        i += length;
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a config that is not UTF-8 is refused by every editor, naming its encoding",
+          "[config_edit][CLI-M44][encoding]") {
+    namespace h = apogee::harness;
+    using Edit = std::function<std::string(std::string_view)>;
+    BackendConfig z;
+    z.type = BackendType::Mock;
+    h::SymphonySpec symphony;
+    symphony.name = "say";
+    h::SymphonyStage stage;
+    stage.name = "one";
+    stage.role = "chat";
+    stage.prompt = "hi";
+    symphony.stages.push_back(stage);
+    h::McpServerConfig server;
+    server.command = "x";
+    h::ReviewTargetConfig target;
+    target.repo = "a/b";
+    const std::vector<Edit> edits{
+        [&](std::string_view c) { return append_backend(c, "z", z, false); },
+        [](std::string_view c) { return delete_backend(c, "z"); },
+        [](std::string_view c) { return h::rename_backend(c, "z", "y"); },
+        [](std::string_view c) { return h::set_backend_field(c, "z", "model", "q"); },
+        [](std::string_view c) { return h::set_backend_model_path(c, "z", "/m.gguf"); },
+        [](std::string_view c) { return h::set_backend_mmproj_path(c, "z", "/p.gguf"); },
+        [](std::string_view c) { return h::set_backend_adapters(c, "z", {}); },
+        [](std::string_view c) { return set_models_role(c, "default", "z"); },
+        [](std::string_view c) { return h::set_default_suite(c, "s"); },
+        [](std::string_view c) { return h::set_default_video(c, "v"); },
+        [](std::string_view c) { return h::set_attachments_graph(c, "off"); },
+        [](std::string_view c) { return h::set_scalar(c, "ui.markdown", "false"); },
+        [](std::string_view c) { return set_permission(c, "run_command", "deny"); },
+        [](std::string_view c) { return h::add_allowed_host(c, "pypi.org"); },
+        [](std::string_view c) { return h::remove_allowed_host(c, "pypi.org"); },
+        [](std::string_view c) { return append_embedding(c, "notes", EmbeddingConfig{}, false); },
+        [](std::string_view c) { return delete_embedding(c, "notes"); },
+        [](std::string_view c) { return h::set_embedding_graph_enabled(c, "notes", true); },
+        [&](std::string_view c) { return append_mcp_server(c, "srv", server, false); },
+        [](std::string_view c) { return delete_mcp_server(c, "srv"); },
+        [](std::string_view c) { return set_mcp_server_enabled(c, "srv", false); },
+        [&](std::string_view c) { return h::append_review_target(c, "r", target, false); },
+        [](std::string_view c) { return h::delete_review_target(c, "r"); },
+        [](std::string_view c) { return append_agent(c, "a", h::AgentConfig{}, false); },
+        [](std::string_view c) { return h::delete_agent(c, "a"); },
+        [&](std::string_view c) { return h::append_symphony(c, "say", symphony, false); },
+        [](std::string_view c) { return h::delete_symphony(c, "say"); },
+        [](std::string_view c) { return append_graph(c, "g", h::NamedGraphConfig{}, false); },
+        [](std::string_view c) { return delete_graph(c, "g"); },
+        [](std::string_view c) { return h::append_suite(c, "s", h::SuiteConfig{}, false); },
+        [](std::string_view c) { return h::delete_suite(c, "s"); },
+        [](std::string_view c) { return h::set_suite_member(c, "s", "chat", std::nullopt); },
+        [](std::string_view c) { return h::set_suite_consultable(c, "s", {}); },
+        [](std::string_view c) { return h::set_suite_consult_caps(c, "s", h::ConsultCaps{}); },
+        [](std::string_view c) { return h::set_suite_validate(c, "s", h::ValidateConfig{}); },
+        [](std::string_view c) { return h::set_suite_orchestrate(c, "s", true); },
+        [](std::string_view c) { return format_config(c); },
+    };
+    const std::string legacy = legacy_template();
+    REQUIRE(!legacy.empty());
+    for (const auto& [text, word] : std::vector<std::pair<std::string, std::string>>{
+             {as_utf16(legacy, false), "UTF-16 text (little-endian)"},
+             {as_utf16(legacy, true), "UTF-16 text (big-endian)"},
+             {as_utf16(legacy, false).substr(2), "UTF-16 text (little-endian)"},
+             {std::string{"\xFF\xFE\x00\x00", 4} + "b\0\0\0", "UTF-32 text (little-endian)"},
+             {std::string{"\x00\x00\xFE\xFF", 4}, "UTF-32 text (big-endian)"},
+             {"backends:\n  m:\n    type: mock\n    model: \"a" + std::string(1, '\0') + "\"\n",
+              "a NUL byte at offset 43"}}) {
+        INFO(word);
+        for (std::size_t i = 0; i < edits.size(); ++i) {
+            INFO("edit " + std::to_string(i));
+            CHECK_THROWS_WITH(edits[i](text), ContainsSubstring(word) &&
+                                                  ContainsSubstring("save it as UTF-8") &&
+                                                  ContainsSubstring("nothing was changed"));
+        }
+    }
+    CHECK_THROWS_WITH(set_models_role(as_utf16(legacy, false), "default", "z"),
+                      "this config is UTF-16 text (little-endian), and the editor edits UTF-8 "
+                      "alone -- save it as UTF-8; nothing was changed");
+    // A UTF-8 byte-order mark is UTF-8: kept, and the edit lands after it.
+    const std::string marked =
+        "\xEF\xBB\xBF"
+        "backends:\n  m:\n    type: mock\n";
+    CHECK(append_backend(marked, "z", z, false) ==
+          std::string{marked} + "\n  z:\n    type: mock\n");
+    CHECK(apogee::harness::parse_config(append_backend(marked, "z", z, false), "<m>")
+              .backend_names() == std::vector<std::string>{"m", "z"});
+}
+
+TEST_CASE("an edit whose result would not load says it was not applied, and why",
+          "[config_edit][CLI-M44][atomic]") {
+    const EditFixture fixture;
+    // A layout refused: the bytes as they were, and no "not valid YAML".
+    const std::string four = reindented(kLayoutBase, [](std::size_t n) { return n * 2; });
+    apogee::harness::write_file_atomically(fixture.path, four);
+    try {
+        apogee::harness::edit_config_file(fixture.path, [](std::string_view c) {
+            return apogee::harness::add_allowed_host(c, "pypi.org");
+        });
+        FAIL("an edit of a 4-space file landed");
+    } catch (const ConfigEditError& e) {
+        CHECK_THAT(e.what(), ContainsSubstring("'apogee config migrate'"));
+        CHECK(std::string{e.what()}.find("not valid YAML") == std::string::npos);
+    }
+    CHECK(fixture.bytes() == four);
+    // A result the typed loader refuses -- the default suite's deletion --
+    // is a refused edit in the words it now has, never "<edited config>:".
+    const std::string named =
+        "backends:\n  m:\n    type: mock\nsuites:\n  s:\n    members:\n"
+        "      chat: m\nmodels:\n  default_suite: s\n";
+    apogee::harness::write_file_atomically(fixture.path, named);
+    try {
+        apogee::harness::edit_config_file(
+            fixture.path, [](std::string_view c) { return apogee::harness::delete_suite(c, "s"); });
+        FAIL("an edit that would not load landed");
+    } catch (const ConfigEditError& e) {
+        const std::string said = e.what();
+        INFO(said);
+        CHECK(
+            said.starts_with("the edit was not applied because its result would not load, so "
+                             "nothing was changed: models.default_suite"));
+        CHECK(said.find("<edited config>") == std::string::npos);
+    }
+    CHECK(fixture.bytes() == named);
+    // A result that is no YAML at all: the same words, the parser's detail after.
+    try {
+        apogee::harness::edit_config_file(
+            fixture.path, [](std::string_view) { return std::string{"backends:\n  broken: [\n"}; });
+        FAIL("a broken result landed");
+    } catch (const ConfigEditError& e) {
+        CHECK_THAT(e.what(), ContainsSubstring("the edit was not applied because its result would "
+                                               "not load, so nothing was changed: not valid YAML"));
+        CHECK(std::string{e.what()}.find("<edited config>: not valid YAML") == std::string::npos);
+    }
+    // A config already broken is still the loader's own words, by its path.
+    std::ofstream{fixture.path, std::ios::binary | std::ios::trunc} << "backends: [\n";
+    CHECK_THROWS_AS(apogee::harness::edit_config_file(
+                        fixture.path, [](std::string_view c) { return std::string{c}; }),
+                    apogee::harness::ConfigError);
 }

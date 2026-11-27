@@ -260,14 +260,14 @@ Every case runs in a temporary home, with mock backends. Each fails on today's b
 - **The agents and MCP routes' empty error type, and the scaffolds' write order**: [CLI-M52](a-refused-scaffold-writes-nothing.md).
 - **`symphonies edit` launching `vi`** when `EDITOR` is unset and stdin is not a terminal (`symphonies_cmd.cpp:424`; `agents edit` does the same). It then fails with `the editor exited with status 1`. An aside of the investigation.
 - **`config get symphonies.-x`** answering `no such config key`, while `backends.*` works and folds case. Also an aside of the investigation.
-- **Quoted or spaced keys in a YAML file a person wrote**: [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md).
+- **Quoted or spaced keys in a YAML file a person wrote**: [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27).
 
 ## Links
 
 - **Blocked by:** — · **Blocks:** —
 - **Sibling** (the same investigation, 2026-11-26): [CLI-M52](a-refused-scaffold-writes-nothing.md), [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), [CLI-M57](a-saved-chat-names-only-its-own-files.md).
 - **Relates to:**
-  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), which edits the same `entry_name` and `find_entry_line`. Either order works, and its JSONC-unchanged rule keeps these words for a bridged key.
+  - [CLI-M44](../../../assistant/cli/MILESTONES.md#2026-11-27--yaml-editor-refuses-the-layouts-it-does-not-write-maintenance-item-m44-the-yaml-editor-refuses-by-name-the-layouts-it-does-not-write) (shipped 2026-11-27), which edits the same `entry_name` and `find_entry_line`. Either order works, and its JSONC-unchanged rule keeps these words for a bridged key.
   - [CLI-M48](a-suggested-command-runs-as-printed.md), which quotes `create`'s success lines. Its symphony `-q` case, created after `s1`, can't be reached by `create` once this item lands, so whichever lands second seeds that case by hand or drops it. Neither gates the other.
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes raised this aside, and [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name), which moves Library's symphony delete onto `--`.
   - MILESTONES' 55f entry (2026-10-25, the add rule and "Not fixed: symphony names") and 57e entry (2026-11-01, `missing_entry`, symphony names out of scope). This item closes both records.

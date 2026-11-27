@@ -1005,9 +1005,12 @@ TEST_CASE("the gate's verbs land on a compact YAML list, and a deny that would n
     REQUIRE(home.run({"config", "delete-allowed-host", "pypi.org"}, &out) == 0);
     CHECK(home.config_text() == left);
 
-    // A deny the loader would not read: refused, the file unchanged.
-    const std::string quoted = std::string{kConfig} + "\"permissions\":\n  run_command: allow\n";
-    const CliHome shadowed{quoted};
+    // A deny the loader would not read: refused, the file unchanged -- by
+    // the read-back for a key written twice (the loader reads the last), and
+    // since CLI-M44 by name for a quoted header, before any read-back.
+    const std::string twice =
+        std::string{kConfig} + "permissions:\n  run_command: allow\n  run_command: allow\n";
+    const CliHome shadowed{twice};
     std::string err;
     out.clear();
     CHECK(shadowed.run({"config", "set-permission", "run_command", "deny"}, &out, &err) == 1);
@@ -1016,9 +1019,17 @@ TEST_CASE("the gate's verbs land on a compact YAML list, and a deny that would n
           std::string::npos);
     CHECK(err.find("permissions.run_command is allow") != std::string::npos);
     CHECK(err.find("apogee config migrate") != std::string::npos);
-    CHECK(shadowed.config_text() == quoted);
+    CHECK(shadowed.config_text() == twice);
     CHECK(apogee::harness::load_config(shadowed.config_path()).permissions.level("run_command") ==
           apogee::harness::PermissionLevel::Allow);
+    const std::string quoted = std::string{kConfig} + "\"permissions\":\n  run_command: allow\n";
+    const CliHome spelled{quoted};
+    err.clear();
+    CHECK(spelled.run({"config", "set-permission", "run_command", "deny"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.find("the key permissions is written '\"permissions\":'") != std::string::npos);
+    CHECK(err.find("apogee config migrate") != std::string::npos);
+    CHECK(spelled.config_text() == quoted);
 }
 
 TEST_CASE("delete-allowed-host deletes nothing it does not name, and says so",

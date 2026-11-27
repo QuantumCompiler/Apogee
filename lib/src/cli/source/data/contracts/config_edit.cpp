@@ -50,10 +50,18 @@ public:
 namespace yaml_text {
 namespace {
 
+/// The layout the line editor edits is the one it writes (CLI-M44): every
+/// mapping level 2 spaces in from its key -- entries under a map section at
+/// exactly `kEntryIndent`, their fields at `kFieldIndent`, a field's own
+/// block 2 deeper again -- and a list's `- ` items at their key's own indent
+/// (compact) or deeper. A section in any other indent, a key it looks for
+/// written quoted or spaced, is refused by name with `config migrate` named,
+/// never read as absent or written beside.
+constexpr std::size_t kLevelStep = 2;
 /// Entries under a map section sit at exactly this indent.
-constexpr std::size_t kEntryIndent = 2;
+constexpr std::size_t kEntryIndent = kLevelStep;
 /// Their fields sit at this one.
-constexpr std::size_t kFieldIndent = 4;
+constexpr std::size_t kFieldIndent = kEntryIndent + kLevelStep;
 
 /// A source line, terminator included.
 ///
@@ -152,6 +160,14 @@ AfterKey after_key(std::string_view line_body, std::size_t at) {
     return next > at && line_body[next] == '#' ? AfterKey::Comment : AfterKey::Value;
 }
 
+bool equals_folded(std::string_view lhs, std::string_view rhs) {
+    return lhs.size() == rhs.size() &&
+           std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char a, char b) {
+               return std::tolower(static_cast<unsigned char>(a)) ==
+                      std::tolower(static_cast<unsigned char>(b));
+           });
+}
+
 /// `<section>:` at column 0, alone or with a comment after it (57e):
 /// `backends:   # my models` is the section's header as YAML reads it, and
 /// an edit lands under it with the comment kept.
@@ -161,6 +177,266 @@ bool is_section_header(std::string_view line_body, std::string_view section) {
         return false;
     }
     return after_key(line_body, section.size() + 1) != AfterKey::Value;
+}
+
+/// The text between a double-quoted scalar's quotes, its escapes read as
+/// yaml-cpp reads them (defined with the value writers below).
+std::string unescaped(std::string_view inner);
+
+/// A scalar token's text: a quoted one unquoted (a double-quoted one's
+/// escapes read, `unescaped`), a plain one as it stands.
+std::string token_text_of(std::string_view token) {
+    if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
+        std::string out;
+        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
+            out += token[i];
+            if (token[i] == '\'' && i + 2 < token.size() && token[i + 1] == '\'') {
+                ++i;  // '' is one quote
+            }
+        }
+        return out;
+    }
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
+        return unescaped(token.substr(1, token.size() - 2));
+    }
+    return std::string{token};
+}
+
+/// Where the key that starts at `at` ends -- the `:` after it: past a quoted
+/// key's closing quote and any blanks after that (CLI-M44: `"a" :`), or the
+/// `:` a plain key runs to (`: ` or `:` at the end); npos when there is none.
+std::size_t key_token_end(std::string_view line, std::size_t at) {
+    if (at < line.size() && (line[at] == '"' || line[at] == '\'')) {
+        const char quote = line[at];
+        for (std::size_t i = at + 1; i < line.size(); ++i) {
+            if (quote == '"' && line[i] == '\\') {
+                ++i;
+                continue;
+            }
+            if (line[i] == quote) {
+                const std::size_t colon = line.find_first_not_of(" \t", i + 1);
+                return colon != std::string_view::npos && line[colon] == ':'
+                           ? colon
+                           : std::string_view::npos;
+            }
+        }
+        return std::string_view::npos;
+    }
+    for (std::size_t i = at; i < line.size(); ++i) {
+        if (line[i] == ':' && (i + 1 == line.size() || line[i + 1] == ' ' || line[i + 1] == '\t')) {
+            return i;
+        }
+        if (line[i] == '#' && i > at && (line[i - 1] == ' ' || line[i - 1] == '\t')) {
+            return std::string_view::npos;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// The key written from `at` to its `:` at `colon`, as YAML reads it: a
+/// quoted one unquoted, a plain one without the blanks before its colon.
+std::string key_text(std::string_view line, std::size_t at, std::size_t colon) {
+    std::string_view token = line.substr(at, colon - at);
+    while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
+        token.remove_suffix(1);
+    }
+    return token_text_of(token);
+}
+
+/// The refusal for a key the editor looks for, written in a spelling YAML
+/// reads as that key and the editor does not find (CLI-M44): quoted, or a
+/// blank before its colon. Passed by, the lookup read it as absent and wrote
+/// a second key beside it, which the loader never reads.
+ConfigEditError key_spelling_refusal(std::string_view dotted, std::string_view written,
+                                     std::string_view key) {
+    return ConfigEditError("the key " + std::string{dotted} + " is written '" +
+                           std::string{written} +
+                           "', and the editor finds a key only written bare, '" + std::string{key} +
+                           ":' -- rewrite it so, or carry the file to JSONC with 'apogee "
+                           "config migrate', whose every form the editor edits");
+}
+
+/// Refuses `line_body` when it writes `key` at `indent` in a spelling other
+/// than the bare `key:` the editor finds (CLI-M44) -- `"key":`, `'key':`,
+/// `key :` -- compared folded for an entry's name. A name no plain key spells
+/// (`yaml_plain_key`) is quoted wherever it is written, and left to the
+/// lookup's own words, which name the way to it; so is a line writing the key
+/// bare, or another key.
+void refuse_key_spelling(std::string_view line_body, std::size_t indent, std::string_view key,
+                         std::string_view dotted, bool folded = false) {
+    if (is_blank(line_body) || is_comment(line_body) || indent_of(line_body) != indent ||
+        !yaml_plain_key(key)) {
+        return;
+    }
+    const std::size_t colon = key_token_end(line_body, indent);
+    if (colon == std::string_view::npos) {
+        return;
+    }
+    const std::string_view token = line_body.substr(indent, colon - indent);
+    const bool bare = !token.empty() && token.front() != '"' && token.front() != '\'' &&
+                      token.back() != ' ' && token.back() != '\t';
+    const std::string text = key_text(line_body, indent, colon);
+    if (bare || !(folded ? equals_folded(text, key) : text == key)) {
+        return;
+    }
+    throw key_spelling_refusal(dotted, line_body.substr(indent, colon - indent + 1), key);
+}
+
+/// `parts` joined by dots, as a refusal names a key: `backends.m.model`.
+std::string dotted_path(std::initializer_list<std::string_view> parts) {
+    std::string out;
+    for (const std::string_view part : parts) {
+        out += (out.empty() ? "" : ".") + std::string{part};
+    }
+    return out;
+}
+
+/// Whether `line_body` is a block list's item at `indent`: a `-` there, then
+/// nothing, a space or a tab -- `-docs` is a scalar, never an item.
+bool is_list_item(std::string_view line_body, std::size_t indent) {
+    return line_body.substr(indent, 1) == "-" &&
+           (line_body.size() == indent + 1 || line_body[indent + 1] == ' ' ||
+            line_body[indent + 1] == '\t');
+}
+
+/// `count` spaces, as a refusal says them.
+std::string spaces(std::size_t count) {
+    return std::to_string(count) + (count == 1 ? " space" : " spaces");
+}
+
+/// The refusal for a level written in another indent than the editor's
+/// (CLI-M44): the level, the indent measured, the one the editor writes, and
+/// `config migrate` -- never "not valid YAML" or "not found", the words an
+/// edit splicing its 2-space lines into the file gave before.
+ConfigEditError layout_refusal(std::string_view dotted, std::size_t measured,
+                               std::size_t expected) {
+    return ConfigEditError(
+        "the lines under " + std::string{dotted} + ": are indented " + spaces(measured) +
+        ", where the editor writes " + std::to_string(expected) +
+        " -- it edits the 2-space layout Apogee writes, each level 2 spaces in from its key; "
+        "re-indent the file so, or carry it to JSONC with 'apogee config migrate', whose every "
+        "form the editor edits");
+}
+
+/// Half-open line range of a section's body, excluding its header.
+struct SectionRange {
+    bool found = false;
+    std::size_t header = 0;   ///< index of the `<section>:` line
+    std::size_t begin = 0;    ///< first body line
+    std::size_t end = 0;      ///< one past the last body line
+    std::string_view name{};  ///< the section's key, as a refusal names it
+};
+
+/// Where the quoted scalar's closing `quote` sits on `line`, from `from` --
+/// an escaped character (`\"` inside double quotes, `''` inside single) is
+/// none -- or npos: its text carries on over the next line.
+std::size_t closing_quote(std::string_view line, std::size_t from, char quote) {
+    for (std::size_t i = from; i < line.size(); ++i) {
+        if (quote == '"' && line[i] == '\\') {
+            ++i;
+        } else if (line[i] == quote) {
+            if (quote == '\'' && i + 1 < line.size() && line[i + 1] == '\'') {
+                ++i;
+                continue;
+            }
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+/// The quote a scalar starting at `from` on `line` opens and leaves open at
+/// the line's end, or nullopt: a plain scalar, or a quoted one closed there.
+std::optional<char> quote_left_open(std::string_view line, std::size_t from) {
+    from = line.find_first_not_of(" \t", from);
+    if (from == std::string_view::npos || (line[from] != '"' && line[from] != '\'')) {
+        return std::nullopt;
+    }
+    if (closing_quote(line, from + 1, line[from]) != std::string_view::npos) {
+        return std::nullopt;
+    }
+    return line[from];
+}
+
+/// Measures the layout of a section's lines (CLI-M44): every mapping under
+/// it -- its entries, their fields, a field's own block, at any depth -- sits
+/// `kLevelStep` in from its key, the layout the editor writes, or the edit is
+/// refused naming the level and the indent measured. A list's `- ` items are
+/// values, read in the indent the editor's list readers take (at their key's
+/// own indent, or deeper), and what sits under an item is not measured; nor
+/// is a value's own text: a block scalar's, a scalar on the lines below its
+/// key, a plain one carried on, a quoted one left open until its quote
+/// closes. A section an edit does not look up is never measured, so a
+/// section in another layout refuses only the edits of its own.
+void require_layout(const Lines& lines, const SectionRange& range) {
+    struct Level {
+        std::size_t indent = 0;
+        std::string path;
+    };
+
+    std::vector<Level> keys{{0, std::string{range.name}}};
+    bool open = true;                     // the last key is alone on its line
+    std::optional<std::size_t> list_at;   // a block list's `- ` items sit here
+    std::optional<std::size_t> value_at;  // a value's own lines sit deeper than this
+    std::optional<char> quote;            // a quoted scalar's text, until this closes
+    for (std::size_t i = range.begin; i < range.end; ++i) {
+        const std::string_view line = body(lines[i]);
+        if (quote.has_value()) {
+            if (closing_quote(line, 0, *quote) != std::string_view::npos) {
+                quote.reset();
+            }
+            continue;
+        }
+        if (is_blank(line) || is_comment(line)) {
+            continue;
+        }
+        const std::size_t at = indent_of(line);
+        if (list_at.has_value() && (at > *list_at || (at == *list_at && is_list_item(line, at)))) {
+            continue;
+        }
+        list_at.reset();
+        if (value_at.has_value() && at > *value_at) {
+            continue;
+        }
+        value_at.reset();
+        if (line[at] == '\t') {
+            return;  // a tab in the indentation: the loader's to refuse
+        }
+        while (keys.size() > 1 && keys.back().indent >= at) {
+            keys.pop_back();
+            open = false;
+        }
+        if (is_list_item(line, at)) {
+            list_at = at;
+            open = false;
+            continue;
+        }
+        const std::size_t colon = key_token_end(line, at);
+        if (colon == std::string_view::npos && line[at] != '?') {
+            // Text: under a key alone on its line, that key's scalar written
+            // on the lines below it, every deeper line its own.
+            value_at = open ? keys.back().indent : at;
+            quote = quote_left_open(line, at);
+            open = false;
+            continue;
+        }
+        // The first key under a key alone on its line sets its level.
+        if (open && at != keys.back().indent + kLevelStep) {
+            throw layout_refusal(keys.back().path, at, keys.back().indent + kLevelStep);
+        }
+        open = false;
+        if (colon == std::string_view::npos || after_key(line, colon + 1) == AfterKey::Value) {
+            // A key holding its value (or YAML's explicit `? key`): deeper
+            // lines carry it on.
+            value_at = at;
+            if (colon != std::string_view::npos) {
+                quote = quote_left_open(line, colon + 1);
+            }
+            continue;
+        }
+        keys.push_back({at, keys.back().path + "." + key_text(line, at, colon)});
+        open = true;
+    }
 }
 
 /// The refusal for a key whose own line holds its value -- a flow mapping
@@ -204,32 +480,21 @@ std::optional<std::string_view> entry_name(std::string_view line_body) {
     return name;
 }
 
-bool equals_folded(std::string_view lhs, std::string_view rhs) {
-    return lhs.size() == rhs.size() &&
-           std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char a, char b) {
-               return std::tolower(static_cast<unsigned char>(a)) ==
-                      std::tolower(static_cast<unsigned char>(b));
-           });
-}
-
-/// Half-open line range of a section's body, excluding its header.
-struct SectionRange {
-    bool found = false;
-    std::size_t header = 0;   ///< index of the `<section>:` line
-    std::size_t begin = 0;    ///< first body line
-    std::size_t end = 0;      ///< one past the last body line
-    std::string_view name{};  ///< the section's key, as a refusal names it
-};
-
 /// The section `<section>:` -- its header, alone or with a comment after it,
 /// and its body. Throws ConfigEditError when the file writes the section on
 /// its header's own line (`memory: {recall: true}`, 57e): a shape the editor
 /// does not see into, refused before any editor appends a second block
-/// beside it and prints a success the loader never reads.
+/// beside it and prints a success the loader never reads. So it does, by
+/// name, when the header is written quoted or spaced (`"backends":`,
+/// `models :`), or the section's lines in another layout than the editor's
+/// (CLI-M44, `require_layout`): every editor looks its section up here.
 SectionRange find_section(const Lines& lines, std::string_view section) {
     SectionRange range;
     range.name = section;
     for (std::size_t i = 0; i < lines.size(); ++i) {
+        if (is_top_level(body(lines[i]))) {
+            refuse_key_spelling(body(lines[i]), 0, section, section);
+        }
         if (const std::string_view text = body(lines[i]);
             is_top_level(text) && text.starts_with(section) && text.size() > section.size() &&
             text[section.size()] == ':' && after_key(text, section.size() + 1) == AfterKey::Value &&
@@ -249,6 +514,7 @@ SectionRange find_section(const Lines& lines, std::string_view section) {
                 break;
             }
         }
+        require_layout(lines, range);
         return range;
     }
     return range;
@@ -633,11 +899,16 @@ std::pair<std::size_t, std::size_t> entry_extent(const Lines& lines, std::size_t
 /// written on its own line -- `  a: {type: mock}`, or a tab after the colon
 /// as `find_section` takes it -- is refused by name (57e), as a section
 /// written so is: neither "not found" nor a second `a:` appended beside it
-/// would be true.
+/// would be true. So is an entry whose key is written quoted or spaced
+/// (CLI-M44).
 std::optional<std::size_t> find_entry_line(const Lines& lines, const SectionRange& section,
                                            std::string_view name) {
+    const std::string dotted = std::string{section.name} + "." + std::string{name};
     for (std::size_t i = section.begin; i < section.end; ++i) {
         const std::string_view line = body(lines[i]);
+        // `  "a":` is entry `a` to YAML: refused by name (CLI-M44), never
+        // "not found" or a second `a:` beside it.
+        refuse_key_spelling(line, kEntryIndent, name, dotted, /*folded=*/true);
         const std::optional<std::string_view> candidate = entry_name(line);
         if (candidate.has_value() && equals_folded(*candidate, name)) {
             return i;
@@ -651,7 +922,7 @@ std::optional<std::size_t> find_entry_line(const Lines& lines, const SectionRang
             (line[colon + 1] == ' ' || line[colon + 1] == '\t') &&
             equals_folded(line.substr(kEntryIndent, colon - kEntryIndent), name) &&
             after_key(line, colon + 1) == AfterKey::Value) {
-            throw inline_value_refusal(std::string{section.name} + "." + std::string{name}, name);
+            throw inline_value_refusal(dotted, name);
         }
     }
     return std::nullopt;
@@ -985,11 +1256,13 @@ std::string set_mcp_server_enabled(std::string_view content, std::string_view na
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string value = enabled ? "true" : "false";
+    const std::string key = dotted_path({"mcp_servers", name, "enabled"});
     for (std::size_t i = begin + 1; i < end; ++i) {
         const std::string_view line = body(lines[i]);
         if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
             continue;
         }
+        refuse_key_spelling(line, kFieldIndent, "enabled", key);
         const std::string_view rest = line.substr(kFieldIndent);
         if (!rest.starts_with("enabled:")) {
             continue;
@@ -1649,6 +1922,8 @@ std::string set_suite_member(std::string_view content, std::string_view suite,
     std::optional<std::size_t> members_line;
     for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
         const std::string_view line = body(lines[i]);
+        refuse_key_spelling(line, kFieldIndent, "members",
+                            dotted_path({"suites", suite, "members"}));
         if (key_at(line, kFieldIndent) != std::optional<std::string_view>{"members"}) {
             continue;
         }
@@ -1679,6 +1954,8 @@ std::string set_suite_member(std::string_view content, std::string_view suite,
     std::optional<std::size_t> role_line;
     std::optional<std::size_t> later_role;
     for (std::size_t i = block_begin + 1; i < block_end; ++i) {
+        refuse_key_spelling(body(lines[i]), kMemberIndent, role,
+                            dotted_path({"suites", suite, "members", role}));
         const std::optional<std::string_view> name = key_at(body(lines[i]), kMemberIndent);
         if (!name.has_value()) {
             continue;
@@ -1744,6 +2021,7 @@ std::string set_suite_field(std::string_view content, std::string_view suite, st
     std::optional<std::size_t> field_line;
     std::optional<std::size_t> before_line;
     for (std::size_t i = entry_begin + 1; i < entry_end; ++i) {
+        refuse_key_spelling(body(lines[i]), kFieldIndent, key, dotted_path({"suites", suite, key}));
         const std::optional<std::string_view> name = key_at(body(lines[i]), kFieldIndent);
         if (name == std::optional<std::string_view>{key}) {
             field_line = i;
@@ -1837,6 +2115,7 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
 
     const std::string prefix = std::string{key} + ":";
     const std::string after_prefix = std::string{after_field} + ":";
+    const std::string dotted = dotted_path({"backends", name, key});
     std::optional<std::size_t> type_line;
     std::optional<std::size_t> after_line;
     for (std::size_t i = begin + 1; i < end; ++i) {
@@ -1844,6 +2123,7 @@ std::string set_backend_path_field(std::string_view content, std::string_view na
         if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
             continue;
         }
+        refuse_key_spelling(line, kFieldIndent, key, dotted);
         const std::string_view field = line.substr(kFieldIndent);
         if (field.starts_with("type:")) {
             type_line = i;
@@ -1884,8 +2164,10 @@ std::string remove_backend_field(std::string_view content, std::string_view name
     }
     const auto [begin, end] = entry_extent(lines, *key_line, range.end);
     const std::string prefix = std::string{key} + ":";
+    const std::string dotted = dotted_path({"backends", name, key});
     for (std::size_t i = begin + 1; i < end; ++i) {
         const std::string_view line = body(lines[i]);
+        refuse_key_spelling(line, kFieldIndent, key, dotted);
         if (!is_blank(line) && !is_comment(line) && indent_of(line) == kFieldIndent &&
             line.substr(kFieldIndent).starts_with(prefix)) {
             remove_field(lines, i, end, kFieldIndent);
@@ -1936,11 +2218,13 @@ std::string set_backend_adapters(std::string_view content, std::string_view name
     std::optional<std::size_t> field_line;
     std::optional<std::size_t> path_line;
     std::optional<std::size_t> type_line;
+    const std::string dotted = dotted_path({"backends", name, "adapters"});
     for (std::size_t i = begin + 1; i < end; ++i) {
         const std::string_view line = body(lines[i]);
         if (is_blank(line) || is_comment(line) || indent_of(line) != kFieldIndent) {
             continue;
         }
+        refuse_key_spelling(line, kFieldIndent, "adapters", dotted);
         const std::string_view field = line.substr(kFieldIndent);
         if (field.starts_with("adapters:")) {
             field_line = i;
@@ -2131,6 +2415,10 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
         if (is_blank(line) || is_comment(line)) {
             continue;
         }
+        if (!graph_line.has_value()) {
+            refuse_key_spelling(line, kFieldIndent, "graph",
+                                dotted_path({"embeddings", collection, "graph"}));
+        }
         if (graph_line.has_value()) {
             if (indent_of(line) <= kFieldIndent) {
                 graph_end = i;  // the next sibling field ends the block
@@ -2145,6 +2433,8 @@ std::string set_embedding_graph_enabled(std::string_view content, std::string_vi
     if (graph_line.has_value()) {
         for (std::size_t i = *graph_line + 1; i < graph_end; ++i) {
             const std::string_view line = body(lines[i]);
+            refuse_key_spelling(line, kGraphFieldIndent, "enabled",
+                                dotted_path({"embeddings", collection, "graph", "enabled"}));
             if (is_blank(line) || is_comment(line) || indent_of(line) != kGraphFieldIndent ||
                 !line.substr(kGraphFieldIndent).starts_with("enabled:")) {
                 continue;
@@ -2196,6 +2486,7 @@ std::string set_section_rendered(std::string_view content, std::string_view sect
             if (indent != kEntryIndent) {
                 continue;
             }
+            refuse_key_spelling(line, kEntryIndent, field, dotted_path({section_name, field}));
             const std::string_view rest = line.substr(kEntryIndent);
             const std::size_t colon = rest.find(':');
             if (colon == std::string_view::npos || rest.substr(0, colon) != field) {
@@ -2278,6 +2569,7 @@ std::string set_subsection_rendered(std::string_view content, std::string_view s
             continue;
         }
         last_in_section = i;
+        refuse_key_spelling(line, kSubIndent, sub, dotted_path({section_name, sub}));
         if (key_at(line, kSubIndent) == sub) {
             std::string_view rest = line.substr(kSubIndent + sub.size() + 1);
             while (!rest.empty() && rest.front() == ' ') {
@@ -2303,6 +2595,7 @@ std::string set_subsection_rendered(std::string_view content, std::string_view s
         if (indent_of(line) <= kSubIndent) {
             break;  // the block ended
         }
+        refuse_key_spelling(line, kFieldIndent, field, dotted_path({section_name, sub, field}));
         if (key_at(line, kFieldIndent) == field) {
             replace_field_value(lines, i, section.end, kFieldIndent, rendered, terminator);
             return join_lines(lines);
@@ -2498,14 +2791,6 @@ void read_flow_items(HostList& list, std::string_view line) {
     }
 }
 
-/// Whether `line_body` is a block list's item at `indent`: a `-` there, then
-/// nothing, a space or a tab -- `-docs` is a scalar, never an item.
-bool is_list_item(std::string_view line_body, std::size_t indent) {
-    return line_body.substr(indent, 1) == "-" &&
-           (line_body.size() == indent + 1 || line_body[indent + 1] == ' ' ||
-            line_body[indent + 1] == '\t');
-}
-
 HostList find_host_list(const Lines& lines, const SectionRange& section) {
     HostList list;
     list.insert_at = section.begin;
@@ -2518,6 +2803,7 @@ HostList find_host_list(const Lines& lines, const SectionRange& section) {
         if (list.key_found || indent_of(line) != kEntryIndent) {
             continue;
         }
+        refuse_key_spelling(line, kEntryIndent, kAllowedHostsKey, "tools.allowed_hosts");
         const std::string_view rest = line.substr(kEntryIndent);
         if (!rest.starts_with(kAllowedHostsKey) || rest.size() <= kAllowedHostsKey.size() ||
             rest[kAllowedHostsKey.size()] != ':') {
@@ -2750,52 +3036,6 @@ std::string format_config(std::string_view content) {
 
 namespace {
 
-/// A scalar token's text: a quoted one unquoted (a double-quoted one's
-/// escapes read, `unescaped`), a plain one as it stands.
-std::string token_text_of(std::string_view token) {
-    if (token.size() >= 2 && token.front() == '\'' && token.back() == '\'') {
-        std::string out;
-        for (std::size_t i = 1; i + 1 < token.size(); ++i) {
-            out += token[i];
-            if (token[i] == '\'' && i + 2 < token.size() && token[i + 1] == '\'') {
-                ++i;  // '' is one quote
-            }
-        }
-        return out;
-    }
-    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
-        return unescaped(token.substr(1, token.size() - 2));
-    }
-    return std::string{token};
-}
-
-/// Where the key that starts at `at` ends: past its closing quote, or at the
-/// `:` a plain key runs to (`: ` or `:` at the end); npos when there is none.
-std::size_t key_token_end(std::string_view line, std::size_t at) {
-    if (at < line.size() && (line[at] == '"' || line[at] == '\'')) {
-        const char quote = line[at];
-        for (std::size_t i = at + 1; i < line.size(); ++i) {
-            if (quote == '"' && line[i] == '\\') {
-                ++i;
-                continue;
-            }
-            if (line[i] == quote) {
-                return i + 1 < line.size() && line[i + 1] == ':' ? i + 1 : std::string_view::npos;
-            }
-        }
-        return std::string_view::npos;
-    }
-    for (std::size_t i = at; i < line.size(); ++i) {
-        if (line[i] == ':' && (i + 1 == line.size() || line[i + 1] == ' ' || line[i + 1] == '\t')) {
-            return i;
-        }
-        if (line[i] == '#' && i > at && (line[i - 1] == ' ' || line[i - 1] == '\t')) {
-            return std::string_view::npos;
-        }
-    }
-    return std::string_view::npos;
-}
-
 /// Where a value starting at `from` ends: before a ` #` comment outside its
 /// quotes and its trailing blanks.
 std::size_t value_token_end(std::string_view line, std::size_t from) {
@@ -2909,6 +3149,9 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
         if (is_blank(line) || is_comment(line) || indent_of(line) != kEntryIndent) {
             continue;
         }
+        // A name every format edits is found written bare, as every other
+        // editor finds it (CLI-M44); a name none does is found as written.
+        refuse_key_spelling(line, kEntryIndent, old_name, dotted_path({"backends", old_name}));
         const std::size_t end = key_token_end(line, kEntryIndent);
         if (end == std::string_view::npos) {
             continue;
@@ -2917,7 +3160,7 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
             rest != std::string_view::npos && line[rest] != '#') {
             continue;  // a `key: value` line, no entry
         }
-        if (token_text_of(line.substr(kEntryIndent, end - kEntryIndent)) == old_name) {
+        if (key_text(line, kEntryIndent, end) == old_name) {
             key_line = i;
             break;
         }
@@ -2978,7 +3221,7 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
         if (end == std::string_view::npos) {
             continue;  // a list's scalar, or text
         }
-        const std::string key = token_text_of(line.substr(at, end - at));
+        const std::string key = key_text(line, at, end);
         const std::size_t from = line.find_first_not_of(" \t", end + 1);
         const std::size_t stop =
             from == std::string_view::npos ? from : value_token_end(line, from);
@@ -3012,14 +3255,148 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
 
 namespace {
 
-/// Applies a YAML transform to `content` in its own format: YAML directly; a
-/// JSONC config through the bridge -- its value written as YAML, the
-/// transform applied, the result spliced back into the JSONC text in place,
-/// so every comment and every byte the edit does not touch stays (28i).
+/// The byte-order mark a UTF-8 text may open with.
+constexpr std::string_view kUtf8Mark = "\xEF\xBB\xBF";
+
+/// Refuses a config that is not UTF-8 text (CLI-M44), naming what it is: a
+/// UTF-16 or UTF-32 text, by its byte-order mark or by the zero bytes its
+/// first character carries (YAML's own detection), or any text holding a
+/// NUL byte. yaml-cpp decodes such a file itself while the editor edits its
+/// bytes, so an edit appended UTF-8 to UTF-16 text and printed a success the
+/// loader never read.
+void refuse_encoding(std::string_view content) {
+    // YAML's detection table, in its order: each pattern's first bytes, -1
+    // for any byte.
+    struct Detected {
+        std::array<int, 4> opens{};
+        std::size_t length = 0;
+        std::string_view encoding{};
+    };
+
+    static constexpr std::array<Detected, 8> kTable{{
+        {{0x00, 0x00, 0xFE, 0xFF}, 4, "UTF-32 text (big-endian)"},
+        {{0x00, 0x00, 0x00, -1}, 4, "UTF-32 text (big-endian)"},
+        {{0xFF, 0xFE, 0x00, 0x00}, 4, "UTF-32 text (little-endian)"},
+        {{-1, 0x00, 0x00, 0x00}, 4, "UTF-32 text (little-endian)"},
+        {{0xFE, 0xFF, 0, 0}, 2, "UTF-16 text (big-endian)"},
+        {{0x00, -1, 0, 0}, 2, "UTF-16 text (big-endian)"},
+        {{0xFF, 0xFE, 0, 0}, 2, "UTF-16 text (little-endian)"},
+        {{-1, 0x00, 0, 0}, 2, "UTF-16 text (little-endian)"},
+    }};
+    for (const Detected& detected : kTable) {
+        bool opens = content.size() >= detected.length;
+        for (std::size_t i = 0; opens && i < detected.length; ++i) {
+            opens = detected.opens.at(i) < 0 ||
+                    static_cast<unsigned char>(content[i]) == detected.opens.at(i);
+        }
+        if (opens) {
+            throw ConfigEditError("this config is " + std::string{detected.encoding} +
+                                  ", and the editor edits UTF-8 alone -- save it as UTF-8; "
+                                  "nothing was changed");
+        }
+    }
+    if (const std::size_t nul = content.find('\0'); nul != std::string_view::npos) {
+        throw ConfigEditError("this config holds a NUL byte at offset " + std::to_string(nul) +
+                              ", which no UTF-8 text does -- save it as UTF-8; nothing was "
+                              "changed");
+    }
+}
+
+/// A YAML config's text, cut where the line editor edits it (CLI-M44): a
+/// UTF-8 byte-order mark before it, kept as it is; then its first document,
+/// the one `YAML::Load` reads; then the rest from the marker that ends it --
+/// a `...`, or the `---` starting a second document -- which holds nothing
+/// but blank lines, comments and markers.
+struct YamlText {
+    std::string_view mark;
+    std::string_view document;
+    std::string_view rest;
+};
+
+/// What `line` is as a document marker, `---` or `...` alone or with a
+/// comment or a node after it, or "" -- with `content` set when a node
+/// follows on its line.
+std::string_view document_marker(std::string_view line, bool& content) {
+    for (const std::string_view marker : {std::string_view{"---"}, std::string_view{"..."}}) {
+        if (line.starts_with(marker) && (line.size() == 3 || line[3] == ' ' || line[3] == '\t')) {
+            const std::size_t next = line.find_first_not_of(" \t", 3);
+            content = next != std::string_view::npos && line[next] != '#';
+            return marker;
+        }
+    }
+    content = false;
+    return {};
+}
+
+/// `content` cut into its `YamlText`. A rest holding anything the loader
+/// would read as a later document's content is refused by name, naming the
+/// hand edit -- `config migrate` refuses that shape too: the editor edits the
+/// first document alone, and a key it found or wrote in a later one would
+/// print a success the loader never reads.
+YamlText yaml_text_of(std::string_view content) {
+    YamlText out;
+    if (content.starts_with(kUtf8Mark)) {
+        out.mark = content.substr(0, kUtf8Mark.size());
+        content.remove_prefix(kUtf8Mark.size());
+    }
+    out.document = content;
+    const yaml_text::Lines lines = yaml_text::split_lines(content);
+    bool started = false;  // the first document has begun: a node, or its `---`
+    std::size_t offset = 0;
+    for (std::size_t i = 0; i < lines.size(); offset += lines[i].size(), ++i) {
+        const std::string_view line = yaml_text::body(lines[i]);
+        bool node = false;
+        const std::string_view marker = document_marker(line, node);
+        if (marker.empty()) {
+            started = started || (!yaml_text::is_blank(line) && !yaml_text::is_comment(line) &&
+                                  line.front() != '%');
+            continue;
+        }
+        if (marker == "---" && !started) {
+            started = true;  // the first document's own start
+            continue;
+        }
+        for (std::size_t j = i; j < lines.size(); ++j) {
+            const std::string_view later = yaml_text::body(lines[j]);
+            bool holds = false;
+            const bool marked = !document_marker(later, holds).empty();
+            if (marked ? holds : !yaml_text::is_blank(later) && !yaml_text::is_comment(later)) {
+                throw ConfigEditError("this config holds a second YAML document, after the '" +
+                                      std::string{marker} + "' on line " + std::to_string(i + 1) +
+                                      ", which Apogee never reads -- move what it holds into the "
+                                      "first document, or delete it, by hand");
+            }
+        }
+        out.document = content.substr(0, offset);
+        out.rest = content.substr(offset);
+        return out;
+    }
+    return out;
+}
+
+/// Applies a YAML transform to the first document of `content`
+/// (`yaml_text_of`), the byte-order mark and the rest kept as they are.
+template <typename Transform>
+std::string in_yaml_document(std::string_view content, Transform&& transform) {
+    const YamlText text = yaml_text_of(content);
+    if (text.mark.empty() && text.rest.empty()) {
+        return std::forward<Transform>(transform)(content);
+    }
+    return std::string{text.mark} + std::forward<Transform>(transform)(text.document) +
+           std::string{text.rest};
+}
+
+/// Applies a YAML transform to `content` in its own format: YAML directly --
+/// its first document, after a UTF-8 byte-order mark (CLI-M44); a JSONC
+/// config through the bridge -- its value written as YAML, the transform
+/// applied, the result spliced back into the JSONC text in place, so every
+/// comment and every byte the edit does not touch stays (28i). A text that is
+/// not UTF-8 is refused first, in either format (CLI-M44).
 template <typename Transform>
 std::string in_format(std::string_view content, Transform&& transform) {
+    refuse_encoding(content);
     if (!jsonc::looks_like_jsonc(content)) {
-        return std::forward<Transform>(transform)(content);
+        return in_yaml_document(content, std::forward<Transform>(transform));
     }
     nlohmann::ordered_json current;
     try {
@@ -3144,18 +3521,28 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
     }
     // A name taken -- the same folded, as add-backend refuses one -- unless it
     // is this backend's own, a change of case.
-    for (const std::string& name : section_entry_names(content, "backends")) {
-        if (name != old_name && yaml_text::fold_collision({name}, new_name).has_value()) {
-            throw ConfigEditError("a backend named '" + name + "' already exists");
+    const auto refuse_taken = [&](std::string_view text) {
+        for (const std::string& name : section_entry_names(text, "backends")) {
+            if (name != old_name && yaml_text::fold_collision({name}, new_name).has_value()) {
+                throw ConfigEditError("a backend named '" + name + "' already exists");
+            }
+            if (name == new_name) {
+                throw ConfigEditError("a backend named '" + name + "' already exists");
+            }
         }
-        if (name == new_name) {
-            throw ConfigEditError("a backend named '" + name + "' already exists");
-        }
-    }
+    };
+    // Not through `in_format` -- the JSONC half edits the JSONC itself -- but
+    // with its refusals: a text that is not UTF-8, and a YAML config's first
+    // document alone (CLI-M44).
+    refuse_encoding(content);
     if (jsonc::looks_like_jsonc(content)) {
+        refuse_taken(content);
         return rename_backend_jsonc(content, old_name, new_name);
     }
-    return yaml_text::rename_backend(content, old_name, new_name, backend_reference_paths());
+    return in_yaml_document(content, [&](std::string_view text) {
+        refuse_taken(text);
+        return yaml_text::rename_backend(text, old_name, new_name, backend_reference_paths());
+    });
 }
 
 std::string yaml_scalar(std::string_view value) {
@@ -3164,7 +3551,8 @@ std::string yaml_scalar(std::string_view value) {
 
 std::vector<std::string> section_entry_names(std::string_view content, std::string_view section) {
     if (!jsonc::looks_like_jsonc(content)) {
-        return yaml_text::section_entry_names(content, section);
+        // The first document's, as the loader reads it (CLI-M44).
+        return yaml_text::section_entry_names(yaml_text_of(content).document, section);
     }
     std::vector<std::string> names;
     try {
@@ -3623,7 +4011,10 @@ std::optional<Config> loader_reading(std::string_view text) {
 /// The refusal for a gate edit the loader would read without its change
 /// (CLI-M43): what would not take effect, what the loader reads instead,
 /// that nothing was changed, and the way to a file the editor sees whole --
-/// `config migrate` for YAML, whose layouts it may not see.
+/// `config migrate` for YAML, whose layouts it may not see. Since CLI-M44 the
+/// line editor refuses a quoted or spaced key and a later document by name
+/// before this is asked, so what reaches it is a key YAML reads that the
+/// editor's lookups pass: one written twice, or in the explicit `? key` form.
 ConfigEditError not_landed(std::string_view content, std::string_view change,
                            std::string_view reading) {
     std::string message = std::string{change} +
@@ -3633,9 +4024,9 @@ ConfigEditError not_landed(std::string_view content, std::string_view change,
         message += "the line editor does not see where this file writes it; edit it by hand";
     } else {
         message +=
-            "the line editor does not see where this file writes it (a quoted or spaced key, a "
-            "key written twice, a second document after '---' or '...'); carry the file to JSONC "
-            "with 'apogee config migrate', whose every form the editor edits";
+            "the line editor does not see where this file writes it (a key written twice, or in "
+            "YAML's explicit '? key' form); carry the file to JSONC with 'apogee config "
+            "migrate', whose every form the editor edits";
     }
     return ConfigEditError(message);
 }
@@ -3777,8 +4168,28 @@ std::string remove_allowed_host(std::string_view content, std::string_view host)
 }
 
 std::string format_config(std::string_view content) {
-    // Whitespace only, never a key or a value: the same tidy in either format.
+    // Whitespace only, never a key or a value: the same tidy in either format,
+    // and in any layout -- but of UTF-8 text alone (CLI-M44), where a line's
+    // end is its own byte.
+    refuse_encoding(content);
     return yaml_text::format_config(content);
+}
+
+Config parse_edited_config(std::string_view text) {
+    constexpr std::string_view kOrigin = "<edited config>";
+    try {
+        return parse_config(text, kOrigin);
+    } catch (const ConfigError& e) {
+        // The loader's words without its origin, which names no file here.
+        std::string_view detail = e.what();
+        if (detail.starts_with(kOrigin) && detail.substr(kOrigin.size()).starts_with(": ")) {
+            detail.remove_prefix(kOrigin.size() + 2);
+        }
+        throw ConfigEditError(
+            "the edit was not applied because its result would not load, so nothing was "
+            "changed: " +
+            std::string{detail});
+    }
 }
 
 std::string read_config_file(const std::filesystem::path& path) {
