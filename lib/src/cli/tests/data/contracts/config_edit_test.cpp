@@ -1317,6 +1317,248 @@ TEST_CASE("allowed-host edits refuse what is not a host, or not listed", "[confi
         ConfigEditError);
 }
 
+// --- the gate's edits land, or say they did not (CLI-M43) --------------------
+
+TEST_CASE("a compact host list is read: add then remove gives back its bytes",
+          "[config_edit][hosts][CLI-M43]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::parse_config;
+    using apogee::harness::remove_allowed_host;
+
+    // The bug as a fixture: items at the key's own indent (what PyYAML and
+    // Ruby's Psych write) read as no list -- the remove said "not in", the
+    // add rewrote the key to `[x]` above the items and could not parse.
+    struct Shape {
+        std::string name;
+        std::string text;     ///< docs.python.org and example.com, compact
+        std::string added;    ///< after add_allowed_host(text, "pypi.org")
+        std::string removed;  ///< after remove_allowed_host(text, "example.com")
+    };
+
+    const std::string psych_head =
+        "---\nbackends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\n";
+    const std::vector<Shape> shapes{
+        {"compact", "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n  - pypi.org\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org\n"},
+        {"Psych's exact dump",
+         psych_head + "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n",
+         psych_head +
+             "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n  - pypi.org\n",
+         psych_head + "tools:\n  allowed_hosts:\n  - docs.python.org\n"},
+        {"comments between and after items",
+         "tools:\n  allowed_hosts:\n  - docs.python.org   # the docs\n  # pasted later\n"
+         "  - example.com   # the example\n  # end of the list\nui:\n  markdown: true\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org   # the docs\n  # pasted later\n"
+         "  - example.com   # the example\n  - pypi.org\n  # end of the list\nui:\n"
+         "  markdown: true\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org   # the docs\n  # pasted later\n"
+         "  # end of the list\nui:\n  markdown: true\n"},
+        {"another key after the list",
+         "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n  disabled:\n  - shell\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n  - pypi.org\n"
+         "  disabled:\n  - shell\n",
+         "tools:\n  allowed_hosts:\n  - docs.python.org\n  disabled:\n  - shell\n"},
+        {"CRLF", "tools:\r\n  allowed_hosts:\r\n  - docs.python.org\r\n  - example.com\r\n",
+         "tools:\r\n  allowed_hosts:\r\n  - docs.python.org\r\n  - example.com\r\n"
+         "  - pypi.org\r\n",
+         "tools:\r\n  allowed_hosts:\r\n  - docs.python.org\r\n"},
+        {"a tab after the dash",
+         "tools:\n  allowed_hosts:\n  -\tdocs.python.org\n  - example.com\n",
+         "tools:\n  allowed_hosts:\n  -\tdocs.python.org\n  - example.com\n  - pypi.org\n",
+         "tools:\n  allowed_hosts:\n  -\tdocs.python.org\n"},
+    };
+    for (const Shape& shape : shapes) {
+        INFO(shape.name);
+        const std::string added = add_allowed_host(shape.text, "pypi.org");
+        CHECK(added == shape.added);
+        CHECK(remove_allowed_host(added, "pypi.org") == shape.text);
+        CHECK(parse_config(added, "<added>").tools.allowed_hosts ==
+              std::vector<std::string>{"docs.python.org", "example.com", "pypi.org"});
+        const std::string removed = remove_allowed_host(shape.text, "example.com");
+        CHECK(removed == shape.removed);
+        CHECK(parse_config(removed, "<removed>").tools.allowed_hosts ==
+              std::vector<std::string>{"docs.python.org"});
+    }
+    const apogee::harness::Config another = parse_config(shapes[3].added, "<another>");
+    CHECK(another.tools.disabled == std::vector<std::string>{"shell"});
+
+    // CLI-M40's cases on a compact list: every spelling of a host goes, and
+    // an entry that is no host goes by its own spelling.
+    constexpr std::string_view kSpelled =
+        "tools:\n  allowed_hosts:\n  - docs.python.org\n  - Example.COM.\n"
+        "  - \"https://not-a-host.example/path\"   # pasted\n  - example.com\n";
+    CHECK(remove_allowed_host(kSpelled, "example.com") ==
+          "tools:\n  allowed_hosts:\n  - docs.python.org\n"
+          "  - \"https://not-a-host.example/path\"   # pasted\n");
+    CHECK(remove_allowed_host(kSpelled, "https://not-a-host.example/path") ==
+          "tools:\n  allowed_hosts:\n  - docs.python.org\n  - Example.COM.\n  - example.com\n");
+    CHECK(add_allowed_host(kSpelled, "EXAMPLE.com") == kSpelled);  // listed: nothing to write
+    CHECK_THROWS_WITH(remove_allowed_host(kSpelled, "pypi.org"),
+                      "'pypi.org' is not in tools.allowed_hosts");
+}
+
+TEST_CASE("an item written over two lines is refused by name, never split from its value",
+          "[config_edit][hosts][CLI-M43]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::remove_allowed_host;
+    // The loader reads `-\n  docs.python.org` as one item; the scan stopped
+    // at the continuation, and an add landed above it: the loader then read
+    // `pypi.org docs.python.org` as one entry, which allows nothing.
+    for (const std::string& text :
+         {std::string{
+              "tools:\n  allowed_hosts:\n    -\n      docs.python.org\n    - example.com\n"},
+          std::string{"tools:\n  allowed_hosts:\n  - example.com\n  -\n    docs.python.org\n"},
+          std::string{"tools:\n  allowed_hosts:\n  - docs.python.org\n    and.more\n"}}) {
+        INFO(text);
+        for (const std::function<std::string()>& edit : std::vector<std::function<std::string()>>{
+                 [&] { return add_allowed_host(text, "pypi.org"); },
+                 [&] { return remove_allowed_host(text, "example.com"); }}) {
+            CHECK_THROWS_WITH(edit(),
+                              "tools.allowed_hosts holds an item written over more than "
+                              "one line -- write each `- host` on one line");
+        }
+    }
+}
+
+namespace {
+
+/// A read-back refusal (CLI-M43): the edit would not take effect, nothing
+/// was changed, and `config migrate` is the way -- never the words a broken
+/// edit or a miss has.
+void require_not_landed(const std::function<std::string()>& edit) {
+    try {
+        (void)edit();
+        FAIL("the edit printed a success the loader would not read");
+    } catch (const ConfigEditError& e) {
+        const std::string what = e.what();
+        INFO(what);
+        CHECK(what.find("would not take effect") != std::string::npos);
+        CHECK(what.find("nothing was changed") != std::string::npos);
+        CHECK(what.find("apogee config migrate") != std::string::npos);
+        CHECK(what.find("not valid YAML") == std::string::npos);
+        CHECK(what.find("is not in tools.allowed_hosts") == std::string::npos);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("the gate's three edits read their effect back, and refuse one that would not land",
+          "[config_edit][hosts][permissions][CLI-M43]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::remove_allowed_host;
+    // Each printed success before: a second section appended beside a
+    // quoted or spaced header, a section after a `...` the loader never
+    // reads, a second key beside a quoted one.
+    for (const std::string& text : {std::string{"\"permissions\":\n  run_command: allow\n"},
+                                    std::string{"permissions :\n  run_command: allow\n"},
+                                    std::string{"backends:\n  m:\n    type: mock\n...\n"}}) {
+        INFO(text);
+        require_not_landed([&] { return set_permission(text, "run_command", "deny"); });
+    }
+    for (const std::string& text : {std::string{"tools:\n  \"allowed_hosts\": [docs.python.org]\n"},
+                                    std::string{"tools:\n  allowed_hosts : [docs.python.org]\n"},
+                                    std::string{"\"tools\":\n  allowed_hosts: [docs.python.org]\n"},
+                                    std::string{"backends:\n  m:\n    type: mock\n...\n"}}) {
+        INFO(text);
+        require_not_landed([&] { return add_allowed_host(text, "pypi.org"); });
+    }
+    // A remove the line editor finds nothing to do for, while the loader
+    // still lists the host: not "not in tools.allowed_hosts".
+    for (const std::string& text : {std::string{"tools:\n  \"allowed_hosts\": [docs.python.org]\n"},
+                                    std::string{"tools:\n  allowed_hosts : [docs.python.org]\n"}}) {
+        INFO(text);
+        require_not_landed([&] { return remove_allowed_host(text, "docs.python.org"); });
+    }
+    // Where the effect already reads right, an edit the loader would not
+    // read is still never written: no dead section or key beside the one it
+    // reads (57e's "never shadowed"), which a later hand edit would be lost in.
+    require_not_landed([] {
+        return set_permission("\"permissions\":\n  write_file: allow\n", "run_command", "ask");
+    });
+    require_not_landed([] {
+        return set_permission("\"permissions\":\n  run_command: allow\n", "run_command", "allow");
+    });
+    require_not_landed([] {
+        return set_permission(
+            "backends:\n  m:\n    type: mock\n---\npermissions:\n  run_command: allow\n",
+            "run_command", "ask");
+    });
+    require_not_landed(
+        [] { return add_allowed_host("tools:\n  \"allowed_hosts\": [pypi.org]\n", "pypi.org"); });
+    require_not_landed([] {
+        return remove_allowed_host(
+            "backends:\n  m:\n    type: mock\n...\ntools:\n  allowed_hosts: [a.example]\n",
+            "a.example");
+    });
+    // The control: the same edits on a bare header land, as today, a level
+    // already set included.
+    CHECK(set_permission("permissions:\n  run_command: allow\n", "run_command", "deny") ==
+          "permissions:\n  run_command: deny\n");
+    CHECK(set_permission("permissions:\n  run_command: allow   # mine\n", "run_command", "allow") ==
+          "permissions:\n  run_command: allow   # mine\n");
+    CHECK(set_permission("backends:\n  m:\n    type: mock\n", "run_command", "ask") ==
+          "backends:\n  m:\n    type: mock\n\npermissions:\n  run_command: ask\n");
+    CHECK(add_allowed_host("tools:\n  allowed_hosts: [docs.python.org]\n", "pypi.org") ==
+          "tools:\n  allowed_hosts: [docs.python.org, pypi.org]\n");
+}
+
+TEST_CASE(
+    "a block list at the end of a file with no final newline takes an add on a line of its own",
+    "[config_edit][hosts][CLI-M43]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::parse_config;
+    // The new item was glued onto the last one: the loader read the one
+    // entry `a.example    - pypi.org`, which allows nothing.
+    for (const auto& [text, added] : std::vector<std::pair<std::string, std::string>>{
+             {"tools:\n  allowed_hosts:\n  - a.example",
+              "tools:\n  allowed_hosts:\n  - a.example\n  - pypi.org\n"},
+             {"tools:\n  allowed_hosts:\n    - a.example   # mine",
+              "tools:\n  allowed_hosts:\n    - a.example   # mine\n    - pypi.org\n"},
+             {"tools:\r\n  allowed_hosts:\r\n  - a.example",
+              "tools:\r\n  allowed_hosts:\r\n  - a.example\r\n  - pypi.org\r\n"}}) {
+        INFO(text);
+        const std::string edited = add_allowed_host(text, "pypi.org");
+        CHECK(edited == added);
+        CHECK(parse_config(edited, "<added>").tools.allowed_hosts ==
+              std::vector<std::string>{"a.example", "pypi.org"});
+    }
+}
+
+TEST_CASE("a remove is refused while an entry spelled through a variable names the host",
+          "[config_edit][hosts][CLI-M43]") {
+    using apogee::harness::remove_allowed_host;
+    // CLI-M40 left it to this read-back: the loader expands `${VAR}`, the
+    // line editor reads the entry as written, so "removed" left the host
+    // reached unasked.
+    const std::string text = "tools:\n  allowed_hosts: [example.com, \"${APOGEE_M43_HOST}\"]\n";
+    const std::string json =
+        "{\"tools\": {\"allowed_hosts\": [\"example.com\", \"${APOGEE_M43_HOST}\"]}}\n";
+    {
+        const apogee::testing::EnvGuard variable{"APOGEE_M43_HOST", "Example.COM."};
+        for (const std::string& content :
+             {text, json, std::string{"tools:\n  allowed_hosts: [\"${APOGEE_M43_HOST}\"]\n"}}) {
+            INFO(content);
+            CHECK_THROWS_WITH(
+                remove_allowed_host(content, "example.com"),
+                "removing example.com from tools.allowed_hosts would not take effect -- as Apogee "
+                "reads this file, the list still holds it, through the entry "
+                "'${APOGEE_M43_HOST}', which the line editor reads as written -- so nothing was "
+                "changed: edit that entry by hand");
+        }
+    }
+    {
+        // The entry named as written goes; the literal entry stays.
+        const apogee::testing::EnvGuard variable{"APOGEE_M43_HOST", "example.com"};
+        CHECK(remove_allowed_host(text, "${APOGEE_M43_HOST}") ==
+              "tools:\n  allowed_hosts: [example.com]\n");
+    }
+    // Unset, the entry names no host, and the remove lands.
+    const apogee::testing::EnvUnsetGuard unset{"APOGEE_M43_HOST"};
+    CHECK(remove_allowed_host(text, "example.com") ==
+          "tools:\n  allowed_hosts: [\"${APOGEE_M43_HOST}\"]\n");
+}
+
 TEST_CASE("the helper role pointers are set through the one editor", "[config_edit][roles]") {
     const std::string base = "models:\n  default: a  # the chat\nbackends:\n  a:\n    type: mock\n";
     std::string edited = apogee::harness::set_models_role(base, "default_utility", "helper");

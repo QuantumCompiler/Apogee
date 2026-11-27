@@ -33,6 +33,14 @@ namespace {
 constexpr std::string_view kEntryNameRule =
     "a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null";
 
+/// A remove that names no entry, as the line editor reads the list -- told
+/// apart from the transform's other refusals so the read-back can ask the
+/// loader whether it reads the list the same way (CLI-M43).
+class HostNotListed : public ConfigEditError {
+public:
+    using ConfigEditError::ConfigEditError;
+};
+
 }  // namespace
 
 /// The line editor: every transform, defined once over the YAML text the
@@ -2490,6 +2498,14 @@ void read_flow_items(HostList& list, std::string_view line) {
     }
 }
 
+/// Whether `line_body` is a block list's item at `indent`: a `-` there, then
+/// nothing, a space or a tab -- `-docs` is a scalar, never an item.
+bool is_list_item(std::string_view line_body, std::size_t indent) {
+    return line_body.substr(indent, 1) == "-" &&
+           (line_body.size() == indent + 1 || line_body[indent + 1] == ' ' ||
+            line_body[indent + 1] == '\t');
+}
+
 HostList find_host_list(const Lines& lines, const SectionRange& section) {
     HostList list;
     list.insert_at = section.begin;
@@ -2524,15 +2540,35 @@ HostList find_host_list(const Lines& lines, const SectionRange& section) {
         if (value_end(original, value) > value) {
             throw ConfigEditError("tools.allowed_hosts is not a list; edit it by hand");
         }
-        // A block list: the `- item` lines nested under the key.
+        // A block list: the `- item` lines nested under the key, or written
+        // at the key's own indent -- the compact form PyYAML and Ruby's Psych
+        // write, by `field_extent`'s rule (CLI-M43). The list ends at the
+        // first content line at or above the key's indent that is no item.
+        std::optional<std::size_t> item_indent;
         for (std::size_t j = i + 1; j < section.end; ++j) {
             const std::string_view item_line = body(lines[j]);
             if (is_blank(item_line) || is_comment(item_line)) {
                 continue;
             }
             const std::size_t indent = indent_of(item_line);
-            if (indent <= kEntryIndent || item_line.substr(indent, 1) != "-") {
+            const bool dash = is_list_item(item_line, indent);
+            if (indent < kEntryIndent) {
                 break;
+            }
+            if (!item_indent.has_value()) {
+                if (!dash) {
+                    break;  // `allowed_hosts:` alone, the next key or no list under it
+                }
+                item_indent = indent;
+            } else if (indent <= kEntryIndent && (indent != *item_indent || !dash)) {
+                break;  // the next key, at the key's own indent
+            }
+            if (indent != *item_indent || !dash) {
+                // A deeper line is the item before it carried on, as the
+                // loader reads it: never split from its value.
+                throw ConfigEditError(
+                    "tools.allowed_hosts holds an item written over more than one line -- write "
+                    "each `- host` on one line");
             }
             const std::size_t start = indent + 1;
             std::size_t token = start;
@@ -2545,6 +2581,24 @@ HostList find_host_list(const Lines& lines, const SectionRange& section) {
         }
     }
     return list;
+}
+
+/// `tools.allowed_hosts`' entries as the line editor reads them -- as
+/// written, `${VAR}` and all -- or none where it reads no list.
+std::vector<std::string> allowed_host_entries(std::string_view content) {
+    const Lines lines = split_lines(content);
+    std::vector<std::string> values;
+    try {
+        const SectionRange section = find_section(lines, "tools");
+        if (section.found) {
+            for (const ListItem& item : find_host_list(lines, section).items) {
+                values.push_back(item.value);
+            }
+        }
+    } catch (const ConfigEditError&) {
+        values.clear();  // a list it refuses: none it reads
+    }
+    return values;
 }
 
 }  // namespace
@@ -2600,7 +2654,10 @@ std::string add_allowed_host(std::string_view content, std::string_view host) {
         }
         return join_lines(lines);
     }
-    const std::string& last = lines[list.items.back().line];
+    std::string& last = lines[list.items.back().line];
+    if (!last.ends_with('\n')) {
+        last += terminator;  // the file's unterminated last line: the item ends here
+    }
     const std::string indent(indent_of(last), ' ');
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(list.items.back().line + 1),
                  indent + "- " + written + terminator);
@@ -2624,7 +2681,7 @@ std::string remove_allowed_host(std::string_view content, std::string_view host)
     if (matches.empty()) {
         // Nothing named, nothing deleted: a miss says so (26o), in the words
         // a host and a non-host have always had.
-        throw ConfigEditError("'" + checked_host(host) + "' is not in tools.allowed_hosts");
+        throw HostNotListed("'" + checked_host(host) + "' is not in tools.allowed_hosts");
     }
     // Last first, so an earlier match's offsets stay where they were.
     if (!list.flow) {
@@ -3550,21 +3607,173 @@ std::string set_scalar(std::string_view content, std::string_view key, std::stri
         content, [&](std::string_view text) { return yaml_text::set_scalar(text, key, rendered); });
 }
 
+namespace {
+
+/// The config as the loader reads `text` -- the read-back's view (CLI-M43),
+/// never a load from disk -- or none when it does not parse: a result that
+/// breaks the file is `edit_config_file`'s re-parse to refuse, as before.
+std::optional<Config> loader_reading(std::string_view text) {
+    try {
+        return parse_config(text, "<edited config>");
+    } catch (const ConfigError&) {
+        return std::nullopt;
+    }
+}
+
+/// The refusal for a gate edit the loader would read without its change
+/// (CLI-M43): what would not take effect, what the loader reads instead,
+/// that nothing was changed, and the way to a file the editor sees whole --
+/// `config migrate` for YAML, whose layouts it may not see.
+ConfigEditError not_landed(std::string_view content, std::string_view change,
+                           std::string_view reading) {
+    std::string message = std::string{change} +
+                          " would not take effect -- as Apogee reads this file, " +
+                          std::string{reading} + " -- so nothing was changed: ";
+    if (jsonc::looks_like_jsonc(content)) {
+        message += "the line editor does not see where this file writes it; edit it by hand";
+    } else {
+        message +=
+            "the line editor does not see where this file writes it (a quoted or spaced key, a "
+            "key written twice, a second document after '---' or '...'); carry the file to JSONC "
+            "with 'apogee config migrate', whose every form the editor edits";
+    }
+    return ConfigEditError(message);
+}
+
+/// A remove's change as its refusals say it: the host, or the entry as
+/// written when the argument is none.
+std::string removal(std::string_view host) {
+    const std::optional<std::string> canonical = canonical_host(host);
+    return "removing " + (canonical.has_value() ? *canonical : "'" + std::string{host} + "'") +
+           " from tools.allowed_hosts";
+}
+
+/// The refusal for a remove the loader would still read the host in: an
+/// entry spelled through `${VAR}` named when one expands to it -- the loader
+/// expands it, the line editor reads it as written (CLI-M40's count) --
+/// else the layout `not_landed` names.
+ConfigEditError not_removed(std::string_view content, std::string_view host) {
+    const std::string change = removal(host);
+    std::vector<std::string> entries;
+    (void)in_format(content, [&](std::string_view text) {
+        entries = yaml_text::allowed_host_entries(text);
+        return std::string{text};
+    });
+    for (const std::string& entry : entries) {
+        const std::array<std::string, 1> expanded{expand_env(entry)};
+        if (entry.find("${") != std::string::npos && expanded[0] != entry &&
+            !allowed_host_matches(expanded, host).empty()) {
+            return ConfigEditError(change +
+                                   " would not take effect -- as Apogee reads this file, the list "
+                                   "still holds it, through the entry '" +
+                                   entry +
+                                   "', which the line editor reads as written -- so nothing was "
+                                   "changed: edit that entry by hand");
+        }
+    }
+    return not_landed(content, change, "the list still holds it");
+}
+
+}  // namespace
+
+// The gate's three edits read their effect back (CLI-M43): what the model may
+// do unasked is a level, a host listed, a host gone, and each is checked in
+// the loader's reading of the result -- and, where the text changed, that
+// the loader reads the line the editor wrote: an edit whose effect already
+// held proves nothing by its result, and a line written where the loader
+// never looks is the shadow 57e refuses.
+
 std::string set_permission(std::string_view content, std::string_view tool,
                            std::string_view level) {
-    return in_format(content, [&](std::string_view text) {
-        return yaml_text::set_permission(text, tool, level);
-    });
+    const auto edit = [&](std::string_view written) {
+        return in_format(content, [&](std::string_view text) {
+            return yaml_text::set_permission(text, tool, written);
+        });
+    };
+    std::string edited = edit(level);
+    const std::optional<PermissionLevel> wanted = permission_level_from_string(level);
+    const std::optional<Config> reading = loader_reading(edited);
+    if (!reading.has_value() || !wanted.has_value()) {
+        return edited;
+    }
+    const std::string change =
+        "setting permissions." + std::string{tool} + " to " + std::string{level};
+    const std::string key = "permissions." + std::string{tool};
+    if (reading->permissions.level(tool) != *wanted) {
+        throw not_landed(content, change,
+                         key + " is " + std::string{to_string(reading->permissions.level(tool))});
+    }
+    // The level already read so: the same edit with another level shows
+    // whether the loader reads the line the editor writes.
+    if (const std::optional<Config> before = loader_reading(content);
+        before.has_value() && before->permissions.level(tool) == *wanted) {
+        const PermissionLevel other =
+            *wanted == PermissionLevel::Deny ? PermissionLevel::Allow : PermissionLevel::Deny;
+        if (const std::optional<Config> probe = loader_reading(edit(to_string(other)));
+            probe.has_value() && probe->permissions.level(tool) != other) {
+            throw not_landed(content, change,
+                             key + " is " + std::string{level} +
+                                 " already, and the line the editor would write is not one it "
+                                 "reads");
+        }
+    }
+    return edited;
 }
 
 std::string add_allowed_host(std::string_view content, std::string_view host) {
-    return in_format(
+    std::string edited = in_format(
         content, [&](std::string_view text) { return yaml_text::add_allowed_host(text, host); });
+    const std::optional<std::string> canonical = canonical_host(host);
+    const std::optional<Config> reading = loader_reading(edited);
+    if (!reading.has_value() || !canonical.has_value()) {
+        return edited;
+    }
+    const std::string change = "adding " + *canonical + " to tools.allowed_hosts";
+    if (!host_listed(reading->tools.allowed_hosts, *canonical)) {
+        throw not_landed(content, change, "the list lacks it");
+    }
+    // A line written is read as one entry more, or the loader never reads it.
+    if (const std::optional<Config> before = loader_reading(content);
+        edited != content && before.has_value() &&
+        reading->tools.allowed_hosts.size() != before->tools.allowed_hosts.size() + 1) {
+        throw not_landed(content, change,
+                         "the list holds it already, and the line the editor would write is not "
+                         "one it reads");
+    }
+    return edited;
 }
 
 std::string remove_allowed_host(std::string_view content, std::string_view host) {
-    return in_format(
-        content, [&](std::string_view text) { return yaml_text::remove_allowed_host(text, host); });
+    const std::optional<Config> before = loader_reading(content);
+    const auto names = [&](const std::optional<Config>& reading) {
+        return reading.has_value() &&
+               !allowed_host_matches(reading->tools.allowed_hosts, host).empty();
+    };
+    std::string edited;
+    try {
+        edited = in_format(content, [&](std::string_view text) {
+            return yaml_text::remove_allowed_host(text, host);
+        });
+    } catch (const HostNotListed&) {
+        // The line editor names no entry; the loader may read one it does
+        // not see, and then "not in tools.allowed_hosts" would be untrue.
+        if (names(before)) {
+            throw not_removed(content, host);
+        }
+        throw;
+    }
+    const std::optional<Config> reading = loader_reading(edited);
+    if (names(reading)) {
+        throw not_removed(content, host);
+    }
+    // A line taken is an entry fewer, or the loader never read it.
+    if (before.has_value() && reading.has_value() &&
+        reading->tools.allowed_hosts.size() >= before->tools.allowed_hosts.size()) {
+        throw not_landed(content, removal(host),
+                         "the list does not hold it, and the line the editor would remove is not "
+                         "one it reads");
+    }
+    return edited;
 }
 
 std::string format_config(std::string_view content) {

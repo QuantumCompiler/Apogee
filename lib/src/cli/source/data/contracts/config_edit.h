@@ -424,6 +424,15 @@ struct SettableScalar {
 ///
 /// `tool` is a tool name (`write_file`, `mcp__server__tool`): letters, digits
 /// and underscores. Anything else is refused before the file is touched.
+///
+/// The edit reads its effect back (CLI-M43): when the loader's reading of
+/// the result (`parse_config`) gives the tool another level -- a quoted or
+/// spaced `permissions` header the line editor appends beside, a second
+/// document after `---` or `...` -- or, where the level already read so,
+/// would not read the line the editor writes (the edit tried at another
+/// level), it throws ConfigEditError saying the change would not take effect
+/// and naming `apogee config migrate`, nothing changed. A result that does
+/// not parse is left to `edit_config_file`'s re-parse.
 [[nodiscard]] std::string set_permission(std::string_view content, std::string_view tool,
                                          std::string_view level);
 
@@ -434,18 +443,37 @@ struct SettableScalar {
 /// `host` must be a bare host name (`harness/host.h`) and is written in its
 /// canonical form; anything else is refused before the file is touched. A
 /// host already listed, in any spelling, leaves the text unchanged. A flow
-/// list (`[a, b]`, the template's form) gains `, host`; a block list gains a
-/// `- host` line; a missing key or `tools:` section is created with the
-/// one-line form.
+/// list (`[a, b]`, the template's form) gains `, host`; a block list -- its
+/// items nested under the key, or compact at the key's own indent, as PyYAML
+/// and Ruby's Psych write it (CLI-M43) -- gains a `- host` line at its
+/// items' indent; a missing key or `tools:` section is created with the
+/// one-line form. A block item whose value carries on over the next line is
+/// refused by name (write each `- host` on one line), never split from it.
+///
+/// The edit reads its effect back (CLI-M43): when the loader's reading of
+/// the result does not list the host -- a quoted or spaced key or section
+/// the line editor writes a second one beside, a second document after
+/// `---` or `...` -- or, where the text changed, does not read one entry
+/// more, it throws ConfigEditError saying the change would not take effect
+/// and naming `apogee config migrate`, nothing changed.
 [[nodiscard]] std::string add_allowed_host(std::string_view content, std::string_view host);
 
 /// Removes from `tools.allowed_hosts` every entry `host` names
 /// (`allowed_host_matches`, `contracts/host.h`): an entry as written -- a
 /// pasted URL, which allows nothing, is removed by its own spelling -- or,
 /// for a host, every spelling of it, so the host really asks again (CLI-M40).
-/// The exact inverse of add_allowed_host, so an add and a remove leave the
-/// file byte-identical. Throws ConfigEditError when nothing matches, the text
-/// unchanged: a non-host as not a host name, a host as not listed.
+/// The list is read in the layouts add_allowed_host reads. The exact inverse
+/// of add_allowed_host, so an add and a remove leave the file byte-identical.
+/// Throws ConfigEditError when nothing matches, the text unchanged: a
+/// non-host as not a host name, a host as not listed.
+///
+/// The edit reads its effect back (CLI-M43): when the loader would still
+/// read an entry `host` names -- in a layout the line editor does not see,
+/// or through an entry spelled `${VAR}`, which the loader expands and the
+/// editor reads as written -- or would read no entry fewer, it throws
+/// ConfigEditError saying the change would not take effect, naming `apogee
+/// config migrate` for the layout or the entry for the variable, nothing
+/// changed. A miss the loader agrees with keeps its words.
 [[nodiscard]] std::string remove_allowed_host(std::string_view content, std::string_view host);
 
 /// Tidies whitespace without touching content: strips trailing spaces, folds

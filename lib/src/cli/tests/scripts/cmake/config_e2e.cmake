@@ -969,6 +969,47 @@ if(NOT TAILED_AFTER MATCHES "^backends:   # my models\n" OR TAILED_AFTER MATCHES
     message(FATAL_ERROR "the add did not land under the commented header:\n${TAILED_AFTER}")
 endif()
 
+# --- CLI-M43: the gate's edits land, or say they did not --------------------
+# Ruby Psych's exact dump writes the host list compact, at its key's indent:
+# a website in it is revoked with exactly its line gone, and an add then a
+# delete gives back the bytes. A deny under a quoted `permissions` header,
+# which the loader would not read, is refused naming `config migrate`, and
+# the file is left as it was.
+set(PSYCH_FILE "${APOGEE_WORK_DIR}/psych/config.yaml")
+set(PSYCH_KEPT "---\nbackends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\ntools:\n  allowed_hosts:\n  - docs.python.org\n")
+file(WRITE "${PSYCH_FILE}" "${PSYCH_KEPT}  - example.com\n")
+apogee_run(0 --config "${PSYCH_FILE}" config delete-allowed-host example.com)
+file(READ "${PSYCH_FILE}" PSYCH_AFTER)
+if(NOT PSYCH_AFTER STREQUAL PSYCH_KEPT)
+    message(FATAL_ERROR "delete-allowed-host on Psych's dump did not take its line alone:\n"
+                        "${PSYCH_AFTER}")
+endif()
+apogee_run(0 --config "${PSYCH_FILE}" config add-allowed-host pypi.org)
+file(READ "${PSYCH_FILE}" PSYCH_AFTER)
+if(NOT PSYCH_AFTER STREQUAL "${PSYCH_KEPT}  - pypi.org\n")
+    message(FATAL_ERROR "add-allowed-host on Psych's dump did not add at the items' indent:\n"
+                        "${PSYCH_AFTER}")
+endif()
+apogee_run(0 --config "${PSYCH_FILE}" config delete-allowed-host pypi.org)
+file(READ "${PSYCH_FILE}" PSYCH_AFTER)
+if(NOT PSYCH_AFTER STREQUAL PSYCH_KEPT)
+    message(FATAL_ERROR "add then delete on Psych's dump did not give back its bytes:\n"
+                        "${PSYCH_AFTER}")
+endif()
+set(QUOTED_FILE "${APOGEE_WORK_DIR}/quoted/config.yaml")
+set(QUOTED_TEXT "backends:\n  m:\n    type: mock\n    model: m\n\"permissions\":\n  run_command: allow\n")
+file(WRITE "${QUOTED_FILE}" "${QUOTED_TEXT}")
+apogee_run(1 --config "${QUOTED_FILE}" config set-permission run_command deny)
+if(NOT APOGEE_ERR MATCHES "would not take effect" OR NOT APOGEE_ERR MATCHES "apogee config migrate"
+   OR APOGEE_OUT MATCHES "= deny")
+    message(FATAL_ERROR "a deny under a quoted header was not refused by name:\n"
+                        "stdout: ${APOGEE_OUT}\nstderr: ${APOGEE_ERR}")
+endif()
+file(READ "${QUOTED_FILE}" QUOTED_AFTER)
+if(NOT QUOTED_AFTER STREQUAL QUOTED_TEXT)
+    message(FATAL_ERROR "a refused set-permission changed the file:\n${QUOTED_AFTER}")
+endif()
+
 # On JSONC: a multi-line prompt reads back with its newlines, and a
 # number-looking name, default and model stay text -- check names no
 # unconfigured backend.

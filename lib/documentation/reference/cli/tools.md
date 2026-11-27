@@ -178,6 +178,20 @@ nothing and which `check` names with `apogee config delete-allowed-host
 both and the website asks again; its line names the host (and how many entries
 went), or the entry and that it allowed nothing. A name no entry answers to
 deletes nothing and exits 1.
+In an older `config.yaml`, the host verbs read the list nested under its key
+or compact at the key's own indent (`allowed_hosts:` then `- host` lines
+beside it, as PyYAML and Ruby write it), and refuse by name an item written
+over more than one line (`write each - host on one line`).
+`add-allowed-host`, `delete-allowed-host` and `set-permission` print a success
+only when Apogee reads the change back from the edited file (CLI-M43): where
+the file writes the list or the level where the editor cannot see it -- a
+quoted or spaced key, a key written twice, a second document after `---` or
+`...` -- the verb exits 1 saying the change would not take effect, the file
+unchanged, and names `apogee config migrate`, after which every verb lands. It
+writes no second copy beside the one Apogee reads, even when the level or the
+host already reads as asked. A host still named by an entry written through a
+variable (`${MY_HOST}`), which Apogee expands, is named for you to edit by
+hand.
 
 **The question shows what will run, whole and as it is** (57p). The prompt
 for `run_command` shows the whole command, however long, and the folder it

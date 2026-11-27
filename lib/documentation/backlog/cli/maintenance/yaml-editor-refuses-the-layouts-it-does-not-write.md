@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Config editing › the YAML line editor (`contracts/config_edit.cpp`), every `config` verb and its HTTP twin |
 | **Labels** | `config` `yaml` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M43](gate-edits-land-or-say-they-did-not.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | CLI-M40's skeptic (2026-11-22), then a sandboxed investigation and a skeptic's re-run the same day |
 | **Created** | 2026-11-22 |
@@ -178,14 +178,15 @@ Hermetic and in process. Each refused case fails on today's binary (measured 202
 
 ## Out of scope
 
-- **The compact host list and the gate edits' read-back**: [CLI-M43](gate-edits-land-or-say-they-did-not.md), which this builds on.
+- **The compact host list and the gate edits' read-back**: [CLI-M43](../../../assistant/cli/MILESTONES.md#2026-11-27--gate-edits-land-or-say-they-did-not-maintenance-item-m43-the-gates-config-edits-land-or-say-they-did-not) (shipped 2026-11-27), which this builds on.
 - **`config migrate`'s own gaps** (a `--- # comment` line, a multi-line last value followed by comments, a BOM, UTF-16, a later document): [CLI-M47](config-migrate-carries-every-line-or-names-it.md). Best built before or with this item, since this item's refusals send people to `migrate`.
 - **Re-indenting a file** for the person: migrate is the way out.
 
 ## Links
 
-- **Blocked by:** [CLI-M43](gate-edits-land-or-say-they-did-not.md) · **Blocks:** —
+- **Blocked by:** — · **Blocks:** —
 - **Relates to:**
+  - [CLI-M43](../../../assistant/cli/MILESTONES.md#2026-11-27--gate-edits-land-or-say-they-did-not-maintenance-item-m43-the-gates-config-edits-land-or-say-they-did-not) (shipped 2026-11-27): the compact host list and the three gate edits' read-back, which this item keeps behind its refusals.
   - [CLI-M40](../../../assistant/cli/MILESTONES.md#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host) (shipped 2026-11-27), whose Out of scope named these layouts.
   - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its offers come from the loader, and they stay so on a refused layout (the open question above).
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose dry run asks this item's refusals before an ingest writes anything.

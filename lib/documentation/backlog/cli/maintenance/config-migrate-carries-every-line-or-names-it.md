@@ -195,6 +195,6 @@ Each case fails on today's binary unless marked as a control (measured 2026-11-2
 
 - **Blocked by:** — · **Blocks:** —
 - **Relates to:**
-  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) and [CLI-M43](gate-edits-land-or-say-they-did-not.md), whose refusals name `migrate` as the way out;
+  - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) and [CLI-M43](../../../assistant/cli/MILESTONES.md#2026-11-27--gate-edits-land-or-say-they-did-not-maintenance-item-m43-the-gates-config-edits-land-or-say-they-did-not) (shipped 2026-11-27), whose refusals name `migrate` as the way out;
   - 28i (2fbe6749), `config migrate`'s record;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which plans `migrate` from a paired device.

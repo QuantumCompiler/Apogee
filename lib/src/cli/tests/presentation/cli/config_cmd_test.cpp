@@ -18,6 +18,7 @@
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/host.h"
 #include "support/cli_home.h"
 #include "support/gguf_builder.h"
 
@@ -951,21 +952,73 @@ TEST_CASE("delete-allowed-host removes every spelling of a host, so a fetch to i
     CHECK(out == "removed docs.python.org from tools.allowed_hosts\n");
 }
 
-TEST_CASE("delete-allowed-host counts what went, as the loader reads it before and after",
-          "[commands][config][allowed-hosts][CLI-M40]") {
+TEST_CASE("delete-allowed-host refuses while an entry spelled through a variable names the host",
+          "[commands][config][allowed-hosts][CLI-M40][CLI-M43]") {
     // The loader expands `${VAR}` in an entry; the line editor reads the
-    // text, so an entry spelled through a variable is not removed, and the
-    // count says only what went (that it still allows the host is CLI-M43's
-    // read-back).
+    // text, so an entry spelled through a variable is not removed. CLI-M40
+    // counted only what went and printed a success while the host was still
+    // reached unasked; the read-back (CLI-M43) refuses instead, the file
+    // unchanged, naming the entry.
     const apogee::testing::EnvGuard variable{"APOGEE_M40_HOST", "example.com"};
-    const CliHome home{std::string{kConfig} +
-                       "tools:\n  allowed_hosts: [Example.COM., example.com, "
-                       "\"${APOGEE_M40_HOST}\"]\n"};
+    const std::string text = std::string{kConfig} +
+                             "tools:\n  allowed_hosts: [Example.COM., example.com, "
+                             "\"${APOGEE_M40_HOST}\"]\n";
+    const CliHome home{text};
+    std::string out;
+    std::string err;
+    CHECK(home.run({"config", "delete-allowed-host", "example.com"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.find("removing example.com from tools.allowed_hosts would not take effect") !=
+          std::string::npos);
+    CHECK(err.find("through the entry '${APOGEE_M40_HOST}'") != std::string::npos);
+    CHECK(home.config_text() == text);
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+    CHECK(apogee::harness::host_listed(config.tools.allowed_hosts, "example.com"));
+}
+
+TEST_CASE("the gate's verbs land on a compact YAML list, and a deny that would not land says so",
+          "[commands][config][allowed-hosts][permissions][CLI-M43]") {
+    // The investigation's reproduction: a compact list (PyYAML's, Psych's)
+    // could not be revoked, and a deny under a quoted header printed success
+    // while the loader still read `allow`.
+    const std::string compact =
+        std::string{kConfig} + "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n";
+    const CliHome home{compact};
+    const auto fetch = [&](std::string_view host) {
+        const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+        return apogee::commands::make_permission_checker(config, nullptr)(
+            apogee::agent::GateRequest{"fetch_url", host, "https://example/", true});
+    };
+    REQUIRE(fetch("example.com") == apogee::agent::Permission::Allow);
     std::string out;
     REQUIRE(home.run({"config", "delete-allowed-host", "example.com"}, &out) == 0);
-    CHECK(out == "removed example.com from tools.allowed_hosts (2 entries)\n");
+    CHECK(out == "removed example.com from tools.allowed_hosts\n");
     CHECK(home.config_text() ==
-          std::string{kConfig} + "tools:\n  allowed_hosts: [\"${APOGEE_M40_HOST}\"]\n");
+          std::string{kConfig} + "tools:\n  allowed_hosts:\n  - docs.python.org\n");
+    CHECK(fetch("example.com") == apogee::agent::Permission::Ask);
+    // Add then delete: the item at the items' own indent, then the bytes.
+    const std::string left = home.config_text();
+    REQUIRE(home.run({"config", "add-allowed-host", "pypi.org"}, &out) == 0);
+    CHECK(home.config_text() == std::string{kConfig} +
+                                    "tools:\n  allowed_hosts:\n  - docs.python.org\n"
+                                    "  - pypi.org\n");
+    REQUIRE(home.run({"config", "delete-allowed-host", "pypi.org"}, &out) == 0);
+    CHECK(home.config_text() == left);
+
+    // A deny the loader would not read: refused, the file unchanged.
+    const std::string quoted = std::string{kConfig} + "\"permissions\":\n  run_command: allow\n";
+    const CliHome shadowed{quoted};
+    std::string err;
+    out.clear();
+    CHECK(shadowed.run({"config", "set-permission", "run_command", "deny"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.find("setting permissions.run_command to deny would not take effect") !=
+          std::string::npos);
+    CHECK(err.find("permissions.run_command is allow") != std::string::npos);
+    CHECK(err.find("apogee config migrate") != std::string::npos);
+    CHECK(shadowed.config_text() == quoted);
+    CHECK(apogee::harness::load_config(shadowed.config_path()).permissions.level("run_command") ==
+          apogee::harness::PermissionLevel::Allow);
 }
 
 TEST_CASE("delete-allowed-host deletes nothing it does not name, and says so",

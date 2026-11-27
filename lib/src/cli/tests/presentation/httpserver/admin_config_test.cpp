@@ -601,6 +601,60 @@ TEST_CASE("the delete twin removes what the CLI removes: an entry as written, ev
     CHECK(admin_delete_allowed_host(fixture.context(), "*.example.com").status == 400);
 }
 
+TEST_CASE("the gate twins land on a compact list, and a deny that would not land is a 400",
+          "[httpserver][admin][hosts][permissions][CLI-M43]") {
+    // The twin agreed with the CLI and contradicted itself: its GET listed
+    // example.com, its DELETE said it was not listed, its PUT called a file
+    // that loads not valid YAML -- and a deny under a quoted header answered
+    // 200 with `allow`.
+    using apogee::httpserver::admin_delete_allowed_host;
+    using apogee::httpserver::admin_put_allowed_host;
+    const std::string compact =
+        "backends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\n"
+        "tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n";
+    Fixture fixture;
+    for (const std::filesystem::path& path : {fixture.cli_config, fixture.http_config}) {
+        std::ofstream{path, std::ios::binary | std::ios::trunc} << compact;
+    }
+    fixture.startup = apogee::harness::load_config(fixture.http_config);
+
+    const HttpResponse removed = admin_delete_allowed_host(fixture.context(), "example.com");
+    REQUIRE(removed.status == 200);
+    CHECK(parsed(removed)["deleted"] == "example.com");
+    fixture.cli({"config", "delete-allowed-host", "example.com"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(Fixture::bytes(fixture.http_config) ==
+          "backends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\n"
+          "tools:\n  allowed_hosts:\n  - docs.python.org\n");
+
+    const HttpResponse added = admin_put_allowed_host(fixture.context(), "pypi.org");
+    REQUIRE(added.status == 200);
+    fixture.cli({"config", "add-allowed-host", "pypi.org"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(Fixture::bytes(fixture.http_config) ==
+          "backends:\n  m:\n    type: mock\n    model: m\nmodels:\n  default: m\n"
+          "tools:\n  allowed_hosts:\n  - docs.python.org\n  - pypi.org\n");
+
+    // Under a quoted header the deny would not land: a 400 in the words the
+    // CLI prints (the one transform's), never a 200, and nothing written.
+    const std::string quoted = "\"permissions\":\n  run_command: allow\n";
+    std::ofstream{fixture.http_config, std::ios::binary | std::ios::trunc} << quoted;
+    std::string words;
+    try {
+        (void)apogee::harness::set_permission(quoted, "run_command", "deny");
+    } catch (const apogee::harness::ConfigEditError& e) {
+        words = e.what();
+    }
+    REQUIRE(words.find("apogee config migrate") != std::string::npos);
+    HttpRequest put;
+    put.method = "PUT";
+    put.body = R"({"level":"deny"})";
+    const HttpResponse denied = admin_put_permission(fixture.context(), "run_command", put);
+    CHECK(denied.status == 400);
+    CHECK(parsed(denied)["error"]["message"] == words);
+    CHECK(Fixture::bytes(fixture.http_config) == quoted);
+}
+
 TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never list env values",
           "[httpserver][admin][mcp]") {
     const Fixture fixture;
