@@ -589,6 +589,12 @@ OneShot one_shot(const harness::Config& config, const std::string& model, const 
     return shot;
 }
 
+std::string one_shot_backend(const harness::Config& config, std::string_view model) {
+    const SessionModel named = resolve_session_model(config, model);
+    return harness::resolve_chat_backend(
+        config, named.pinned.empty() ? model : std::string_view{named.backend});
+}
+
 std::string_view CompleteCommand::name() const noexcept {
     return "complete";
 }
@@ -678,7 +684,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this run without asking (repeatable)")
-        ->type_name(kOfferedToolValue)
+        ->type_name(kToolOrWebsiteValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -777,7 +783,7 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
         check_images(*flags);
 
         if (!flags->all_backends) {
-            const std::string model = harness::resolve_chat_backend(config, flags->model);
+            const std::string model = one_shot_backend(config, flags->model);
             (void)run_one(harness, config, config_path, *flags, model, prompt, decorate);
             return;
         }

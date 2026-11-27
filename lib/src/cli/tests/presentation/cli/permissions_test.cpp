@@ -266,6 +266,32 @@ TEST_CASE("the search instance's host is trusted by configuration; what it finds
           Permission::Ask);
 }
 
+TEST_CASE("listed_hosts is the checker's one list: the config's hosts, then the search instance",
+          "[commands][permissions][outbound][search][CLI-M36]") {
+    // One list, which the checker judges by and `--deny`'s completion offers
+    // from (CLI-M36), so the hosts Tab offers are the hosts the gate lets
+    // through unasked.
+    Config config;
+    config.tools.allowed_hosts = {"docs.python.org", "Example.COM.", "https://x.example/path"};
+    CHECK(apogee::commands::listed_hosts(config) == config.tools.allowed_hosts);
+    config.tools.search.url = "http://127.0.0.1:8888";
+    const std::vector<std::string> listed = apogee::commands::listed_hosts(config);
+    CHECK(listed == std::vector<std::string>{"docs.python.org", "Example.COM.",
+                                             "https://x.example/path", "127.0.0.1"});
+    const apogee::agent::PermissionChecker check = make_permission_checker(config, nullptr);
+    for (const std::string& entry : listed) {
+        INFO(entry);
+        const std::optional<std::string> host = apogee::harness::canonical_host(entry);
+        if (host.has_value()) {
+            CHECK(check(GateRequest{"fetch_url", *host, "", true}) == Permission::Allow);
+        }
+    }
+    CHECK(check(GateRequest{"fetch_url", "x.example", "", true}) == Permission::Ask);
+    // An instance that cannot be used lists no host.
+    config.tools.search.provider = "brave";
+    CHECK(apogee::commands::listed_hosts(config) == config.tools.allowed_hosts);
+}
+
 TEST_CASE("web_search is registered only where tools.search names a usable instance",
           "[commands][permissions][tools][search]") {
     CHECK(apogee::commands::make_built_in_tools({}).find("web_search") == nullptr);

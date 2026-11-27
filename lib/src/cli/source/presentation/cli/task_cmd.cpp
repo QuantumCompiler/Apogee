@@ -749,18 +749,14 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     } else if (chosen_suite.has_value()) {
         session.suite = std::string{};
     }
-    if (!what.existing.has_value() && !flags.suite.empty() && flags.model.empty()) {
-        if (const harness::Resolution chat = harness::resolve_backend(
-                config, harness::RoleRequest{.role = harness::ModelRole::Chat});
-            chat.from == harness::ResolvedFrom::Suite) {
-            session.backend = chat.key;
-        }
-    }
-    session.backend = harness::resolve_backend_key(
-        config, harness::RoleRequest{
-                    .role = harness::ModelRole::Chat,
-                    .override = what.existing.has_value() ? std::string_view{} : flags.model,
-                    .entry_backend = session.backend});
+    // A new task runs on `task run`'s one choice of backend, which its
+    // completion reads too (CLI-M36); a resume on the one its conversation
+    // was left on.
+    session.backend = what.existing.has_value()
+                          ? harness::resolve_backend_key(
+                                config, harness::RoleRequest{.role = harness::ModelRole::Chat,
+                                                             .entry_backend = session.backend})
+                          : task_chat_backend(config, flags.model, flags.suite);
     harness.resume_conversation(session.backend, session.chat_id);
     int saved_compactions = session.compactions;
 
@@ -1265,7 +1261,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                     "Grant a tool that writes for this task's life, so it runs without asking -- "
                     "each tool named, every use recorded, never wider than the config or the "
                     "agent allows (repeatable, with --tools)")
-        ->type_name(kOfferedToolValue)
+        ->type_name(kTaskGrantToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -1542,24 +1538,8 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     // The agent's policy is the one filter over the registry (Milestone X):
     // what it leaves out is not offered, so it cannot be granted either.
     out.tools = agent != nullptr ? apply_tool_policy(available, agent->tools) : available;
-    // A grant of a native tool this build never offers is refused saying why
-    // (57k: a shell or git tool where no program can be started), before the
-    // ceiling would call it no tool of the task's.
-    for (const std::string& grant : policy.grants) {
-        if (const std::string why = tools::why_not_offered(grant); !why.empty()) {
-            out.refusal = "--allow " + grant + ": " + why;
-            return out;
-        }
-    }
-    out.refusal = tasks::grant_refusal(
-        policy.grants,
-        tasks::GrantScope{.available = &available,
-                          .offered = &out.tools,
-                          .permissions = &config.permissions,
-                          .agent = policy.agent,
-                          .agent_tools = agent != nullptr
-                                             ? std::string{harness::to_string(agent->tools)}
-                                             : std::string{}});
+    out.refusal =
+        task_grant_refusal(config, policy.grants, available, out.tools, policy.agent, agent);
     if (!out.refusal.empty()) {
         return out;
     }
@@ -1577,6 +1557,39 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     out.standing = make_permission_checker(config, nullptr);
     out.gate.confirm = person ? person(approvals) : agent::ConfirmFn{};
     return out;
+}
+
+std::string task_grant_refusal(const harness::Config& config,
+                               const std::vector<std::string>& grants,
+                               const agent::ToolRegistry& available,
+                               const agent::ToolRegistry& offered, std::string_view agent_name,
+                               const harness::AgentConfig* agent, bool child_processes) {
+    // A grant of a native tool this build never offers is refused saying why
+    // (57k: a shell or git tool where no program can be started), before the
+    // ceiling would call it no tool of the task's.
+    for (const std::string& grant : grants) {
+        if (const std::string why = tools::why_not_offered(grant, child_processes); !why.empty()) {
+            return "--allow " + grant + ": " + why;
+        }
+    }
+    return tasks::grant_refusal(
+        grants, tasks::GrantScope{.available = &available,
+                                  .offered = &offered,
+                                  .permissions = &config.permissions,
+                                  .agent = std::string{agent_name},
+                                  .agent_tools = agent != nullptr
+                                                     ? std::string{harness::to_string(agent->tools)}
+                                                     : std::string{}});
+}
+
+std::string task_chat_backend(const harness::Config& config, std::string_view model,
+                              std::string_view suite) {
+    harness::Config probe = config;
+    if (!suite.empty()) {
+        (void)select_suite(probe, suite);  // one it does not name leaves the config's own
+    }
+    return harness::resolve_backend_key(
+        probe, harness::RoleRequest{.role = harness::ModelRole::Chat, .override = model});
 }
 
 bool task_stoppable(const tasks::Task& task, tasks::Request request, bool running) noexcept {

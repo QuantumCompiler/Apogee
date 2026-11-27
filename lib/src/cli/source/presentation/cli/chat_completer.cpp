@@ -111,10 +111,10 @@ constexpr std::array kCommands{
     ChatCommandSpec{"private", ChatVerb::Private, "", "Never summarise this chat for recall"},
     ChatCommandSpec{"allow", ChatVerb::Allow, "[tool|website]",
                     "Allow a tool or website for this chat; alone, list each answer",
-                    ArgumentValues::GatedTools},
+                    ArgumentValues::AllowNames},
     ChatCommandSpec{"deny", ChatVerb::Deny, "<tool|website>",
                     "Refuse a tool or website for this chat, without asking",
-                    ArgumentValues::GatedTools},
+                    ArgumentValues::DenyNames},
     ChatCommandSpec{"revoke", ChatVerb::Revoke, "<tool|website>",
                     "Forget this chat's answer for a tool or website",
                     ArgumentValues::SessionPermissions},
@@ -543,13 +543,43 @@ std::vector<NamedChoice> argument_choices(ArgumentValues values,
                 }
             }
             break;
-        case ArgumentValues::GatedTools:
-            if (sources.gated_tools) {
-                for (std::string& name : sources.gated_tools()) {
-                    choices.push_back({std::move(name), {}});
+        case ArgumentValues::AllowNames:
+        case ArgumentValues::DenyNames: {
+            const std::vector<std::string> gated =
+                sources.gated_tools ? sources.gated_tools() : std::vector<std::string>{};
+            for (const std::string& name : gated) {
+                choices.push_back({name, {}});
+            }
+            // The websites a yes or a no changes something for (CLI-M36):
+            // for /deny the ones the gate lists and those this chat allowed,
+            // for /allow those it denied -- each as the verb reads it, so a
+            // URL or a name shaped like a tool, which it refuses, is never
+            // offered, and a host is offered once, by its canonical name.
+            std::vector<std::string> hosts;
+            if (values == ArgumentValues::DenyNames) {
+                hosts = sources.listed_hosts;
+                if (sources.allowed_hosts) {
+                    for (std::string& host : sources.allowed_hosts()) {
+                        hosts.push_back(std::move(host));
+                    }
+                }
+            } else if (sources.denied_hosts) {
+                hosts = sources.denied_hosts();
+            }
+            for (const std::string& host : hosts) {
+                const GatedName name = name_gated(host, gated);
+                // Its canonical name must be taken too: `side_door.` is a
+                // website, `side_door` a name shaped like a tool.
+                const GatedName offered = name.host ? name_gated(name.key, gated) : GatedName{};
+                if (name.error.empty() && name.host && offered.host && offered.key == name.key &&
+                    std::ranges::none_of(choices, [&name](const NamedChoice& choice) {
+                        return choice.name == name.key;
+                    })) {
+                    choices.push_back({name.key, {}});
                 }
             }
             break;
+        }
         case ArgumentValues::SessionPermissions:
             if (sources.session_permissions) {
                 for (std::string& name : sources.session_permissions()) {
@@ -833,6 +863,8 @@ void order_choices(std::vector<NamedChoice>& choices) {
 ChatCompletionSources chat_completion_sources(const harness::Config& config,
                                               std::filesystem::path working_directory) {
     ChatCompletionSources sources;
+    // The hosts the gate lists, for the websites /deny offers (CLI-M36).
+    sources.listed_hosts = listed_hosts(config);
     for (const std::string& name : config.backend_names()) {
         const harness::BackendConfig* backend = config.find_backend(name);
         if (backend == nullptr) {

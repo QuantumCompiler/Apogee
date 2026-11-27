@@ -305,7 +305,7 @@ Options:
   --no-recall                 Recall no earlier chats in this run
   --private                   Write nothing of this chat: no transcript, no recall, its attachments indexed in a place gone with the run
   --allow OFFERED_TOOL        Allow a tool for this chat without asking (repeatable, with --tools)
-  --deny OFFERED_TOOL         Refuse a tool or website for this chat without asking (repeatable)
+  --deny TOOL_OR_WEBSITE      Refuse a tool or website for this chat without asking (repeatable)
   --allow-host TEXT           Allow fetching from a website for this chat without asking (repeatable)
   --permission-mode TEXT:{manual,accept-edits,plan,dont-ask,bypass}
                               How much runs without asking: manual, accept-edits, plan, dont-ask or bypass

@@ -187,7 +187,7 @@ Hermetic and in process. Each refused case fails on today's binary (measured 202
 - **Blocked by:** [CLI-M43](gate-edits-land-or-say-they-did-not.md) · **Blocks:** —
 - **Relates to:**
   - [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md), whose Out of scope named these layouts.
-  - [CLI-M36](grant-and-deny-flags-offer-what-they-take.md): its offers come from the loader, and they stay so on a refused layout (the open question above).
+  - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its offers come from the loader, and they stay so on a refused layout (the open question above).
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose dry run asks this item's refusals before an ingest writes anything.
   - [CLI-M47](config-migrate-carries-every-line-or-names-it.md), the way out these refusals name, made to carry what it refuses today.
   - [CLI-M52](a-refused-scaffold-writes-nothing.md): `agents create` and `mcp create` dry-run their entry before the first file, so this item's layout refusals leave no scaffold behind once it ships.

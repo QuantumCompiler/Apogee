@@ -152,10 +152,10 @@ Hermetic: `permissions_test`'s unit cases over `name_gated`, `seed_approvals` an
 ## Out of scope
 
 - **A malformed `tools.allowed_hosts` entry `delete-allowed-host` can't remove**: [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md), a different seam (the config editor).
-- **Completion**: `--deny`'s offer of the listed hosts is [CLI-M36](grant-and-deny-flags-offer-what-they-take.md)'s, through this `name_gated`.
+- **Completion**: `--deny`'s offer of the listed hosts is [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take)'s (`TOOL_OR_WEBSITE`, and `/deny`'s in chat), through this `name_gated`.
 - **Narrowing `canonical_host`**, which would make today's `ok` entries malformed.
 
 ## Links
 
 - **Blocked by:** — · **Blocks:** —
-- **Relates to:** [CLI-M36](grant-and-deny-flags-offer-what-they-take.md): its `--deny` offer is defined by `name_gated`, so once this ships a listed `my_host` is offered, and whichever ships second updates M36's `name_gated` call to the new signature. Also [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md) (the same list of hosts, another verb); 57o (dotless hosts, the typo rule); 26o (`--allow` takes tools only); 57k (no shell or git tools where no program can start).
+- **Relates to:** [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its `--deny` offer is defined by `name_gated`, so once this ships a listed `my_host` is offered. CLI-M36 shipped first (2026-11-27), so this item updates its `name_gated` calls to the new signature: `tool_or_website_names` in `complete_sources.cpp` and the `/deny` and `/allow` sources in `chat_completer.cpp`. Each keeps a listed host only when its canonical name is taken too, so `side_door.` joins the offer once this item takes it. Also [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md) (the same list of hosts, another verb); 57o (dotless hosts, the typo rule); 26o (`--allow` takes tools only); 57k (no shell or git tools where no program can start).

@@ -15,6 +15,7 @@
 #include "backends/model_roster.h"
 #include "cli/chat.h"
 #include "cli/chat_attachments.h"
+#include "cli/permissions.h"
 #include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "knowledge/record.h"
@@ -700,4 +701,48 @@ TEST_CASE("/model's rows carry their menu groups in the shell, never on the term
     CHECK(typed.groups.size() == typed.candidates.size());
     CHECK(typed.groups.front() == "configured");
     CHECK(typed.groups.back() == "anthropic's roster · fetched 2026-10-14");
+}
+
+TEST_CASE("/deny offers the listed and allowed websites, /allow the denied ones, each as taken",
+          "[chat][completer][permissions][CLI-M36]") {
+    // In chat, /deny and /allow take a website as well as a tool (26o), and
+    // offered the tools alone. Now /deny offers the hosts the gate lists and
+    // those this chat allowed -- the websites a no changes something for --
+    // and /allow the ones this chat denied, each as `name_gated` reads it:
+    // canonical, and never a URL or a name shaped like a tool, which the
+    // verb refuses.
+    ChatCompletionSources sources = project();
+    const std::vector<std::string> gated{"run_command", "write_file"};
+    sources.gated_tools = [gated] { return gated; };
+    sources.listed_hosts = {"docs.python.org", "Example.COM.", "https://not-a-host.example/path",
+                            "my_host",         "side_door.",   "127.0.0.1"};
+    sources.allowed_hosts = [] { return std::vector<std::string>{"wiki.internal", "my_host"}; };
+    sources.denied_hosts = [] { return std::vector<std::string>{"evil.example"}; };
+    const std::vector<std::string> denied = texts(suggest_chat_input("/deny ", sources));
+    CHECK(denied == std::vector<std::string>{"run_command", "write_file", "docs.python.org",
+                                             "example.com", "127.0.0.1", "wiki.internal"});
+    const std::vector<std::string> allowed = texts(suggest_chat_input("/allow ", sources));
+    CHECK(allowed == std::vector<std::string>{"run_command", "write_file", "evil.example"});
+    CHECK(texts(suggest_chat_input("/deny e", sources)) == std::vector<std::string>{"example.com"});
+    CHECK(texts(suggest_chat_input("/allow e", sources)) ==
+          std::vector<std::string>{"evil.example"});
+    // Each one offered is one the verb takes.
+    for (const std::string& name : denied) {
+        INFO(name);
+        CHECK(apogee::commands::name_gated(name, gated).error.empty());
+    }
+    for (const std::string& name : allowed) {
+        INFO(name);
+        CHECK(apogee::commands::name_gated(name, gated).error.empty());
+    }
+    // /revoke is unchanged: the chat's own answers.
+    sources.session_permissions = [] { return std::vector<std::string>{"write_file"}; };
+    CHECK(texts(suggest_chat_input("/revoke ", sources)) == std::vector<std::string>{"write_file"});
+
+    // A chat's sources list what the gate lists.
+    apogee::harness::Config config;
+    config.tools.allowed_hosts = {"docs.python.org", "Example.COM."};
+    config.tools.search.url = "http://127.0.0.1:8888";
+    CHECK(apogee::commands::chat_completion_sources(config, "/work").listed_hosts ==
+          apogee::commands::listed_hosts(config));
 }

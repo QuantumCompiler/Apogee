@@ -810,7 +810,7 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this chat without asking (repeatable)")
-        ->type_name(kOfferedToolValue)
+        ->type_name(kToolOrWebsiteValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -2180,6 +2180,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             names.insert(names.end(), set->begin(), set->end());
         }
         return names;
+    };
+    // The websites this chat allowed and denied for itself, for /deny and
+    // /allow (CLI-M36).
+    completion.allowed_hosts = [approvals] {
+        return std::vector<std::string>{approvals->hosts.begin(), approvals->hosts.end()};
+    };
+    completion.denied_hosts = [approvals] {
+        return std::vector<std::string>{approvals->denied_hosts.begin(),
+                                        approvals->denied_hosts.end()};
     };
     // An execute session's rows, and the symphonies `/play` takes, read as
     // `/play` finds them (27s).

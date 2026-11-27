@@ -66,4 +66,11 @@ struct OneShot {
 [[nodiscard]] OneShot one_shot(const harness::Config& config, const std::string& model,
                                const std::string& prompt, const OneShotSettings& settings);
 
+/// The backend `apogee complete -m <model>` runs on, and pins its suite's
+/// toolset by (27d): a roster model with one configured owner as that
+/// entry (`resolve_session_model`), any other word as typed, through the
+/// chat chain -- so with no `-m`, the active suite's chat member. The verb
+/// runs on it, and its `--allow` and `--deny` completion reads it (CLI-M36).
+[[nodiscard]] std::string one_shot_backend(const harness::Config& config, std::string_view model);
+
 }  // namespace apogee::commands

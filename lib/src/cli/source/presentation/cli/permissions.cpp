@@ -223,12 +223,7 @@ agent::RefusalNote mode_refusal(std::shared_ptr<const SessionApprovals> approval
     };
 }
 
-agent::PermissionChecker make_permission_checker(const harness::Config& config,
-                                                 std::shared_ptr<SessionApprovals> approvals) {
-    // The levels and hosts are copied: the checker outlives any one config
-    // object, and a mid-session edit to the file takes effect on the next
-    // session.
-    //
+std::vector<std::string> listed_hosts(const harness::Config& config) {
     // The search instance's host counts as listed: the user named it in
     // tools.search, which is the consent (25e). The pages a search finds are
     // ordinary fetches, asked per website.
@@ -239,6 +234,15 @@ agent::PermissionChecker make_permission_checker(const harness::Config& config,
         search.has_value()) {
         hosts.push_back(search->base.host);
     }
+    return hosts;
+}
+
+agent::PermissionChecker make_permission_checker(const harness::Config& config,
+                                                 std::shared_ptr<SessionApprovals> approvals) {
+    // The levels and hosts are copied: the checker outlives any one config
+    // object, and a mid-session edit to the file takes effect on the next
+    // session.
+    std::vector<std::string> hosts = listed_hosts(config);
     return
         [levels = config.permissions, hosts = std::move(hosts),
          approvals = std::move(approvals)](const agent::GateRequest& request) -> agent::Permission {

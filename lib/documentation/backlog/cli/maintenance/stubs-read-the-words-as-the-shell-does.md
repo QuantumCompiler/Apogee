@@ -197,7 +197,7 @@ The bug becomes a quoted-line table, run through the real line editors so the ar
 
 - **Blocked by:** [CLI-M37](powershell-completes-the-word-at-the-cursor.md), [CLI-M41](bash-3-2-completes-every-word.md) · **Blocks:** —
 - **Relates to:**
-  - [CLI-M36](grant-and-deny-flags-offer-what-they-take.md): its rule that "the line is read up to the cursor" gains "and read as the shell reads it". It does not depend on this item.
+  - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its rule that "the line is read up to the cursor" gains "and read as the shell reads it". It does not depend on this item.
   - [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md): `delete-allowed-host` offers entries as written, and this item's bash quoting is what makes inserting `*.example.com` or a raw URL safe there (zsh already is).
   - [CLI-M48](a-suggested-command-runs-as-printed.md), which quotes a printed command as the shell reads it: the same POSIX and PowerShell facts, on the binary's side rather than the stubs'.
   - ADR 0007, the stubs' rules; `line_tokens.h` (37f), the binary's splitter.

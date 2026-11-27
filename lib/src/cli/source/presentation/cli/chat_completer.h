@@ -110,8 +110,13 @@ enum class ArgumentValues : std::uint8_t {
     ThinkingDisplays,
     /// `on`, `off` (26l).
     OnOff,
-    /// The tools this chat asks permission for (26o).
-    GatedTools,
+    /// What `/allow` takes from a closed set: the tools this chat asks
+    /// permission for (26o), and the websites it denied for itself (CLI-M36).
+    AllowNames,
+    /// What `/deny` takes from a closed set: the tools this chat asks
+    /// permission for (26o), the websites the gate lists and those this chat
+    /// allowed for itself (CLI-M36).
+    DenyNames,
     /// The tools and websites this chat has answered for itself (26o).
     SessionPermissions,
     /// The permission modes, described (39b).
@@ -212,6 +217,13 @@ struct ChatCompletionSources {
     /// for itself, for `/allow`, `/deny` and `/revoke` (26o).
     std::function<std::vector<std::string>()> gated_tools;
     std::function<std::vector<std::string>()> session_permissions;
+    /// The websites `/deny` and `/allow` offer beside the tools (CLI-M36):
+    /// the hosts the gate lists (`listed_hosts`, as written), and those this
+    /// chat allowed and denied for itself -- each offered as `name_gated`
+    /// reads it, so none is refused.
+    std::vector<std::string> listed_hosts{};
+    std::function<std::vector<std::string>()> allowed_hosts{};
+    std::function<std::vector<std::string>()> denied_hosts{};
     DirectoryLister list;
     /// Which session the line is typed into (27s): the rows it offers.
     SessionMode mode = SessionMode::Chat;

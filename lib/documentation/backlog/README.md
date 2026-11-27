@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 25 maintenance items can be picked up any time: the CLI's M36–M47 (2026-11-22) and M48–M60 (2026-11-26); the Apple apps have none. Eight wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, and M60 on M58. None of the 25 waits on a decision from you.
+Outside the release, 24 maintenance items can be picked up any time: the CLI's M37–M47 (2026-11-22) and M48–M60 (2026-11-26); the Apple apps have none. Eight wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, and M60 on M58. None of the 24 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55 and M57–M59).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M37–M41, M45, M47, M48, M51–M55 and M57–M59).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -54,7 +54,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M36 | [Grant and deny flags offer what they take](cli/maintenance/grant-and-deny-flags-offer-what-they-take.md) | — |
 | CLI | M37 | [PowerShell completes the word at the cursor](cli/maintenance/powershell-completes-the-word-at-the-cursor.md) | — |
 | CLI | M38 | [A refused run starts no MCP server](cli/maintenance/a-refused-run-starts-no-mcp-server.md) | — |
 | CLI | M39 | [Deny takes every host a yes takes, and says when a tool's name became a website](cli/maintenance/deny-takes-every-host-a-yes-takes.md) | — |

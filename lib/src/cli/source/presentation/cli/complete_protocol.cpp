@@ -568,6 +568,7 @@ Completion complete_words(const CompletionRequest& request, const harness::Confi
         }
         if (const CommandSpec* child = child_named(*node, word)) {
             node = child;
+            context.command.push_back(child->name);
             context.positionals.clear();
             context.flags.clear();
             continue;

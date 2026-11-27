@@ -140,6 +140,113 @@ int run_apogee(const std::vector<std::string>& args, std::string* said = nullptr
     return code;
 }
 
+/// `run_apogee` with `input` on stdin, for a session verb that reads it.
+int run_apogee_fed(const std::vector<std::string>& args, const std::string& input,
+                   std::string* said = nullptr) {
+    const std::istringstream fed{input};
+    std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+    const int code = run_apogee(args, said);
+    std::cin.rdbuf(old_in);
+    std::cin.clear();
+    return code;
+}
+
+/// CLI-M36's probe home (2026-11-22): two mock backends, `m` the default; a
+/// config deny of write_file; agents under each tool policy; a suite that
+/// pins its chat member, `helper`, to the notes tools, and one that pins it
+/// to the web tools, which write nothing; five allowed hosts -- one
+/// canonical only once lowercased, a URL, one shaped like a tool, and one
+/// whose canonical name is shaped like a tool -- and a search instance.
+/// `default_suite` runs the notes suite with no flags.
+struct GrantHome {
+    Home home;
+    std::filesystem::path path = home.home / "config" / "config.yaml";
+    apogee::harness::Config config;
+    c::CommandSpec tree = c::specs_from_app(c::RootCommand{c::default_registry()}.app());
+
+    explicit GrantHome(bool default_suite = false) {
+        write(default_suite);
+    }
+
+    void write(bool default_suite) {
+        const std::string yaml =
+            std::string{"models:\n  default: m\n"} +
+            (default_suite ? "  default_suite: pinned\n" : "") +
+            "backends:\n  m:\n    type: mock\n  helper:\n    type: mock\n"
+            "permissions:\n  write_file: deny\n"
+            "agents:\n  narrow:\n    tools: read-only\n  wide:\n    tools: all\n"
+            "  mute:\n    tools: none\n"
+            "suites:\n  pinned:\n    members:\n      chat:\n        backend: helper\n"
+            "        toolset: [notes]\n"
+            "  webbed:\n    members:\n      chat:\n        backend: helper\n"
+            "        toolset: [web]\n"
+            "tools:\n  allowed_hosts:\n    - docs.python.org\n    - Example.COM.\n"
+            "    - https://not-a-host.example/path\n    - my_host\n    - side_door.\n"
+            "  search:\n    url: http://127.0.0.1:8888\n"
+            "memory:\n  recall: false\n";
+        write_file(path, yaml);
+        config = apogee::harness::parse_config(yaml, "test");
+    }
+
+    /// What Tab offers after `words`, through the real `__complete` path.
+    [[nodiscard]] c::Completion offer(const std::vector<std::string>& words,
+                                      const std::string& current = "") const {
+        return c::complete_words({.words = words, .current = current}, config, tree,
+                                 c::default_completion_sources());
+    }
+
+    /// `apogee --config <this config> <args>`.
+    int run(std::vector<std::string> args, std::string* said = nullptr) const {
+        args.insert(args.begin(), {"--config", path.string()});
+        return run_apogee(args, said);
+    }
+};
+
+/// The writers this host registers, sorted, without `out`.
+[[nodiscard]] std::vector<std::string> writers_without(
+    std::initializer_list<std::string_view> out = {}) {
+    std::vector<std::string> kept;
+    for (std::string& tool :
+         c::offered_tool_names(apogee::platform::supports_child_processes(), {})) {
+        if (std::ranges::find(out, std::string_view{tool}) == out.end()) {
+            kept.push_back(std::move(tool));
+        }
+    }
+    std::ranges::sort(kept);
+    return kept;
+}
+
+/// The tools of `candidates` (those `destructive_tool_names` lists), and the
+/// rest -- the websites -- each sorted.
+[[nodiscard]] std::vector<std::string> tools_of(const std::vector<std::string>& candidates,
+                                                bool tools = true) {
+    std::vector<std::string> out;
+    for (const std::string& name : candidates) {
+        const auto writers = apogee::tools::destructive_tool_names();
+        if ((std::ranges::find(writers, std::string_view{name}) != writers.end()) == tools) {
+            out.push_back(name);
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+/// The value `line` gives the first of `spellings`, `--x=v` read as well.
+[[nodiscard]] std::string line_value(const std::vector<std::string>& line,
+                                     std::initializer_list<std::string_view> spellings) {
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        for (const std::string_view spelling : spellings) {
+            if (line[i] == spelling && i + 1 < line.size()) {
+                return line[i + 1];
+            }
+            if (line[i].starts_with(std::string{spelling} + "=")) {
+                return line[i].substr(spelling.size() + 1);
+            }
+        }
+    }
+    return {};
+}
+
 [[nodiscard]] const std::string& bundled_script(std::string_view name) {
     for (const apogee::harness::BundledScript& script :
          apogee::harness::bundled_training_scripts()) {
@@ -768,6 +875,343 @@ TEST_CASE("allow and deny offer no tool of a toolset the config switches off",
     }
 }
 
+TEST_CASE("a task's grant offers the writers its own ceiling takes, and the verb refuses the rest",
+          "[commands][completion][sources][permissions][task][CLI-M36]") {
+    // `task run --allow` refuses a writer the config denies, one its agent's
+    // policy leaves out and one outside the suite's pin on the task's
+    // backend; Tab offered all six whatever the line or config said (the
+    // probes of 2026-11-22). Now the offer is the ceiling's, read from the
+    // line before the cursor -- each case held three ways: the expected
+    // set; the ceiling `drive` itself composes over its full registry,
+    // tool by tool; and each writer left out run as the verb, refused
+    // with no task made.
+    GrantHome grant;
+    write_file(apogee::harness::recipes_dir() / "narrow-digest.yaml",
+               "goal: Digest the notes.\ntools: true\nagent: narrow\n");
+    const std::vector<std::string> notes{"delete_note", "write_note"};
+    const std::vector<std::string> undenied = writers_without({"write_file"});
+
+    struct Case {
+        std::vector<std::string> line;
+        bool default_suite = false;
+        std::vector<std::string> offered{};
+        std::string none{};
+    };
+
+    const std::vector<Case> cases{
+        // The config's deny.
+        {.line = {}, .offered = undenied},
+        // Each agent's policy.
+        {.line = {"--agent", "narrow"},
+         .none = "the agent 'narrow' runs with tools: read-only, so a task under it is granted "
+                 "nothing"},
+        {.line = {"--agent", "mute"},
+         .none = "the agent 'mute' runs with tools: none, so a task under it is granted nothing"},
+        {.line = {"--agent", "wide"}, .offered = undenied},
+        // A recipe's agent, and a typed one over it.
+        {.line = {"--recipe", "narrow-digest"}, .none = "the agent 'narrow' runs with tools:"},
+        {.line = {"--recipe", "narrow-digest", "--agent", "wide"}, .offered = undenied},
+        // The suite's pin, however the backend in play is its member.
+        {.line = {"--suite", "pinned"}, .offered = notes},
+        {.line = {"--suite=pinned"}, .offered = notes},
+        {.line = {"-m", "helper", "--suite", "pinned"}, .offered = notes},
+        {.line = {"--model", "helper", "--suite", "pinned"}, .offered = notes},
+        {.line = {}, .default_suite = true, .offered = notes},
+        // A pin that leaves no writer says so -- whatever the agent allows.
+        {.line = {"--suite", "webbed"}, .none = "the suite 'webbed' gives helper only web"},
+        {.line = {"--agent", "wide", "--suite", "webbed"},
+         .none = "the suite 'webbed' gives helper only web"},
+        // ... and what lifts it: no suite, or a backend outside it.
+        {.line = {"--suite", "off"}, .default_suite = true, .offered = undenied},
+        {.line = {"-m", "m", "--suite", "pinned"}, .offered = undenied},
+        {.line = {"-m", "m"}, .default_suite = true, .offered = undenied},
+        {.line = {"-m", "helper"}, .offered = undenied},
+    };
+    for (const Case& each : cases) {
+        std::string described;
+        for (const std::string& word : each.line) {
+            described += " " + word;
+        }
+        INFO("task run" << described << (each.default_suite ? " (default_suite: pinned)" : ""));
+        grant.write(each.default_suite);
+        const bool recipe = !line_value(each.line, {"--recipe"}).empty();
+        std::vector<std::string> words{"task", "run"};
+        if (!recipe) {
+            words.emplace_back("Write the report");
+        }
+        words.emplace_back("--tools");
+        words.insert(words.end(), each.line.begin(), each.line.end());
+        words.emplace_back("--allow");
+        const c::Completion got = grant.offer(words);
+        CHECK(got.candidates == each.offered);
+        if (each.offered.empty()) {
+            INFO(got.hint);
+            CHECK(got.hint.find(each.none) != std::string::npos);
+        }
+
+        // The ceiling `drive` composes: the backend `task run` chooses, its
+        // whole registry (`make_built_in_tools`) pinned, the agent's policy.
+        const std::string suite = line_value(each.line, {"--suite"});
+        apogee::harness::Config probe = grant.config;
+        if (!suite.empty()) {
+            REQUIRE(c::select_suite(probe, suite).empty());
+        }
+        const std::string backend =
+            c::task_chat_backend(grant.config, line_value(each.line, {"-m", "--model"}), suite);
+        std::string agent_name = line_value(each.line, {"--agent"});
+        if (agent_name.empty() && recipe) {
+            agent_name = "narrow";
+        }
+        const std::optional<apogee::harness::AgentConfig> agent =
+            agent_name.empty() ? std::nullopt : apogee::harness::resolve_agent(probe, agent_name);
+        const apogee::agent::ToolRegistry available = c::pin_toolset(
+            c::make_built_in_tools(c::BuiltInToolOptions{.config = &probe}), probe, backend);
+        const apogee::agent::ToolRegistry offered =
+            agent.has_value() ? c::apply_tool_policy(available, agent->tools) : available;
+        for (const std::string_view tool : apogee::tools::destructive_tool_names()) {
+            INFO(tool);
+            const std::string refused =
+                c::task_grant_refusal(probe, {std::string{tool}}, available, offered, agent_name,
+                                      agent.has_value() ? &*agent : nullptr);
+            CHECK(has(got.candidates, tool) == refused.empty());
+            if (has(got.candidates, tool)) {
+                continue;
+            }
+            // The verb, on its refusal side: exit 1, the rule's words, and
+            // no task made.
+            std::vector<std::string> args(words);
+            args.emplace_back(tool);
+            std::string said;
+            CHECK(grant.run(args, &said) == 1);
+            INFO(said);
+            CHECK(said.find(refused) != std::string::npos);
+            CHECK(apogee::tasks::list_tasks(apogee::harness::tasks_dir()).empty());
+        }
+    }
+}
+
+TEST_CASE("a task's grant is read up to the cursor: an agent typed after it is not seen",
+          "[commands][completion][sources][permissions][task][CLI-M36]") {
+    // PRECISION's precedent (`--mlx` after `--type` cannot be seen): the
+    // protocol hands over the words before the cursor, so `--agent narrow`
+    // typed later on the line is not among them. The offer is then the
+    // one the line so far allows -- narrower than the line will finally
+    // allow, never wider than what is typed.
+    const GrantHome grant;
+    CHECK(grant.offer({"task", "run", "Write the report", "--tools", "--allow"}).candidates ==
+          writers_without({"write_file"}));
+    // A `--tools` not yet typed empties nothing: it may follow, or a recipe
+    // bring it.
+    CHECK(grant.offer({"task", "run", "Write the report", "--allow"}).candidates ==
+          writers_without({"write_file"}));
+}
+
+TEST_CASE("a grant's offer never errors: an unknown agent or suite drops its filter",
+          "[commands][completion][sources][permissions][task][CLI-M36]") {
+    const GrantHome grant;
+    for (const std::vector<std::string>& line :
+         std::vector<std::vector<std::string>>{{"--agent", "nobody"},
+                                               {"--suite", "nobody"},
+                                               {"--recipe", "nobody"},
+                                               {"-m", "nobody"}}) {
+        INFO(line.front() << " " << line.back());
+        std::vector<std::string> words{"task", "run", "Write the report", "--tools"};
+        words.insert(words.end(), line.begin(), line.end());
+        words.emplace_back("--allow");
+        CHECK(grant.offer(words).candidates == writers_without({"write_file"}));
+    }
+    // A config that does not load: the list without its filters, and
+    // nothing printed but candidates.
+    write_file(grant.path, "backends: [unclosed\n");
+    std::string said;
+    CHECK(run_apogee({"--config", grant.path.string(), "__complete", "task", "run", "x", "--tools",
+                      "--agent", "narrow", "--allow", ""},
+                     &said) == 0);
+    std::string expected;
+    for (const std::string& tool : writers_without()) {
+        expected += tool + "\n";
+    }
+    CHECK(said == expected);
+}
+
+TEST_CASE("complete's --allow and --deny follow its suite's pin; the session verbs keep the rest",
+          "[commands][completion][sources][permissions][CLI-M36]") {
+    // `complete` runs once, so the suite's toolset pin on its backend is
+    // fixed: its --allow and --deny refuse a writer outside it, and Tab
+    // offered all six (2026-11-22). A session verb checks its flags against
+    // the unpinned registry, since `/suite` and `/model` can move the pin
+    // mid-session -- so its offer stays whole. A config deny narrows none of
+    // them: the session still asks.
+    const GrantHome grant{true};
+    const std::vector<std::string> notes{"delete_note", "write_note"};
+    for (const std::string flag : {"--allow", "--deny"}) {
+        for (const std::vector<std::string>& line :
+             std::vector<std::vector<std::string>>{{"-m", "helper"}, {"--model", "helper"}, {}}) {
+            INFO("complete " << (line.empty() ? "" : line.front() + " helper ") << flag);
+            std::vector<std::string> words{"complete"};
+            words.insert(words.end(), line.begin(), line.end());
+            words.emplace_back("--tools");
+            words.emplace_back(flag);
+            CHECK(tools_of(grant.offer(words).candidates) == notes);
+            for (const std::string& tool : writers_without({"delete_note", "write_note"})) {
+                INFO(tool);
+                std::vector<std::string> args(words);
+                args.push_back(tool);
+                args.emplace_back("hi");
+                std::string said;
+                CHECK(grant.run(args, &said) == 1);
+                CHECK(said.find(flag + ": '" + tool + "' is not a tool this chat asks about") !=
+                      std::string::npos);
+            }
+        }
+        // A backend outside the suite lifts the pin; a config-denied writer
+        // is offered, and runs.
+        INFO("complete -m m " << flag);
+        CHECK(tools_of(grant.offer({"complete", "-m", "m", "--tools", flag}).candidates) ==
+              writers_without());
+        std::string said;
+        CHECK(grant.run({"complete", "-m", "m", "--tools", flag, "write_file", "hi"}, &said) == 0);
+        // The session verbs keep the unpinned list, as they take it.
+        CHECK(tools_of(grant.offer({"chat", "--suite", "pinned", "-m", "helper", "--tools", flag})
+                           .candidates) == writers_without());
+    }
+    // Under --all-backends every backend runs under its own pin: offered is
+    // what each of them takes, so no run refuses it.
+    const std::vector<std::string> every =
+        tools_of(grant.offer({"complete", "--all-backends", "--tools", "--allow"}).candidates);
+    CHECK(every == notes);
+    for (const std::string& tool : writers_without()) {
+        INFO("complete --all-backends --allow " << tool);
+        std::string said;
+        CHECK(grant.run({"complete", "--all-backends", "--tools", "--allow", tool, "hi"}, &said) ==
+              0);
+        CHECK((said.find("is not a tool this chat asks about") == std::string::npos) ==
+              has(every, tool));
+    }
+    std::string said;
+    CHECK(run_apogee_fed({"--config", grant.path.string(), "chat", "--suite", "pinned", "-m",
+                          "helper", "--tools", "--deny", "edit_file"},
+                         "", &said) == 0);
+    INFO(said);
+}
+
+TEST_CASE("deny offers each host the gate lists, once and canonical, as the verb takes it",
+          "[commands][completion][sources][permissions][outbound][CLI-M36]") {
+    // `--deny` takes a website too -- the one way to refuse, for a session, a
+    // host the config lets through -- and Tab offered none (2026-11-22). The
+    // raw list would offer what --deny refuses (a URL, a tool-shaped name)
+    // and a host as written rather than as it is kept. So each listed host
+    // `name_gated` reads as a website is offered by its canonical name, once.
+    const GrantHome grant;
+    const std::vector<std::string> hosts{"127.0.0.1", "docs.python.org", "example.com"};
+    for (const std::string verb : {"chat", "execute", "acp", "tui", "complete"}) {
+        INFO(verb);
+        const std::vector<std::string> offered =
+            grant.offer({verb, "--tools", "--deny"}).candidates;
+        CHECK(tools_of(offered) == writers_without());
+        CHECK(tools_of(offered, false) == hosts);
+    }
+    // The in-shell sessions bind the same table on an app of their own.
+    for (const c::SessionMode mode : {c::SessionMode::Chat, c::SessionMode::Execute}) {
+        CLI::App app;
+        c::bind_session_flags(app, std::make_shared<c::SessionFlags>(), mode);
+        const std::vector<std::string> offered =
+            c::complete_words({.words = {"--tools", "--deny"}, .current = ""}, grant.config,
+                              c::specs_from_app(app), c::default_completion_sources())
+                .candidates;
+        CHECK(tools_of(offered, false) == hosts);
+    }
+
+    // The verb, both ways: each offered host is taken; each listed entry
+    // left out, refused.
+    for (const std::string& host : hosts) {
+        INFO(host);
+        std::string said;
+        CHECK(grant.run({"complete", "--tools", "--deny", host, "hi"}, &said) == 0);
+        // Denied, it is refused though the config lists it.
+        const auto approvals = std::make_shared<c::SessionApprovals>();
+        REQUIRE(
+            c::seed_approvals(*approvals, c::PermissionPresets{.deny = {host}}, writers_without())
+                .empty());
+        const apogee::agent::GateRequest reach{"fetch_url", host, "", true};
+        CHECK(c::make_permission_checker(grant.config, nullptr)(reach) ==
+              apogee::agent::Permission::Allow);
+        CHECK(c::make_permission_checker(grant.config, approvals)(reach) ==
+              apogee::agent::Permission::Deny);
+    }
+    // `side_door.` is taken as written, but its canonical name, `side_door`,
+    // is shaped like a tool and refused: Tab offers neither, never a name
+    // the verb refuses (until CLI-M39 takes every listed host).
+    for (const std::string listed : {"https://not-a-host.example/path", "my_host", "side_door"}) {
+        INFO(listed);
+        std::string said;
+        CHECK(grant.run({"complete", "--tools", "--deny", listed, "hi"}, &said) == 1);
+        CHECK(said.find("--deny: '" + listed + "' is not a tool this chat asks about") !=
+              std::string::npos);
+    }
+
+    // Any other host is typed, under a hint that names both; --allow stays
+    // tools-only (26o), and --allow-host free text.
+    const c::Completion typed = grant.offer({"chat", "--tools", "--deny"}, "wiki.internal");
+    CHECK(typed.candidates.empty());
+    CHECK(typed.hint.starts_with("--deny TOOL_OR_WEBSITE: Refuse a tool or website"));
+    CHECK(tools_of(grant.offer({"chat", "--tools", "--allow"}).candidates, false).empty());
+    const c::Completion free = grant.offer({"chat", "--tools", "--allow-host"});
+    CHECK(free.candidates.empty());
+    CHECK(free.hint.starts_with("--allow-host TEXT"));
+}
+
+TEST_CASE("delete-allowed-host offers each entry it removes, by its own match, once",
+          "[commands][completion][sources][permissions][config][CLI-M36]") {
+    // The raw list offered `Example.COM.` as written, a URL the verb refuses
+    // (`checked_host`), and could offer a host twice. Now each entry the
+    // verb's match takes is offered canonical, once -- `my_host` among them,
+    // which the verb removes -- and each one offered is removed.
+    const GrantHome grant;
+    const std::vector<std::string> offered =
+        grant.offer({"config", "delete-allowed-host"}).candidates;
+    CHECK(offered ==
+          std::vector<std::string>{"docs.python.org", "example.com", "my_host", "side_door"});
+    for (const std::string& host : offered) {
+        INFO(host);
+        std::string said;
+        CHECK(grant.run({"config", "delete-allowed-host", host}, &said) == 0);
+    }
+    CHECK(apogee::harness::load_config(grant.path).tools.allowed_hosts ==
+          std::vector<std::string>{"https://not-a-host.example/path"});
+    // With only an entry it cannot remove left, the hint says so -- not that
+    // the list is empty.
+    const apogee::harness::Config left = apogee::harness::load_config(grant.path);
+    c::CompletionContext context;
+    context.config = &left;
+    const c::NameList none = c::list_names(c::kAllowedHostValue, context);
+    CHECK(none.names.empty());
+    CHECK(none.none.find("no entry 'config delete-allowed-host' takes") != std::string::npos);
+}
+
+TEST_CASE("where no program can start, no grant or deny kind offers run_command",
+          "[commands][completion][sources][permissions][57k][CLI-M36]") {
+    const GrantHome grant;
+    const auto names = [&](std::string_view kind, std::vector<std::string> command, bool programs) {
+        c::CompletionContext context;
+        context.config = &grant.config;
+        context.command = std::move(command);
+        context.child_processes = programs;
+        return c::list_names(kind, context).names;
+    };
+    for (const auto& [kind, command] :
+         std::vector<std::pair<std::string_view, std::vector<std::string>>>{
+             {c::kOfferedToolValue, {"complete"}},
+             {c::kOfferedToolValue, {"chat"}},
+             {c::kToolOrWebsiteValue, {"complete"}},
+             {c::kToolOrWebsiteValue, {"chat"}},
+             {c::kTaskGrantToolValue, {"task", "run"}}}) {
+        INFO(kind << " on " << command.back());
+        CHECK_FALSE(has(names(kind, command, false), "run_command"));
+        CHECK(has(names(kind, command, true), "run_command"));
+    }
+}
+
 TEST_CASE("each flag that takes less than its neighbours declares its own kind",
           "[commands][completion][sources][names]") {
     // ADR 0007's offer-is-a-contract rule, at the declaration: the narrower
@@ -793,11 +1237,13 @@ TEST_CASE("each flag that takes less than its neighbours declares its own kind",
         return spec->positionals.front().source;
     };
 
+    // Chat-style --allow takes a tool the session offers; --deny that or a
+    // website the gate lists (CLI-M36).
     for (const std::string verb : {"chat", "execute", "acp", "tui", "complete"}) {
         INFO(verb);
         const c::CommandSpec* spec = node({verb});
         CHECK(flag_kind(*spec, "--allow") == c::kOfferedToolValue);
-        CHECK(flag_kind(*spec, "--deny") == c::kOfferedToolValue);
+        CHECK(flag_kind(*spec, "--deny") == c::kToolOrWebsiteValue);
     }
     // The in-shell sessions bind the same table on an app of their own.
     for (const c::SessionMode mode : {c::SessionMode::Chat, c::SessionMode::Execute}) {
@@ -805,9 +1251,10 @@ TEST_CASE("each flag that takes less than its neighbours declares its own kind",
         c::bind_session_flags(app, std::make_shared<c::SessionFlags>(), mode);
         const c::CommandSpec spec = c::specs_from_app(app);
         CHECK(flag_kind(spec, "--allow") == c::kOfferedToolValue);
-        CHECK(flag_kind(spec, "--deny") == c::kOfferedToolValue);
+        CHECK(flag_kind(spec, "--deny") == c::kToolOrWebsiteValue);
     }
-    CHECK(flag_kind(*node({"task", "run"}), "--allow") == c::kOfferedToolValue);
+    // A task's grant is held to the task's own ceiling (CLI-M36).
+    CHECK(flag_kind(*node({"task", "run"}), "--allow") == c::kTaskGrantToolValue);
     // A permissions: entry may name run_command on any host.
     CHECK(first_positional_kind(node({"config", "set-permission"})) == c::kToolValue);
 

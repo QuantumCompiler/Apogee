@@ -4119,6 +4119,59 @@ The user's four Assistant snapshots (12B, 26B, E2B, E4B) are all draft heads, ea
 - **Embedding through MLX at all** (an `EmbeddingCapable` `mlx` backend over `mlx-embeddings`), and building vision, omni or video models through MLX: capabilities, not upkeep. A spike, on the user's word.
 - **Converting this set on real weights:** the user's run.
 
+### 2026-11-27 — `grant-and-deny-flags-offer-what-they-take` (maintenance item M36): the permission flags offer what their verbs take
+
+**Why.** v0.2.1's pre-merge docs pass (2026-11-22, [its completion audit](#2026-11-22--the-completion-audit-at-v021s-docs-pass-resume-and-the-tool-grants-offer-what-they-take)) left the permission flags' offers that needed a design of their own, and two probes of the built binary measured them. Tab offered `task run --allow` all six writers under every agent, suite and config, and the verb refused them nine runs of nine. The suite's tool pin reached neither of `complete`'s `--allow` and `--deny`. `--deny` offered no website, though a website is half of what it takes. `config delete-allowed-host` offered an entry it refuses (a URL) and a host as written (`Example.COM.`). ADR 0007 holds an offer to its verb both ways, so each flag now gets a list held to the verb's own refusal, read from the line before the cursor, within the per-keystroke budget.
+
+**What was built** (`presentation/cli/`)
+
+- [x] **`task run --allow` offers by the task's own ceiling**: a new kind, `TASK_GRANT_TOOL`. The ceiling `compose_task_gate` applied (the 57k check, then `tasks::grant_refusal`) is now one declared function, `task_grant_refusal`, and the backend `drive` chooses is now `task_chat_backend(config, model, suite)`. `drive` calls both, and its refusals are unchanged. The source resolves, from the line before the cursor:
+  - the backend: `-m`/`--model`, else the chat member of `--suite` (or `--suite=`), else of `models.default_suite`;
+  - the registry: the native toolsets under the build's `child_processes` and `tools.disabled`, pinned by the suite's toolset on that backend (`pin_toolset`);
+  - the agent: `--agent`, else the `--recipe`'s, else none, its policy applied (`apply_tool_policy`).
+
+  Each writer is kept when `task_grant_refusal` is empty. With none left, the hint names the rule: `the agent 'narrow' runs with tools: read-only, so a task under it is granted nothing`, or `the suite 'webbed' gives helper only web`.
+- [x] **`complete`'s `--allow` and `--deny` follow its suite's pin.** `complete` runs once, so its pin is fixed. `CompletionContext` gained `command`, the subcommand path the walk descended, so `OFFERED_TOOL` applies the pin on `complete` alone, on the backend the verb runs on. That backend is `one_shot_backend(config, model)` (new in `complete.h`), which the verb now calls too, behaviour unchanged: a roster model is read as its one owner's entry, any other word as typed. Under `--all-backends`, the offer is the tools every backend's pin keeps. The session verbs (chat, execute, acp, tui, the in-shell sessions) keep the unpinned list, as they take it: `/suite` and `/model` can move the pin mid-session. A config deny narrows none of them, since the session still asks.
+- [x] **Every `--deny` offers the websites the gate lists**: a new kind, `TOOL_OR_WEBSITE`. It offers `OFFERED_TOOL`'s list, then each host from `listed_hosts(config)` that `name_gated` reads as a website, by its canonical name, once. `listed_hosts` (new in `permissions.h`) is `tools.allowed_hosts` and the search instance's host, taken out of `make_permission_checker`, which now judges by it. So the probe's list offers `docs.python.org`, `example.com` and `127.0.0.1`, never the URL, `my_host` (shaped like a tool, CLI-M39's to change) or `Example.COM.` as written. Any other host is typed, under the hint `--deny TOOL_OR_WEBSITE: Refuse a tool or website …`. `--allow` stays tools-only (26o), and `--allow-host` stays `TEXT`.
+- [x] **In chat, `/deny` and `/allow` offer websites too.** `/deny` offers the gated tools, the listed hosts and the hosts this chat allowed. `/allow` offers the gated tools and the hosts this chat denied. Each is offered as `name_gated` reads it (`ChatCompletionSources::listed_hosts`, `allowed_hosts`, `denied_hosts`; `ArgumentValues::DenyNames` and `AllowNames` replace `GatedTools`). `/revoke` is unchanged.
+- [x] **`config delete-allowed-host` offers what it removes**: each entry whose canonical host the verb's match (`checked_host`, `canonical_host`) accepts, as that host, once. Over the probe's list that is `docs.python.org`, `example.com` and `my_host`. Once [CLI-M40](../../backlog/cli/maintenance/delete-allowed-host-removes-what-the-list-holds.md) lets the verb remove an entry as written, the malformed entries join the offer by its predicate.
+- [x] **`--help` shows the kinds**: `task run --allow TASK_GRANT_TOOL`, and `--deny TOOL_OR_WEBSITE` on every session verb and `complete`. Chat's and execute's goldens changed in exactly their `--deny` lines. `kNameValues` holds 55 kinds.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - The kinds are named `TASK_GRANT_TOOL` and `TOOL_OR_WEBSITE`.
+  - `complete` is told from a session verb by the command path the walk descends.
+  - The empty offer's hints are the two the document wrote (above).
+  - A `--tools` missing before the cursor empties nothing: it may follow, or a recipe may bring it.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **"Else the default agent" reads as no agent.** A task has no default agent. An unknown `--agent`, `--recipe` or `--suite` drops that filter: an unknown suite leaves the config's own in force, as `select_suite`'s refusal leaves the probe. That under-offers at worst, and the verb refuses the line.
+  - **`complete`'s backend is `one_shot_backend`, shared with the verb**, so a roster `-m` gets its owner's pin in both places.
+  - **Under `complete --all-backends`, the offer is what every backend's pin keeps.** Each run refuses a name outside its own pin, so the intersection is the list no run refuses.
+  - **A listed host is offered by its canonical name only when the verb takes that name too** (from the review). `side_door.` is a website, but `side_door` is shaped like a tool and refused, so neither is offered until CLI-M39 ships. The same holds in chat.
+  - **The empty task offer's hint names the rule that empties it** (from the review). It gives the agent's words only when its policy leaves nothing. It gives the pin's when the pinned registry holds no writer, whatever the agent allows. Otherwise it says `every tool that writes is denied by the config or switched off -- a task's grant is never wider than the config`.
+  - **`delete-allowed-host`'s hint, when only entries it cannot remove are left**, says so (`no entry 'config delete-allowed-host' takes -- …`), not "no allowed hosts yet".
+  - **In chat the gated tools come first, then the websites**, each canonical once. On the command line the one ordering rule (45a) orders tools and hosts together.
+
+**Verified.**
+- **Test-first.** The two kinds were declared with today's list as their source, and the in-chat sources with today's offer. Seven of nine new cases failed (90 assertions): the task grant under the deny, each agent, the recipe, the pin and its lifts; the pin on `complete`; `--deny`'s hosts and hint; `delete-allowed-host`'s canonical list; `/deny` and `/allow`. The 57k case and `listed_hosts`'s passed, as an extraction's should. With the sources in, all nine passed. The review's two findings each went in test-first too (11 assertions failed, then passed): a listed `side_door.` offered as a name the verb refuses, and a `wide` agent named for a pin that left no writer. With them came the web pin's hint, the `--all-backends` intersection and the hint over malformed entries alone.
+- **Each case held three ways** (`complete_sources_test`):
+  - the expected set;
+  - the ceiling `drive` itself composes over its full registry (`make_built_in_tools`, pinned, policy-filtered), tool by tool;
+  - each writer left out run as the verb in process, which exits 1 with its rule's words and makes no task.
+
+  `complete`'s pinned offer is held to `complete -m helper --tools --allow|--deny <t> hi` (refused outside the pin), a config-denied writer still runs, and `chat --suite pinned -m helper --tools --deny edit_file` is still taken. Each offered host is taken by `complete --tools --deny <h> hi`, each listed entry left out is refused, and an offered host, denied, is `Deny` though listed. Each `delete-allowed-host` candidate is removed by the verb. An unknown agent, suite, recipe or `-m` and an unloadable config each give a list and print nothing else. With `child_processes` false, no kind offers `run_command`. The declarations case reads the bound CLI11 tree.
+- **The built binary**, in a throwaway `APOGEE_HOME` and `HOME` under the session scratchpad, over the probe's config, gave every expected result of the document's six steps. The two refusals and `--deny example.com` ran as before, and `task list` stayed empty. `__complete task run --tools --agent narrow --suite pinned -m helper --allow ""` took 0.00 s real.
+- **Tags on the final tree:** `[CLI-M36]` 9 cases, `[completion]` 91, `[sources]` 34, `[permissions]` 56, `[task]` 54, `[chat]` 211, `[completer]` 34, `[golden]` 43, `[57k]` 20, `[execute]` 57, `[acp]` 50, `[tui]` 143, `[commands]` 812, all passing.
+- **No warning:** MinGW g++ 16.2 (the windows-x64 tree's flags) and Homebrew clang 22 (the macos-arm64 tree's flags), `-fsyntax-only -Wall -Wextra`, gave no diagnostic on the seven changed sources and three changed tests. clang-format 22 leaves every changed file as it is.
+- **The gate**, `lib/scripts/cicd.sh --test` on the final code, with nothing else running: exit 0. **4,584 ctest cases**, 100% passed: the run's baseline of 4,575 plus this item's nine. Two were skipped, as at the baseline: the `pdftotext` case and the extended-attribute write guard's. The suite ran in 665 s, with no compiler warning in the log. The macOS app built and passed its 1,400 cases (the result bundle's `totalTestCount`), none failed or skipped.
+
+**Not done:**
+- **CI has not run this**, so the Linux and Windows rows wait on the user's push. Windows' side of `run_command` is held through `CompletionContext::child_processes` on this Mac, and only CI's Windows rows run it natively. Neither `make pr-ci` nor the whole-tree `make lint` was run, nor GCC 13 in the Linux container.
+- **MCP tools are never offered**, though a task may be granted one: listing them would start the servers.
+- **A flag typed after the cursor is not seen**, so the offer may be narrower than the line finally allows. On PowerShell this holds once CLI-M37 ships, and on macOS's bash 3.2 these offers reach no one until CLI-M41 ships.
+- **`--deny` and `/deny` leave out a listed tool-shaped host** (`my_host`, `side_door.`) until CLI-M39 makes every listed host deniable. `delete-allowed-host` leaves out a malformed entry until CLI-M40.
+- **The in-chat sources read the session's answers unlocked**, as `/revoke`'s source did before. The shell asks for suggestions on its UI thread while a turn may record an answer, so a lock in `SessionApprovals` would be an item of its own.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

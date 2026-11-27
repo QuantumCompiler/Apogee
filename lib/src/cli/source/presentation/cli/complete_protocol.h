@@ -152,6 +152,12 @@ struct CompletionContext {
     /// offers only what a session registers (`OFFERED_TOOL`). The platform's
     /// answer by default; a test sets it to see either side on any host.
     bool child_processes = platform::supports_child_processes();
+    /// The subcommands the walk descended into, in order, each by its name
+    /// (`task`, `run`): which verb the line is for, for a kind whose offer
+    /// differs between verbs -- `complete`'s suite pin, fixed for its one
+    /// run, which a session verb's `/suite` can move (CLI-M36). Empty at the
+    /// top level and on a session's own line.
+    std::vector<std::string> command{};
 };
 
 /// The names of one kind that exist now.

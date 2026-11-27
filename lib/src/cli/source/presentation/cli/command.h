@@ -166,11 +166,26 @@ inline constexpr const char* kGitRemoteValue = "REMOTE";
 inline constexpr const char* kConfigKeyValue = "KEY";
 /// A tool a `permissions:` entry can name.
 inline constexpr const char* kToolValue = "TOOL";
-/// A tool this build offers -- --allow, --deny and a task's grant (57k: no
-/// shell or git tool where no program can be started), and none of a
-/// toolset `tools.disabled` switches off.
+/// A tool chat-style `--allow` takes, and the tools of `--deny`: a writer a
+/// session's registry holds on this build (57k: no shell or git tool where
+/// no program can be started), none of a toolset `tools.disabled` switches
+/// off -- and on `complete`, whose suite pin is fixed for its one run, only
+/// those the suite pins on the backend in play (CLI-M36). A config deny
+/// narrows none of them: the session still asks.
 inline constexpr const char* kOfferedToolValue = "OFFERED_TOOL";
-/// A host in `tools.allowed_hosts`.
+/// A tool a task's grant takes (`task run --allow`, CLI-M36): a writer the
+/// task's own registry holds -- its suite's toolset pin on its backend
+/// applied -- inside its agent's policy and not denied by the config, held
+/// by the task's own ceiling (`task_grant_refusal`) over the backend, suite
+/// and agent the line names before the cursor.
+inline constexpr const char* kTaskGrantToolValue = "TASK_GRANT_TOOL";
+/// What `--deny` takes from a closed set (CLI-M36): the tools `OFFERED_TOOL`
+/// offers, and each host the gate lists (`listed_hosts`) that `name_gated`
+/// reads as a website, by its canonical name. Any other website is typed.
+inline constexpr const char* kToolOrWebsiteValue = "TOOL_OR_WEBSITE";
+/// A host in `tools.allowed_hosts` that `config delete-allowed-host` removes,
+/// by the verb's own match (CLI-M36): each entry whose canonical host it
+/// accepts, by that host, once.
 inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 /// A provider the last scan found to register (M33): `providers register`'s
 /// argument, read from the provider cache, never a scan.
@@ -178,7 +193,7 @@ inline constexpr const char* kProviderValue = "PROVIDER";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 53> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 55> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -217,6 +232,8 @@ inline constexpr std::array<std::string_view, 53> kNameValues{kCollectionValue,
                                                               kConfigKeyValue,
                                                               kToolValue,
                                                               kOfferedToolValue,
+                                                              kTaskGrantToolValue,
+                                                              kToolOrWebsiteValue,
                                                               kAllowedHostValue,
                                                               kProviderValue,
                                                               kSymphonyValue,

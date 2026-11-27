@@ -169,6 +169,6 @@ Hermetic and in process: the transforms over YAML and JSONC text, the twin throu
 
 - **Blocked by:** [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md) · **Blocks:** [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md)
 - **Relates to:**
-  - [CLI-M36](grant-and-deny-flags-offer-what-they-take.md): its `delete-allowed-host` offer comes from the loader (`complete_sources.cpp:793-795`), so on a compact list it offers hosts the verb refuses today. After this item, the verb takes them.
+  - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its `delete-allowed-host` offer comes from the loader (`ALLOWED_HOST` in `complete_sources.cpp`), so on a compact list it offers hosts the verb refuses today. After this item, the verb takes them.
   - [CLI-M39](deny-takes-every-host-a-yes-takes.md): the same list, `--deny`'s side.
   - 55f and 27f, the compact-list fixes that never reached this scan; 57e, "a printed success is a landed change"; 72c2d75a, the scan's first commit.

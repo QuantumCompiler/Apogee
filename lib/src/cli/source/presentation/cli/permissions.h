@@ -159,6 +159,13 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
     const harness::Config& config, const SessionApprovals& approvals,
     const std::vector<std::string>& gated, const std::vector<std::string>& edits = {});
 
+/// The hosts the gate lets through without asking: `tools.allowed_hosts` as
+/// written, then the host of the search instance `tools.search` names when
+/// it names a usable one (25e) -- the user named it, which is the consent.
+/// The checker judges by this list, and `--deny`'s and `/deny`'s completion
+/// offers from it (CLI-M36), each entry as `name_gated` reads it.
+[[nodiscard]] std::vector<std::string> listed_hosts(const harness::Config& config);
+
 /// The checker. For a tool that writes: the config's level for the tool, then
 /// the session's answers, then the session's mode (39b: plan refuses every
 /// writer, accept-edits allows an edit, bypass allows, dont-ask refuses),

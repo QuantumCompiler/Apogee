@@ -14,6 +14,7 @@
 #include "cli/suite_residency.h"
 #include "contracts/config.h"
 #include "logger/session.h"
+#include "platform/child_process.h"
 #include "tasks/ledger.h"
 #include "tasks/policy.h"
 #include "tasks/recipe.h"
@@ -157,5 +158,29 @@ struct TaskGate {
                                          const tasks::AutonomyPolicy& policy,
                                          const harness::AgentConfig* agent,
                                          const PersonPrompt& person);
+
+/// **A task's ceiling** (27i): why `grants` would take a task past what this
+/// build offers -- a shell or git tool where no program can be started (57k,
+/// `child_processes` false) -- or past the config and its agent
+/// (`tasks::grant_refusal`, over `available`, the task's tools before any
+/// agent's policy, and `offered`, after it), naming the rule; empty when they
+/// do not. `agent` is the entry the task runs under, named `agent_name`, or
+/// null. `compose_task_gate` refuses by it, and `task run --allow`'s
+/// completion (`TASK_GRANT_TOOL`, CLI-M36) offers each writer it leaves
+/// empty: one ceiling, so what Tab offers the verb takes.
+[[nodiscard]] std::string task_grant_refusal(
+    const harness::Config& config, const std::vector<std::string>& grants,
+    const agent::ToolRegistry& available, const agent::ToolRegistry& offered,
+    std::string_view agent_name, const harness::AgentConfig* agent,
+    bool child_processes = platform::supports_child_processes());
+
+/// The backend a new task's turns run on, as `task run` chooses it: `model`
+/// (`-m`) when given, else the chat member of the suite the task runs under
+/// -- `suite` (`--suite`, `off` for none) when it names one, else
+/// `models.default_suite` -- else the chat chain past it. `drive` runs the
+/// task on it and pins the suite's toolset by it, and `TASK_GRANT_TOOL`
+/// reads it (CLI-M36). Pure: the config is read, nothing is built.
+[[nodiscard]] std::string task_chat_backend(const harness::Config& config, std::string_view model,
+                                            std::string_view suite);
 
 }  // namespace apogee::commands

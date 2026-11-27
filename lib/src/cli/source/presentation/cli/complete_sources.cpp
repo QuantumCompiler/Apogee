@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -12,15 +13,19 @@
 #include <vector>
 
 #include "backends/mlx_local.h"
+#include "cli/complete.h"
 #include "cli/config_cmd.h"
 #include "cli/embed.h"
 #include "cli/graph.h"
+#include "cli/helpers.h"
 #include "cli/models_pull.h"
+#include "cli/permissions.h"
 #include "cli/provider_offer.h"
 #include "cli/providers_cmd.h"
 #include "cli/task_cmd.h"
 #include "contracts/assets.h"
 #include "contracts/cancellation.h"
+#include "contracts/host.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "contracts/review_skill.h"
@@ -338,6 +343,163 @@ void voice_models(const models::StoreRoots& roots, NameList& list) {
         }
     }
     push_format(list.names, std::move(found));
+}
+
+/// The value the line gave the first of `spellings` it holds before the
+/// cursor (`-m` and `--model` are kept apart), or empty.
+[[nodiscard]] std::string flag_value(const CompletionContext& context,
+                                     std::initializer_list<std::string_view> spellings) {
+    for (const std::string_view spelling : spellings) {
+        if (const auto found = context.flags.find(std::string{spelling});
+            found != context.flags.end()) {
+            return found->second;
+        }
+    }
+    return {};
+}
+
+/// The native tools a session registers on this build under the config --
+/// no shell or git tool where no program can be started (57k), none of a
+/// toolset `tools.disabled` switches off -- registered as a session
+/// registers them: the registration is the test, so no rule is copied. The
+/// configured MCP servers' tools are never here: listing them would start
+/// the servers.
+[[nodiscard]] agent::ToolRegistry native_registry(bool child_processes,
+                                                  const std::vector<std::string>& disabled) {
+    tools::ToolsetOptions options;
+    options.child_processes = child_processes;
+    options.disabled = disabled;
+    agent::ToolRegistry registry;
+    tools::register_native_toolsets(registry, options);
+    return registry;
+}
+
+/// The writers `registry` holds, in `destructive_tool_names`' order.
+[[nodiscard]] std::vector<std::string> writers_in(const agent::ToolRegistry& registry) {
+    std::vector<std::string> out;
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        if (registry.find(tool) != nullptr) {
+            out.emplace_back(tool);
+        }
+    }
+    return out;
+}
+
+/// The tools chat-style `--allow` and `--deny` take (`OFFERED_TOOL`): the
+/// writers a session's registry holds -- and on `complete`, whose suite pin
+/// is fixed for its one run, those the pin keeps on the backend it runs on
+/// (`one_shot_backend`), or under `--all-backends` those every backend's pin
+/// keeps. A session verb checks its flags against the unpinned registry,
+/// since `/suite` and `/model` can move the pin mid-session (CLI-M36).
+[[nodiscard]] std::vector<std::string> session_tool_names(const CompletionContext& context,
+                                                          const harness::Config& config) {
+    const agent::ToolRegistry registry =
+        native_registry(context.child_processes, config.tools.disabled);
+    if (context.command != std::vector<std::string>{"complete"}) {
+        return writers_in(registry);
+    }
+    if (!context.flags.contains("--all-backends")) {
+        return writers_in(pin_toolset(
+            registry, config, one_shot_backend(config, flag_value(context, {"-m", "--model"}))));
+    }
+    std::vector<std::string> kept = writers_in(registry);
+    for (const std::string& backend : config.backend_names()) {
+        const std::vector<std::string> pinned = writers_in(pin_toolset(registry, config, backend));
+        std::erase_if(kept, [&pinned](const std::string& tool) {
+            return std::ranges::find(pinned, tool) == pinned.end();
+        });
+    }
+    return kept;
+}
+
+/// What `--deny` takes from a closed set (`TOOL_OR_WEBSITE`): the tools
+/// chat-style flags take, then each host the gate lists that `name_gated`
+/// reads as a website -- by its canonical name, once. A URL, a name shaped
+/// like a tool and any other entry the verb refuses are left out; a host no
+/// list names is typed (CLI-M36).
+[[nodiscard]] std::vector<std::string> tool_or_website_names(const CompletionContext& context,
+                                                             const harness::Config& config) {
+    std::vector<std::string> names = session_tool_names(context, config);
+    const std::vector<std::string> tools = names;
+    for (const std::string& entry : listed_hosts(config)) {
+        const GatedName name = name_gated(entry, tools, true, context.child_processes);
+        // Offered by its canonical name only when the verb takes that name
+        // too: `side_door.` is a website, but `side_door` is shaped like a
+        // tool and refused.
+        const GatedName offered =
+            name.host ? name_gated(name.key, tools, true, context.child_processes) : GatedName{};
+        if (name.error.empty() && name.host && offered.host && offered.key == name.key &&
+            std::ranges::find(names, name.key) == names.end()) {
+            names.push_back(name.key);
+        }
+    }
+    return names;
+}
+
+/// What a task's grant takes (`TASK_GRANT_TOOL`): each writer the task's
+/// own ceiling (`task_grant_refusal`) leaves unrefused, over the registry
+/// `drive` would compose for the line so far -- the backend `task run`
+/// chooses from `-m` and `--suite` (`task_chat_backend`), the suite's pin on
+/// it, and the agent's policy: `--agent`, else the `--recipe`'s, else none.
+/// A filter whose input the config does not know is dropped: completion
+/// never errors, and the verb says why (CLI-M36).
+[[nodiscard]] NameList task_grant_names(const CompletionContext& context,
+                                        const harness::Config& config) {
+    NameList list;
+    const std::string suite = flag_value(context, {"--suite"});
+    harness::Config probe = config;
+    if (!suite.empty()) {
+        (void)select_suite(probe, suite);  // one it does not name leaves the config's own
+    }
+    const std::string backend =
+        task_chat_backend(config, flag_value(context, {"-m", "--model"}), suite);
+    std::string agent_name = flag_value(context, {"--agent"});
+    if (agent_name.empty()) {
+        if (const std::string recipe = flag_value(context, {"--recipe"}); !recipe.empty()) {
+            const tasks::RecipeBook book = tasks::recipe_book(harness::recipes_dir());
+            if (const tasks::RecipeEntry* entry = book.find(recipe); entry != nullptr) {
+                agent_name = entry->recipe.agent;
+            }
+        }
+    }
+    std::optional<harness::AgentConfig> agent;
+    if (!agent_name.empty()) {
+        agent = harness::resolve_agent(probe, agent_name);
+        if (!agent.has_value()) {
+            agent_name.clear();
+        }
+    }
+    const agent::ToolRegistry available =
+        pin_toolset(native_registry(context.child_processes, probe.tools.disabled), probe, backend);
+    const agent::ToolRegistry offered =
+        agent.has_value() ? apply_tool_policy(available, agent->tools) : available;
+    for (const std::string_view tool : tools::destructive_tool_names()) {
+        if (task_grant_refusal(probe, {std::string{tool}}, available, offered, agent_name,
+                               agent.has_value() ? &*agent : nullptr, context.child_processes)
+                .empty()) {
+            list.names.emplace_back(tool);
+        }
+    }
+    // Why nothing is left, by the rule that leaves it so.
+    const std::optional<std::vector<std::string>> pinned =
+        harness::suite_pins(probe, backend).toolset;
+    if (agent.has_value() && writers_in(offered).empty() && !writers_in(available).empty()) {
+        list.none = "the agent '" + agent_name +
+                    "' runs with tools: " + std::string{harness::to_string(agent->tools)} +
+                    ", so a task under it is granted nothing";
+    } else if (pinned.has_value() && writers_in(available).empty()) {
+        std::string toolsets;
+        for (const std::string& toolset : *pinned) {
+            toolsets += (toolsets.empty() ? "" : ", ") + toolset;
+        }
+        list.none = "the suite '" + probe.models.default_suite + "' gives " + backend +
+                    (toolsets.empty() ? std::string{" no tools"} : " only " + toolsets);
+    } else {
+        list.none =
+            "every tool that writes is denied by the config or switched off -- a task's grant "
+            "is never wider than the config";
+    }
+    return list;
 }
 
 [[nodiscard]] std::vector<std::string> kit_names() {
@@ -789,10 +951,26 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
             list.names.emplace_back(tool);
         }
     } else if (kind == kOfferedToolValue) {
-        list.names = offered_tool_names(context.child_processes, config.tools.disabled);
+        list.names = session_tool_names(context, config);
+    } else if (kind == kToolOrWebsiteValue) {
+        list.names = tool_or_website_names(context, config);
+    } else if (kind == kTaskGrantToolValue) {
+        list = task_grant_names(context, config);
     } else if (kind == kAllowedHostValue) {
-        list.names = config.tools.allowed_hosts;
-        list.none = "no allowed hosts yet -- 'apogee config add-allowed-host'";
+        // What `delete-allowed-host` removes, by its own match: an entry
+        // whose canonical host `checked_host` -- `canonical_host` -- accepts,
+        // offered as that host, once (CLI-M36). A malformed entry it cannot
+        // remove is not offered.
+        for (const std::string& entry : config.tools.allowed_hosts) {
+            if (const std::optional<std::string> host = harness::canonical_host(entry);
+                host.has_value() && std::ranges::find(list.names, *host) == list.names.end()) {
+                list.names.push_back(*host);
+            }
+        }
+        list.none = config.tools.allowed_hosts.empty()
+                        ? "no allowed hosts yet -- 'apogee config add-allowed-host'"
+                        : "no entry 'config delete-allowed-host' takes -- each one left is not a "
+                          "host name, and 'apogee check' names it";
     } else if (kind == kProviderValue) {
         // What the last scan found to register (M33), read from the provider
         // cache -- never a scan -- each with what the scan's row says of it.
@@ -816,19 +994,7 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
 
 std::vector<std::string> offered_tool_names(bool child_processes,
                                             const std::vector<std::string>& disabled) {
-    // The writers a session's registry holds, registered as a session
-    // registers them: the registration is the test, so no rule is copied.
-    tools::ToolsetOptions options;
-    options.child_processes = child_processes;
-    options.disabled = disabled;
-    const std::vector<std::string> registered = tools::native_tool_names(options);
-    std::vector<std::string> out;
-    for (const std::string_view tool : tools::destructive_tool_names()) {
-        if (std::ranges::find(registered, tool) != registered.end()) {
-            out.emplace_back(tool);
-        }
-    }
-    return out;
+    return writers_in(native_registry(child_processes, disabled));
 }
 
 CompletionSources default_completion_sources() {
