@@ -111,7 +111,7 @@ public struct TrainingScreen: View {
             Button("Cancel", role: .cancel) { model.pending = nil }
         } message: {
             Text(
-                (["apogee " + (model.pending?.arguments.joined(separator: " ") ?? "")] + [model.pendingConsequence].compactMap { $0 })
+                (["apogee " + (model.pending.map { Argv.shown($0.arguments) } ?? "")] + [model.pendingConsequence].compactMap { $0 })
                     .joined(separator: "\n\n"))
         }
         .fileImporter(isPresented: $preparing, allowedContentTypes: [.item]) { result in
@@ -609,8 +609,7 @@ struct CreateSheet: View {
     @Bindable var model: TrainingViewModel
 
     var body: some View {
-        let name = model.createName.trimmingCharacters(in: .whitespaces)
-        SheetFrame(title: "New dataset", arguments: name.isEmpty ? nil : ["datasets", "create", name, "--from", model.createFrom], action: "Create", act: { Task { await model.createDataset() } }, cancel: { model.sheet = nil }) {
+        SheetFrame(title: "New dataset", arguments: model.createArguments, action: "Create", act: { Task { await model.createDataset() } }, cancel: { model.sheet = nil }) {
             TextField("Dataset name", text: $model.createName).textFieldStyle(.roundedBorder)
             Picker("From", selection: $model.createFrom) {
                 Text("A template (two example lines)").tag("template")
@@ -636,7 +635,7 @@ struct SheetFrame<Fields: View>: View {
             Text(title).font(.apogeeHeading)
             fields()
             if let arguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3).textSelection(.enabled)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3).textSelection(.enabled)
             }
             HStack {
                 Spacer()
@@ -1039,7 +1038,7 @@ struct SheetFrame<Fields: View>: View {
 }
 
 #Preview("A sheet's frame: its command as typed") {
-    SheetFrame(title: "New dataset", arguments: ["datasets", "create", "notes", "--from", "sessions"], action: "Create", act: {}, cancel: {}) {
+    SheetFrame(title: "New dataset", arguments: Argv.line(["datasets", "create"], options: [.value("--from", "sessions")], names: ["notes"]), action: "Create", act: {}, cancel: {}) {
         TextField("Dataset name", text: .constant("notes")).textFieldStyle(.roundedBorder)
     }
 }

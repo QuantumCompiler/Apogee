@@ -72,7 +72,7 @@ The cure is already in the repository, twice:
 
 [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md) specs the same pattern for collections.
 
-The probes behind [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md) listed this among their CLI asides: "`agents create` leaving `prompts/-x.txt` behind on a refused name". The investigation that followed the APP-M21 and APP-M22 probes measured it, and found the case-fold harm and the other refusal classes. The Mac app's Library › New agent passes the typed name without `--`, so a dash name never reaches the scaffold from the app; that is APP-M21's and APP-M23's seam. But `.x`, `null` and a case variant do reach it.
+The probes behind [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) listed this among their CLI asides: "`agents create` leaving `prompts/-x.txt` behind on a refused name". The investigation that followed the APP-M21 and APP-M22 probes measured it, and found the case-fold harm and the other refusal classes. The Mac app's Library › New agent passes the typed name without `--`, so a dash name never reaches the scaffold from the app; that is APP-M21's and APP-M23's seam. But `.x`, `null` and a case variant do reach it.
 
 The design, in prose. Each core, after its sanitizer and before its existing-file checks, loads the config and runs the add it will make on the config's text. A refusal there is said and nothing is written. Then the files are written and the locked edit runs as today. Only trouble after that point can still leave files, and the words name each one.
 
@@ -254,7 +254,7 @@ Every case runs in a throwaway home on mock backends. No model is called.
 ## Out of scope
 
 - **Leftovers from earlier versions.** No verb or check names them, and `rm` removes them. After this item a leftover no longer causes the retry loop, since the dry run speaks first.
-- **The Mac app passing a dash name without `--`**: [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md) for listed names, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md) for the create forms, New agent included.
+- **The Mac app passing a dash name without `--`**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) for listed names, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md) for the create forms, New agent included.
 - **Remedy lines that print a dash name without `--`**: [CLI-M48](a-suggested-command-runs-as-printed.md).
 - **The symphony routes' empty error type** (`admin_symphonies.cpp:154-158`): [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md).
 - **The HTTP agent GET's exact-case match** (`admin_agents.cpp:183-184`), in the same file as this item's change: [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md).
@@ -273,6 +273,6 @@ Every case runs in a throwaway home on mock backends. No model is called.
   - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), whose layout refusals come out of `append_agent` and leave a scaffold until this item ships;
   - [CLI-M42](stubs-read-the-words-as-the-shell-does.md): independent;
   - the siblings from the same probes: [CLI-M48](a-suggested-command-runs-as-printed.md), [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), [CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md) and [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md);
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose probes listed this aside; [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), which keeps the house-voice lines; [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), the app's create forms;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes listed this aside; [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), which keeps the house-voice lines; [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), the app's create forms;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose door would run today's `agents create` and `mcp create` on the server's disk.
 - **Revises:** the intent pinned by `agent_test.cpp:147-160` and described by `agent.h:56-57` and `mcp_server.h:36-37`. **Follows from:** 55f (8d5aec51), the add rule, whose scaffold half this closes; [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0006](../../../adrs/cli/backwards-compatibility.md); [Milestone W](../../../assistant/cli/MILESTONES.md#milestone-w--the-mcp-client) and [Milestone X](../../../assistant/cli/MILESTONES.md#milestone-x--agents-as-data), the scaffolds' records.

@@ -92,7 +92,7 @@ struct TrainingCorrectnessTests {
         model.newDataset()
         model.createName = "notes"
         await model.createDataset()
-        #expect(runner.calls.contains("run datasets|create|notes|--from|template"))
+        #expect(runner.calls.contains("run datasets|create|--from|template|--|notes"))
         #expect(model.selectedDataset == "heat-notes", "the prior selection kept, its page still drawn")
         #expect(model.failure == "apogee datasets: dataset already exists: /Users/someone/.apogee/training/datasets/notes.jsonl (pass --force to overwrite it) (exited with status 1)")
         model.dismissFailure()

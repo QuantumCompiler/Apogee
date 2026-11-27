@@ -48,15 +48,15 @@ struct ModelsViewModelTests {
     func details() async {
         let runner = ScriptedRunner()
         let model = await connected(runner)
-        runner.reading(["models", "info", "qwen-mlx"], #"{"name":"qwen-mlx","fields":[{"field":"backend","value":"qwen-mlx"},{"field":"path","value":"/Users/someone/.apogee/models/mlx/qwen"}]}"#)
+        runner.reading(["models", "info", "--", "qwen-mlx"], #"{"name":"qwen-mlx","fields":[{"field":"backend","value":"qwen-mlx"},{"field":"path","value":"/Users/someone/.apogee/models/mlx/qwen"}]}"#)
         await model.select(model.rows.first { $0.backend == "qwen-mlx" }!)
         // Then its adapters, an mlx entry taking them (GUI 4i): none listed,
         // so the doctor is not asked.
-        #expect(runner.calls.suffix(2) == ["read models info qwen-mlx", "run config get backends.qwen-mlx.adapters"])
+        #expect(runner.calls.suffix(2) == ["read models info -- qwen-mlx", "run config get backends.qwen-mlx.adapters"])
         #expect(model.facts.map(\.label) == ["backend", "path"])
         #expect(model.typed.isEmpty, "no typed data: the record stands alone, as the board's fallback")
         #expect(model.path == "/Users/someone/.apogee/models/mlx/qwen")
-        runner.reading(["models", "info", "qwen3-8b-Q4KM"], #"""
+        runner.reading(["models", "info", "--", "qwen3-8b-Q4KM"], #"""
         {"name":"qwen3-8b-Q4KM","fields":[{"field":"backend","value":"qwen3-8b-Q4KM"}],
          "data":{"format":"gguf","handle":"qwen3-8b/gguf/6d0e12aa","bytes":5000000000,"architecture":"qwen3",
           "window":{"tokens":32768,"source":"default","trained":131072},
@@ -75,7 +75,7 @@ struct ModelsViewModelTests {
     func memoryUnknown() async {
         let runner = ScriptedRunner()
         let model = await connected(runner)
-        runner.reading(["models", "info", "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"], #"{"name":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","fields":[],"data":{"format":"pipeline","handle":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","bytes":28000000000,"architecture":"WanPipeline","window":null,"cache":null,"lineage":[]}}"#)
+        runner.reading(["models", "info", "--", "Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3"], #"{"name":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","fields":[],"data":{"format":"pipeline","handle":"Wan2.1-T2V-1.3B/pipeline/7c21e0d4b9a3","bytes":28000000000,"architecture":"WanPipeline","window":null,"cache":null,"lineage":[]}}"#)
         await model.select(model.rows.first { $0.format == "pipeline" }!)
         #expect(model.info?.memory == nil)
         #expect(model.typed.contains(Field("Memory", "not known: the files state no cache")))
@@ -96,7 +96,7 @@ struct ModelsViewModelTests {
                 == ["run models delete qwen-mlx"],
             "asked first: only the plan read -- and the adapters' list, a read -- nothing changed")
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
-        let ran = runner.calls.firstIndex(of: "run models delete qwen-mlx --yes")!
+        let ran = runner.calls.firstIndex(of: "run models delete --yes -- qwen-mlx")!
         #expect(runner.calls[ran + 1 ... ran + 2] == ["read models list", "read models status"], "read back")
         #expect(said == ["Deleted qwen-mlx"])
         // The scripted plan says nothing, so it names no backend: the choice
@@ -116,9 +116,9 @@ struct ModelsViewModelTests {
         await model.select(row)
         model.askToRemove(row)
         #expect(model.removing == "qwen3-8b-Q4KM")
-        #expect(!runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"), "asked first")
+        #expect(!runner.calls.contains("run config delete-backend -- qwen3-8b-Q4KM"), "asked first")
         try await model.confirmRemove(#require(model.removing))
-        #expect(runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"))
+        #expect(runner.calls.contains("run config delete-backend -- qwen3-8b-Q4KM"))
         #expect(!runner.calls.contains { $0.hasPrefix("run models delete") }, "the weights stay")
         #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
     }
@@ -134,7 +134,7 @@ struct ModelsViewModelTests {
         let answer = try #require(model.removing)
         model.removing = nil
         await model.confirmRemove(answer)
-        #expect(runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"))
+        #expect(runner.calls.contains("run config delete-backend -- qwen3-8b-Q4KM"))
         #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
         #expect(said.last == "Removed the backend qwen3-8b-Q4KM")
     }
@@ -150,12 +150,12 @@ struct ModelsViewModelTests {
         #expect(gguf.renameName == "qwen3-8b" && model.renamesAsModel(gguf))
         model.askToRename(gguf, .model)
         await model.rename(model.renaming!, to: "qwen3-8b-chat")
-        #expect(runner.calls.contains("run models rename qwen3-8b qwen3-8b-chat"))
+        #expect(runner.calls.contains("run models rename -- qwen3-8b qwen3-8b-chat"))
         let mlx = model.rows.first { $0.backend == "qwen-mlx" }!
         #expect(!model.renamesAsModel(mlx), "no name of its the binary completes: renamed as a backend (M2)")
         model.askToRename(mlx, .backend)
         await model.rename(model.renaming!, to: "qwen-mlx-8b")
-        #expect(runner.calls.contains("run config rename-backend qwen-mlx qwen-mlx-8b"))
+        #expect(runner.calls.contains("run config rename-backend -- qwen-mlx qwen-mlx-8b"))
         var checked: [String] = []
         model.checkFiles = { checked.append($0) }
         model.repair(gguf)
@@ -176,10 +176,10 @@ struct ModelsViewModelTests {
         #expect(model.roles.map(\.backend) == ["qwen3-8b-Q4KM", "qwen3-8b-Q4KM", nil])
         #expect(model.roles.map(\.isSet) == [true, false, false])
         await model.assign(model.roles[2], to: "claude")
-        #expect(runner.calls.suffix(4) == ["run config set-default-vision claude", "read models list", "read models status", "run __complete models rename "],
+        #expect(runner.calls.suffix(4) == ["run config set-default-vision -- claude", "read models list", "read models status", "run __complete models rename "],
                 "read back, and the names models rename takes asked again (M2)")
         await model.assign(model.roles[0], to: "claude")
-        #expect(runner.calls.contains("run config set-default claude"), "the chat role's verb is set-default")
+        #expect(runner.calls.contains("run config set-default -- claude"), "the chat role's verb is set-default")
         let before = runner.calls.count
         await model.assign(model.roles[0], to: "qwen3-8b-Q4KM")
         #expect(runner.calls.count == before, "already set there: nothing runs")
@@ -241,18 +241,18 @@ struct ModelsViewModelTests {
         runner.reading(["models", "info"], Self.recorded("info-set"))
         let set = model.rows[0]
         await model.select(set)
-        #expect(runner.calls.contains("read models info Llama3.2-1B-Instruct/safetensors/edaba290ce7f"))
+        #expect(runner.calls.contains("read models info -- Llama3.2-1B-Instruct/safetensors/edaba290ce7f"))
         #expect(model.selectedRow == set && model.info != nil)
         #expect(model.lineage.map(\.kind) == ["pulled"], "52e's typed data, read by the handle")
         await model.askToDelete(set)
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/safetensors/edaba290ce7f --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- Llama3.2-1B-Instruct/safetensors/edaba290ce7f"))
         var checked: [String] = []
         model.checkFiles = { checked.append($0) }
         model.repair(model.rows[1])
         #expect(checked == ["Qwen3-VL-8B-Instruct/safetensors/63f2634a2019"], "by its handle")
         await model.rename(.init(row: model.rows[1], kind: .model), to: "qwen-vl")
-        #expect(runner.calls.contains("run models rename Qwen3-VL-8B-Instruct qwen-vl"))
+        #expect(runner.calls.contains("run models rename -- Qwen3-VL-8B-Instruct qwen-vl"))
         #expect(!runner.calls.contains { $0.contains(ModelRow.unconfigured) })
     }
 
@@ -272,7 +272,7 @@ struct ModelsViewModelTests {
         #expect(model.backends.sorted() == ["EmbeddingGemma-300M-bf16", "Gemma4-E4B-4bit", "Qwen3-8B-4bit"])
         let role = try #require(model.roles.first { $0.role == "embedding" })
         await model.assign(role, to: "EmbeddingGemma-300M-bf16")
-        #expect(runner.calls.contains("run config set-default-embedding EmbeddingGemma-300M-bf16"))
+        #expect(runner.calls.contains("run config set-default-embedding -- EmbeddingGemma-300M-bf16"))
 
         let embedding = try #require(model.rows.first { $0.backend == "EmbeddingGemma-300M-bf16" })
         #expect(!model.opensSessions(embedding), "an embedding model answers no chat")
@@ -307,7 +307,7 @@ struct ModelsViewModelTests {
             let ran = runner.calls.filter { $0.hasPrefix("run config set-default") }
             #expect(!ran.isEmpty && ran.allSatisfy { !$0.hasPrefix("run config set-default-suite") && !$0.hasPrefix("run config set-default-footprint") },
                     "\(status): \(ran)")
-            #expect(ran.contains("run config set-default-utility m1") && ran.contains("run config set-default m2"))
+            #expect(ran.contains("run config set-default-utility -- m1") && ran.contains("run config set-default -- m2"))
         }
         // No suite active: no line.
         let runner = ScriptedRunner()

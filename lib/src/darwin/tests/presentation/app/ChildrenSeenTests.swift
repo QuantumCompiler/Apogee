@@ -131,7 +131,9 @@ struct ChildrenSeenTests {
             "apogee models pull org/model",
             "apogee task run say hello",
             "apogee models list",
-            "apogee graph build app",
+            // New graph names its graph as --graph's value (GUI M21): the
+            // label is the words before the first option.
+            "apogee graph build",
             "apogee knowledge capture Ada: drop it? Bob: yes",
             "apogee embed ingest notes notes",
             "apogee datasets prepare heat-notes.jsonl",

@@ -16,23 +16,34 @@ import Observation
 public final class CollectionsViewModel {
     /// What `embed ingest` is asked, as a person types it.
     public struct IngestForm: Equatable, Sendable {
+        /// The collection field's text: typed, or a listed name handed in.
         public var collection = ""
         public var path = ""
         /// `lexical`, `vector` or `auto`; nil leaves the collection's own.
         public var retriever: String?
         /// Build the collection's graph after (`--graph`).
         public var graph = false
+        /// The listed name Ingest more… handed in, as `embed list` listed it.
+        var listed: String?
 
         public init() {}
 
-        /// `embed ingest <collection> <path> [--retriever r] [--graph]`.
+        /// The collection the line names: a listed name byte for byte while
+        /// the field still holds it -- ` sp` is a store of its own, never
+        /// `sp` -- and anything typed trimmed (GUI M21).
+        public var name: String {
+            collection == listed ? collection : collection.trimmingCharacters(in: .whitespaces)
+        }
+
+        /// `embed ingest [--retriever r] [--graph] -- <collection> <path>`:
+        /// the collection and the path after `--`, so a name like `-x` is
+        /// read as the collection (`Argv`, GUI M21).
         public var arguments: [String]? {
-            let collection = collection.trimmingCharacters(in: .whitespaces)
-            guard !collection.isEmpty, !path.isEmpty else { return nil }
-            var arguments = ["embed", "ingest", collection, path]
-            if let retriever { arguments += ["--retriever", retriever] }
-            if graph { arguments.append("--graph") }
-            return arguments
+            guard !name.isEmpty, !path.isEmpty else { return nil }
+            var options: [Argv.Option] = []
+            if let retriever { options.append(.value("--retriever", retriever)) }
+            if graph { options.append(.flag("--graph")) }
+            return Argv.line(["embed", "ingest"], options: options, names: [name, path])
         }
     }
 
@@ -42,11 +53,11 @@ public final class CollectionsViewModel {
         public let collection: String
         public let source: String?
 
-        /// `embed delete <collection> --yes` -- the CLI only describes a whole
-        /// collection's delete without it -- or `--source <s>`, which it
-        /// deletes as asked.
+        /// `embed delete --yes -- <collection>` -- the CLI only describes a
+        /// whole collection's delete without `--yes` -- or `--source <s>`,
+        /// which it deletes as asked; the collection after `--` (GUI M21).
         public var arguments: [String] {
-            if let source { ["embed", "delete", collection, "--source", source] } else { ["embed", "delete", collection, "--yes"] }
+            Argv.line(["embed", "delete"], options: [source.map { .value("--source", $0) } ?? .flag("--yes")], names: [collection])
         }
     }
 
@@ -112,7 +123,7 @@ public final class CollectionsViewModel {
 
     private func readInfo(_ name: String) async {
         guard let binary else { return }
-        let outcome = await runner.read(binary: binary, ["embed", "info", name])
+        let outcome = await runner.read(binary: binary, Argv.line(["embed", "info"], names: [name]))
         guard selected == name else { return }
         info = outcome.document.flatMap(CollectionInfo.init)
         if info == nil { failure = outcome.failure }
@@ -156,15 +167,15 @@ public final class CollectionsViewModel {
 
     // MARK: - Searching
 
-    /// `embed query <collection> -- <question>`: its lines, as printed. The
-    /// question after `--`, so the binary never reads it as a flag (`Argv`,
-    /// GUI 4g).
+    /// `embed query -- <collection> <question>`: its lines, as printed. The
+    /// collection and the question after `--`, so the binary never reads
+    /// either as a flag (`Argv`, GUI 4g and M21).
     /// Its lines land on the collection they were asked of, as `readInfo`'s
     /// do: one chosen since drops them (GUI 4h).
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespaces)
         guard let binary, let selected, !question.isEmpty else { return }
-        let outcome = await runner.command(binary: binary, ["embed", "query", selected] + Argv.text(question))
+        let outcome = await runner.command(binary: binary, Argv.line(["embed", "query"], names: [selected, question]))
         guard self.selected == selected else { return }
         switch outcome {
         case .done(let stdout):
@@ -199,9 +210,12 @@ public final class CollectionsViewModel {
         }
     }
 
+    /// The ingest sheet, opened empty -- or by Ingest more… on a listed
+    /// collection, whose name is kept as listed (GUI M21).
     public func newIngest(into collection: String? = nil) {
         ingestForm = IngestForm()
         ingestForm.collection = collection ?? ""
+        ingestForm.listed = collection
         ingesting = true
     }
 
@@ -210,11 +224,12 @@ public final class CollectionsViewModel {
     /// the shown one's page and search results go at once, as a click's
     /// `select(_:)` drops them, so no moment holds one collection's results
     /// or heading under another's name (GUI 6h). An ingest into the
-    /// collection shown keeps its results: they are its own.
+    /// collection shown keeps its results: they are its own. The collection
+    /// chosen is the one the line named (GUI M21).
     public func ingest() {
         guard let binary, let arguments = ingestForm.arguments, job == nil else { return }
         ingesting = false
-        let name = ingestForm.collection.trimmingCharacters(in: .whitespaces)
+        let name = ingestForm.name
         run = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false, folder: nil)
         self.job = job

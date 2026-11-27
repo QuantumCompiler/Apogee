@@ -49,18 +49,19 @@ struct BackendsKindAndDrafterTests {
     static let bases = ["Gemma4-E4B-4bit", "Gemma4-12B-4bit", "Qwen3-8B-4bit"]
 
     /// The base-side home; `paired`, the E4B's `models info` as read back
-    /// after `config set-backend Gemma4-E4B-4bit --draft <its drafter>`.
+    /// after `config set-backend --draft <its drafter> -- Gemma4-E4B-4bit`.
+    /// The Backends tab reads each name after `--` (GUI M21).
     static func basePair(paired: Bool = false) -> ScriptedRunner {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("base-pair-list"))
         runner.reading(["models", "status"], recorded("models-status-kinds-registered"))
         for base in bases {
             let name = "base-pair-info-backend-\(base)" + (paired && base == "Gemma4-E4B-4bit" ? "-paired" : "")
-            runner.reading(["models", "info", base], recorded(name))
+            runner.reading(["models", "info", "--", base], recorded(name))
             runner.commanding(["__complete", "config", "set-backend", base, "--draft"], .done(stdout: recorded("base-pair-complete-\(base)", "txt")))
         }
-        runner.reading(["models", "info", drafter], recorded("base-pair-info-drafter"))
-        runner.reading(["models", "info", drafter12B], recorded("base-pair-info-drafter-12b"))
+        runner.reading(["models", "info", "--", drafter], recorded("base-pair-info-drafter"))
+        runner.reading(["models", "info", "--", drafter12B], recorded("base-pair-info-drafter-12b"))
         return runner
     }
 
@@ -71,7 +72,7 @@ struct BackendsKindAndDrafterTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("\(home)-list"))
         runner.reading(["models", "status"], recorded("models-status-kinds-registered"))
-        runner.reading(["models", "info", "Gemma4-E4B-4bit"], recorded("\(home)-info-backend"))
+        runner.reading(["models", "info", "--", "Gemma4-E4B-4bit"], recorded("\(home)-info-backend"))
         return runner
     }
 
@@ -121,13 +122,13 @@ struct BackendsKindAndDrafterTests {
         // The list says nothing of a pairing: each mlx entry's models info is
         // read with it, once.
         for base in Self.bases {
-            #expect(runner.calls.filter { $0 == "read models info \(base)" }.count == 1, "\(base)'s models info, once")
+            #expect(runner.calls.filter { $0 == "read models info -- \(base)" }.count == 1, "\(base)'s models info, once")
         }
         // Unpaired, and read back: the mark goes, and Pair a drafter… is offered.
         let e4b = try row("Gemma4-E4B-4bit", in: model)
-        runner.reading(["models", "info", "Gemma4-E4B-4bit"], recorded("base-pair-info-backend-Gemma4-E4B-4bit"))
+        runner.reading(["models", "info", "--", "Gemma4-E4B-4bit"], recorded("base-pair-info-backend-Gemma4-E4B-4bit"))
         await model.unpair(e4b)
-        #expect(runner.calls.contains("run config set-backend Gemma4-E4B-4bit --draft "))
+        #expect(runner.calls.contains("run config set-backend --draft  -- Gemma4-E4B-4bit"))
         #expect(model.drafterMark(e4b) == nil && model.offersDrafterPairing(e4b))
     }
 
@@ -151,9 +152,9 @@ struct BackendsKindAndDrafterTests {
             handle: Self.drafter, path: Self.root + Self.drafter,
             said: "a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, its record naming Gemma4-E4B")])
         #expect(form.chosen == Self.drafter)
-        #expect(form.arguments == ["config", "set-backend", "Gemma4-E4B-4bit", "--draft", Self.root + Self.drafter])
+        #expect(form.arguments == ["config", "set-backend", "--draft", Self.root + Self.drafter, "--", "Gemma4-E4B-4bit"])
         #expect(runner.calls.contains("run __complete config set-backend Gemma4-E4B-4bit --draft "))
-        #expect(!runner.calls.contains("read models info \(Self.drafter12B)"), "the 12B's drafter is not offered, so not even read")
+        #expect(!runner.calls.contains("read models info -- \(Self.drafter12B)"), "the 12B's drafter is not offered, so not even read")
         model.pairingDrafter = nil
         await model.askToPairDrafter(try row("Gemma4-12B-4bit", in: model))
         #expect(model.pairingDrafter?.offers.map(\.handle) == [Self.drafter12B])
@@ -167,7 +168,7 @@ struct BackendsKindAndDrafterTests {
     @Test("the base-side pairing's commands are held to the binary's verdicts: each base's own drafter taken, another width's refused in its words")
     func pairFromTheBaseHeldToVerdicts() async throws {
         let verdicts = pairingVerdicts()
-        #expect(verdicts.count == 7, "3b's five and the base side's two: \(verdicts.keys.sorted())")
+        #expect(verdicts.count == 9, "3b's five and the base side's four, in M21's order: \(verdicts.keys.sorted())")
         let model = await connected(Self.basePair())
         for base in ["Gemma4-E4B-4bit", "Gemma4-12B-4bit"] {
             await model.askToPairDrafter(try row(base, in: model))
@@ -175,7 +176,7 @@ struct BackendsKindAndDrafterTests {
             #expect(verdicts[command] == "taken", "\(command): \(verdicts[command] ?? "never recorded")")
             model.pairingDrafter = nil
         }
-        let notOffered = "config set-backend Gemma4-E4B-4bit --draft \(Self.root + Self.drafter12B)"
+        let notOffered = "config set-backend --draft \(Self.root + Self.drafter12B) -- Gemma4-E4B-4bit"
         #expect(verdicts[notOffered]?.contains("drafts for a 3840-wide gemma4 model, reading its hidden states, and /Users/someone/.apogee/models/Gemma4-E4B/mlx/2b3c4d5e6f70 is a 2560-wide gemma4 model") == true,
                 "the drafter the E4B's completion leaves out is refused: \(verdicts[notOffered] ?? "never recorded")")
         #expect(recorded("base-pair-complete-Gemma4-E4B-4bit", "txt") == recorded("drafts-complete-Gemma4-E4B-4bit", "txt"),
@@ -192,10 +193,10 @@ struct BackendsKindAndDrafterTests {
         await model.select(e4b)
         await model.askToPairDrafter(e4b)
         runner.commanding(["config", "set-backend"], .done(stdout: recorded("drafts-pair", "txt")))
-        runner.reading(["models", "info", "Gemma4-E4B-4bit"], recorded("base-pair-info-backend-Gemma4-E4B-4bit-paired"))
+        runner.reading(["models", "info", "--", "Gemma4-E4B-4bit"], recorded("base-pair-info-backend-Gemma4-E4B-4bit-paired"))
         await model.pairDrafter()
         #expect(model.pairingDrafter == nil)
-        #expect(runner.calls.contains("run config set-backend Gemma4-E4B-4bit --draft \(Self.root + Self.drafter)"))
+        #expect(runner.calls.contains("run config set-backend --draft \(Self.root + Self.drafter) -- Gemma4-E4B-4bit"))
         #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
         let draft = try #require(model.draft, "the details say it")
         #expect(draft.path == Self.root + Self.drafter && draft.drafts && draft.refusal == nil)
@@ -210,7 +211,7 @@ struct BackendsKindAndDrafterTests {
         // 3b's home: a 12B vision base, and only the E4B's drafter stored.
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("drafts-list"))
-        runner.reading(["models", "info", "Gemma4-12B-4bit"], recorded("drafts-info-backend-Gemma4-12B-4bit"))
+        runner.reading(["models", "info", "--", "Gemma4-12B-4bit"], recorded("drafts-info-backend-Gemma4-12B-4bit"))
         runner.commanding(["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], .done(stdout: recorded("drafts-complete-Gemma4-12B-4bit", "txt")))
         let model = await connected(runner)
         let wider = try row("Gemma4-12B-4bit", in: model)
@@ -218,7 +219,7 @@ struct BackendsKindAndDrafterTests {
         await model.askToPairDrafter(wider)
         let form = try #require(model.pairingDrafter)
         #expect(form.offers.isEmpty && form.chosen == nil && form.arguments == nil)
-        #expect(!runner.calls.contains { $0.hasPrefix("read models info Gemma4-E4B-Assistant") })
+        #expect(!runner.calls.contains { $0.hasPrefix("read models info -- Gemma4-E4B-Assistant") })
     }
 
     // MARK: - A pairing that can no longer draft
@@ -244,9 +245,9 @@ struct BackendsKindAndDrafterTests {
         #expect(checkRow["detail"]?.stringValue == "mlx -- its draft cannot run beside it: " + why)
         #expect(checkRow["remedy"]?.stringValue == "apogee config set-backend Gemma4-E4B-4bit --draft \"\"", "the doctor's way out is Unpair")
         #expect(recorded("draft-gone-chat", "err").contains("Gemma4-E4B-4bit: its draft cannot run beside it: " + why))
-        #expect(pairingVerdicts()["config set-backend Gemma4-E4B-4bit --draft \"\""] == "taken")
+        #expect(pairingVerdicts()["config set-backend --draft \"\" -- Gemma4-E4B-4bit"] == "taken", "the Backends tab's Unpair, recorded")
         await model.unpair(e4b)
-        #expect(runner.calls.contains("run config set-backend Gemma4-E4B-4bit --draft "))
+        #expect(runner.calls.contains("run config set-backend --draft  -- Gemma4-E4B-4bit"))
     }
 
     @Test("a pairing whose base was converted again as mlx-lm's build: the table says MLX · chat, and the mark and details the CLI's refusal")
@@ -277,7 +278,7 @@ struct BackendsKindAndDrafterTests {
         #expect(ModelsViewModel.formatLines(try row("claude", in: model)) == [""])
         #expect(!runner.calls.contains { $0.hasPrefix("read models info") }, "no drafter is read: \(runner.calls)")
         #expect(model.rows.allSatisfy { model.drafterMark($0) == nil && !model.offersDrafterPairing($0) })
-        runner.reading(["models", "info", "qwen-mlx"], #"{"name":"qwen-mlx","fields":[{"field":"backend","value":"qwen-mlx"},{"field":"path","value":"/Users/someone/.apogee/models/mlx/qwen"}]}"#)
+        runner.reading(["models", "info", "--", "qwen-mlx"], #"{"name":"qwen-mlx","fields":[{"field":"backend","value":"qwen-mlx"},{"field":"path","value":"/Users/someone/.apogee/models/mlx/qwen"}]}"#)
         await model.select(try row("qwen-mlx", in: model))
         #expect(model.draft == nil && model.recordFacts == model.facts)
         // 2h's store, recorded from a binary before 53e.

@@ -279,7 +279,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), whose door is built through the same renderer and takes the program word with no change of its own;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's argv builders.
 - **Relates to:**
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose remedy aside started the seam;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose remedy aside started the seam;
   - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), which keeps the house-voice lines this item leaves alone;
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose two `check` remedies M48 builds and this item names the binary in;
   - [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), which says a run's notes as `apogee <verb>: …`, the voice this item doesn't touch;

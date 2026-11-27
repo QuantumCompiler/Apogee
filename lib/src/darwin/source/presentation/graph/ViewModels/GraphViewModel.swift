@@ -120,7 +120,9 @@ public final class GraphViewModel {
     }
 
     /// The graphs (the binary's own completion of a graph's name -- no read
-    /// lists them), the chosen one's counts, and the question asked again;
+    /// lists them -- asked after `--`, so every name it completes is kept
+    /// as written, a dash-led one too: GUI M21), the chosen one's counts,
+    /// and the question asked again;
     /// a node explained before that the graph no longer explains -- one a
     /// Rebuild removed -- dropped, the CLI's line said once (GUI 6h).
     public func refresh() async {
@@ -141,11 +143,12 @@ public final class GraphViewModel {
             failure = "Apogee isn't installed, so there is no graph to read."
             return nil
         }
-        if case .done(let names) = await runner.command(binary: binary, ["__complete", "graph", "stats", ""]) {
-            // One candidate a line; a description, where one follows, after a tab.
+        if case .done(let names) = await runner.command(binary: binary, ["__complete", "graph", "stats", Argv.endOfOptions, ""]) {
+            // One candidate a line, byte for byte -- ` sp` is a graph of its
+            // own, never `sp`; a description, where one follows, after a tab.
             graphs = names.split(whereSeparator: \.isNewline)
-                .map { String($0.split(separator: "\t").first ?? "").trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("-") }
+                .map { String($0.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") }
+                .filter { !$0.isEmpty }
         }
         if graph == nil || !graphs.contains(graph!) { graph = graphs.first }
         guard let graph else {
@@ -153,7 +156,7 @@ public final class GraphViewModel {
             result = nil
             return nil
         }
-        let outcome = await runner.read(binary: binary, ["graph", "stats", graph])
+        let outcome = await runner.read(binary: binary, Argv.line(["graph", "stats"], names: [graph]))
         if let document = outcome.document {
             stats = GraphStats(document: document)
             failure = nil
@@ -161,7 +164,8 @@ public final class GraphViewModel {
             failure = outcome.failure
         }
         if let stats, stats.isProse, stats.built {
-            report = await runner.read(binary: binary, ["graph", "report", "--graph", graph]).document.flatMap(GraphReport.init)
+            report = await runner.read(binary: binary, Argv.line(["graph", "report"], options: [.value("--graph", graph)])).document
+                .flatMap(GraphReport.init)
         } else {
             report = nil
         }
@@ -189,7 +193,7 @@ public final class GraphViewModel {
     public func search() async {
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let binary, let graph, !question.isEmpty else { return }
-        let outcome = await runner.read(binary: binary, ["graph", "query", "--graph", graph] + Argv.text(question))
+        let outcome = await runner.read(binary: binary, Argv.line(["graph", "query"], options: [.value("--graph", graph)], names: [question]))
         guard let document = outcome.document else {
             failure = outcome.failure
             return
@@ -219,7 +223,7 @@ public final class GraphViewModel {
     /// another node was chosen meanwhile.
     private func explain(_ name: String) async -> String? {
         guard let binary, let graph else { return nil }
-        let outcome = await runner.read(binary: binary, ["graph", "explain", "--graph", graph] + Argv.text(name))
+        let outcome = await runner.read(binary: binary, Argv.line(["graph", "explain"], options: [.value("--graph", graph)], names: [name]))
         guard selected == name else { return nil }
         if let document = outcome.document, let explained = GraphExplain(document: document) {
             explain = explained
@@ -249,28 +253,37 @@ public final class GraphViewModel {
 
     // MARK: - Building
 
-    /// Re-parses the graph's sources where files changed (`graph update`), or
-    /// builds it again (`graph build`) when it has none -- supervised, then
-    /// read again.
+    /// Re-parses the graph's sources where files changed (`graph update --
+    /// <graph>`), or builds it again (`graph build -- <graph>`) when it has
+    /// none -- supervised, then read again. The graph after `--` (GUI M21).
     public func rebuild() {
         guard let graph else { return }
         let sourced = !(stats?.sources.isEmpty ?? true)
-        run(sourced ? ["graph", "update", graph] : ["graph", "build", graph])
+        run(Argv.line(["graph", sourced ? "update" : "build"], names: [graph]))
     }
 
     /// A collection graph's communities, detected and summarised by the
-    /// utility model (`graph communities <graph>`), supervised.
+    /// utility model (`graph communities -- <graph>`), supervised.
     public func findCommunities() {
         guard let graph, stats?.isProse == true else { return }
-        run(["graph", "communities", graph])
+        run(Argv.line(["graph", "communities"], names: [graph]))
     }
 
-    /// A new graph of a folder's code: `graph build <name> --source <folder>`.
+    /// A new graph of a folder's code: `graph build --source <folder> --graph
+    /// <name>`. The name goes as `--graph`'s value, "the same as NAME":
+    /// `--source` is repeatable and would take a `--` after it as its own
+    /// end (`Argv.endOfOptionsEaters`, GUI M21). A typed name, trimmed.
     public func build(name: String, folder: URL) {
         let name = name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         graph = name
-        run(["graph", "build", name, "--source", folder.path])
+        run(Self.buildArguments(name: name, folder: folder))
+    }
+
+    /// `graph build --source <folder> --graph <name>`: New graph's line, and
+    /// what its sheet shows as typed (GUI M21).
+    public static func buildArguments(name: String, folder: URL) -> [String] {
+        Argv.line(["graph", "build"], options: [.value("--source", folder.path), .value("--graph", name)])
     }
 
     private func run(_ arguments: [String], finished: (@MainActor (JobProgress?) -> Void)? = nil) {
@@ -301,17 +314,18 @@ public final class GraphViewModel {
 
     /// `graph export <format> --graph <graph> -o <file>`: the file the person
     /// picked in a save panel -- the CLI writes it, never to a default
-    /// place -- its own sentence said.
+    /// place -- its own sentence said. The format is the verb's subcommand.
     public func export(_ format: ExportFormat, to file: URL) async {
         guard let graph else { return }
-        await change(["graph", "export", format.rawValue, "--graph", graph, "-o", file.path], doing: "Exporting")
+        await change(
+            Argv.line(["graph", "export", format.rawValue], options: [.value("--graph", graph), .value("-o", file.path)]), doing: "Exporting")
     }
 
     /// `graph report --graph <graph> --out <file>`: the Markdown summary the
     /// CLI assembles from the store, written where the person picked.
     public func saveReport(to file: URL) async {
         guard let graph else { return }
-        await change(["graph", "report", "--graph", graph, "--out", file.path], doing: "Saving the report")
+        await change(Argv.line(["graph", "report"], options: [.value("--graph", graph), .value("--out", file.path)]), doing: "Saving the report")
     }
 
     /// The name a save panel offers for `format`: the CLI's own default file
@@ -323,7 +337,7 @@ public final class GraphViewModel {
     /// The name a save panel offers for the report.
     public var reportName: String { "\(graph ?? "graph")-report.md" }
 
-    /// A dedupe's dry run -- `graph dedupe <graph> --dry-run`, which changes
+    /// A dedupe's dry run -- `graph dedupe --dry-run -- <graph>`, which changes
     /// nothing -- shown before anything merges: its document's plan on a
     /// binary that has one (the CLI's M31, the admin route's body byte for
     /// byte; GUI M15), else the text it prints, and the text too where the
@@ -333,7 +347,7 @@ public final class GraphViewModel {
         guard let binary, let graph, job == nil else { return }
         dedupe = .planning
         let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
-        switch await runner.documentOrText(binary: binary, ["graph", "dedupe", graph, "--dry-run"], asksDocument: asks, DedupePlan.init(document:)) {
+        switch await runner.documentOrText(binary: binary, Self.dedupeArguments(graph, dryRun: true), asksDocument: asks, DedupePlan.init(document:)) {
         case .document(let plan): dedupe = .found(plan)
         case .text(let text): dedupe = .planned(text.trimmingCharacters(in: .newlines))
         case .failed(let why): dedupe = .failed(why)
@@ -352,12 +366,12 @@ public final class GraphViewModel {
         }
     }
 
-    /// The merge the dry run showed, on the person's word: `graph dedupe
+    /// The merge the dry run showed, on the person's word: `graph dedupe --
     /// <graph>`, supervised, then read again, its lines kept on the sheet.
     public func confirmDedupe() {
         guard let graph, dedupeMerges else { return }
         dedupe = .merging
-        run(["graph", "dedupe", graph]) { [weak self] progress in
+        run(Self.dedupeArguments(graph, dryRun: false)) { [weak self] progress in
             guard let self else { return }
             switch progress?.status {
             case .done: dedupe = .merged(progress?.notices.joined(separator: "\n") ?? "")
@@ -365,6 +379,12 @@ public final class GraphViewModel {
             default: dedupe = .failed("the merge was stopped")
             }
         }
+    }
+
+    /// `graph dedupe [--dry-run] -- <graph>`: the dry run's line or the
+    /// merge's, and what the dedupe sheet shows as typed (GUI M21).
+    public static func dedupeArguments(_ graph: String, dryRun: Bool) -> [String] {
+        Argv.line(["graph", "dedupe"], options: dryRun ? [.flag("--dry-run")] : [], names: [graph])
     }
 
     public func dismissDedupe() {
@@ -377,7 +397,7 @@ public final class GraphViewModel {
         pendingDelete = graph
     }
 
-    /// `graph delete <graph>` once the person said yes to `name`, the graph
+    /// `graph delete -- <graph>` once the person said yes to `name`, the graph
     /// the dialog showed -- a named graph's database removed, its config entry
     /// kept; a collection's graph cleared, its chunks kept -- read back, the
     /// CLI's own sentence said. The dialog's closing clears `pendingDelete`
@@ -389,7 +409,13 @@ public final class GraphViewModel {
         selected = nil
         explain = nil
         layout = GraphLayout(nodes: [], edges: [])
-        await change(["graph", "delete", name], doing: "Deleting")
+        await change(Self.deleteArguments(name), doing: "Deleting")
+    }
+
+    /// `graph delete -- <graph>`: the line a confirmed delete runs, and its
+    /// dialog shows as typed (GUI M21).
+    public static func deleteArguments(_ graph: String) -> [String] {
+        Argv.line(["graph", "delete"], names: [graph])
     }
 
     /// Runs a command, reads again, and says the CLI's first line -- or its

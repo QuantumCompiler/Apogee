@@ -33,7 +33,7 @@ struct GraphViewModelTests {
         let runner = scripted()
         let model = GraphViewModel(runner: runner, starter: ScriptedJobs([]))
         await model.connect(binary: Self.binary)
-        #expect(runner.calls.first == "run __complete graph stats ")
+        #expect(runner.calls.first == "run __complete graph stats -- ")
         #expect(model.graphs == ["demo", "libs"])
         #expect(model.graph == "demo")
         #expect(model.stats?.nodes == 16 && model.stats?.edges == 21 && model.stats?.codeFiles == 4)
@@ -101,7 +101,7 @@ struct GraphViewModelTests {
         #expect(GraphLayout(nodes: [], edges: []).positions.isEmpty)
     }
 
-    @Test("rebuild is graph update for a sourced graph, supervised, then read again; a new graph is graph build --source")
+    @Test("rebuild is graph update for a sourced graph, supervised, then read again; a new graph is graph build --source --graph")
     func rebuild() async {
         let runner = scripted()
         let first = ScriptedJob()
@@ -112,7 +112,7 @@ struct GraphViewModelTests {
         model.say = { said.append($0) }
         await model.connect(binary: Self.binary)
         model.rebuild()
-        #expect(jobs.starts.first?.arguments == ["graph", "update", "demo"])
+        #expect(jobs.starts.first?.arguments == ["graph", "update", "--", "demo"])
         #expect(model.isBuilding)
         first.say(.said("Code graph:       16 node(s), 21 edge(s)"))
         first.end()
@@ -121,7 +121,7 @@ struct GraphViewModelTests {
         #expect(await eventually { !model.isBuilding && !said.isEmpty })
         #expect(said == ["Code graph:       16 node(s), 21 edge(s)"])
         model.build(name: "app", folder: URL(fileURLWithPath: "/Users/someone/app"))
-        #expect(jobs.starts.last?.arguments == ["graph", "build", "app", "--source", "/Users/someone/app"])
+        #expect(jobs.starts.last?.arguments == ["graph", "build", "--source", "/Users/someone/app", "--graph", "app"])
         #expect(model.graph == "app")
         second.end(status: 1)
     }
@@ -161,7 +161,7 @@ struct GraphViewModelTests {
         #expect(model.explain?.communities.first?.summary?.hasPrefix("The heat pump") == true)
         #expect(model.explain?.decisions.first?.status == "shipped")
         model.findCommunities()
-        #expect(jobs.starts.first?.arguments == ["graph", "communities", "notes"])
+        #expect(jobs.starts.first?.arguments == ["graph", "communities", "--", "notes"])
         job.end()
         #expect(await eventually { !model.isBuilding })
     }
@@ -178,7 +178,7 @@ struct GraphViewModelTests {
         #expect(model.report == nil)
         #expect(model.emptyText?.hasPrefix("notes's graph isn't built yet") == true)
         model.rebuild()
-        #expect(jobs.starts.first?.arguments == ["graph", "build", "notes"])
+        #expect(jobs.starts.first?.arguments == ["graph", "build", "--", "notes"])
         job.end()
     }
 }

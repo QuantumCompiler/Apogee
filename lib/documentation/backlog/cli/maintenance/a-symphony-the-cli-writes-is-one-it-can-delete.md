@@ -269,7 +269,7 @@ Every case runs in a temporary home, with mock backends. Each fails on today's b
 - **Relates to:**
   - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), which edits the same `entry_name` and `find_entry_line`. Either order works, and its JSONC-unchanged rule keeps these words for a bridged key.
   - [CLI-M48](a-suggested-command-runs-as-printed.md), which quotes `create`'s success lines. Its symphony `-q` case, created after `s1`, can't be reached by `create` once this item lands, so whichever lands second seeds that case by hand or drops it. Neither gates the other.
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose probes raised this aside, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), which moves Library's symphony delete onto `--`.
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes raised this aside, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), which moves Library's symphony delete onto `--`.
   - MILESTONES' 55f entry (2026-10-25, the add rule and "Not fixed: symphony names") and 57e entry (2026-11-01, `missing_entry`, symphony names out of scope). This item closes both records.
   - 27q (7e19c394, 2026-10-06), where `append_symphony` and `delete_symphony` began.
   - [ADR 0002](../../../adrs/cli/mode-parity.md), [ADR 0006](../../../adrs/cli/backwards-compatibility.md) and [ADR 0007](../../../adrs/cli/tab-completion.md).

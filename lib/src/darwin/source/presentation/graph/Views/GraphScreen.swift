@@ -121,9 +121,11 @@ public struct GraphScreen: View {
     /// What deleting keeps, as the CLI says it does.
     private var deleteMessage: String {
         let name = model.pendingDelete ?? ""
+        let delete = "apogee " + Argv.shown(GraphViewModel.deleteArguments(name))
         return model.stats?.isProse == true
-            ? "apogee graph delete \(name) -- the collection's graph is cleared; its chunks stay, and the next build starts from scratch."
-            : "apogee graph delete \(name) -- its database is removed; its config entry stays (apogee config delete-graph \(name) removes it), and Rebuild parses its sources again."
+            ? delete + " -- the collection's graph is cleared; its chunks stay, and the next build starts from scratch."
+            : delete + " -- its database is removed; its config entry stays (apogee "
+                + Argv.shown(Argv.line(["config", "delete-graph"], names: [name])) + " removes it), and Rebuild parses its sources again."
     }
 
     /// Where the export goes, asked of the person in a save panel -- the
@@ -158,13 +160,14 @@ struct DedupeSheet: View {
             case .planning?:
                 HStack {
                     ProgressView().controlSize(.small)
-                    Text("apogee graph dedupe \(model.graph ?? "") --dry-run").font(.apogeeCode).foregroundStyle(Palette.textSecondary)
+                    Text("apogee " + Argv.shown(GraphViewModel.dedupeArguments(model.graph ?? "", dryRun: true))).font(.apogeeCode)
+                        .foregroundStyle(Palette.textSecondary)
                 }
             case .planned(let text)?:
                 Text("The dry run -- nothing changed yet:").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
                 printed(text)
                 if model.dedupeMerges {
-                    Text("apogee graph dedupe \(model.graph ?? "") -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
+                    Text("apogee " + Argv.shown(GraphViewModel.dedupeArguments(model.graph ?? "", dryRun: false)) + " -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
                         .font(.apogeeMeta)
                         .foregroundStyle(Palette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -173,7 +176,7 @@ struct DedupeSheet: View {
                 Text("The dry run -- nothing changed yet:").font(.apogeeSmall).foregroundStyle(Palette.textSecondary)
                 DedupeGroups(plan: plan)
                 if model.dedupeMerges {
-                    Text("apogee graph dedupe \(model.graph ?? "") -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
+                    Text("apogee " + Argv.shown(GraphViewModel.dedupeArguments(model.graph ?? "", dryRun: false)) + " -- the entities named merge into the one each is kept as. Re-run Find communities after, as the CLI says.")
                         .font(.apogeeMeta)
                         .foregroundStyle(Palette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -472,8 +475,9 @@ struct NewGraphSheet: View {
                 Spacer()
                 Button("Choose…") { choosing = true }
             }
-            if let folder, !name.isEmpty {
-                Text("apogee graph build \(name) --source \(folder.path)").font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+            if let folder, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text("apogee " + Argv.shown(GraphViewModel.buildArguments(name: name.trimmingCharacters(in: .whitespaces), folder: folder)))
+                    .font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             }
             HStack {
                 Spacer()

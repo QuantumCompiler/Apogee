@@ -313,7 +313,7 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 - **Blocked by:** [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), the writer this item extends · **Blocks:** —
 - **Sibling** (the same investigation's seams): [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), the CLI's other notes on stderr; [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), the HTTP graph jobs' notes.
 - **Relates to:**
-  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose stdout-warnings question this answers for the models verbs, and [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose probes ran beside it;
+  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose stdout-warnings question this answers for the models verbs, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose constraint keeps its own notes in the house voice on stderr;
   - [CLI-59d](../v0.2.3/reads-and-commands-over-the-network.md), whose door relays `models pull`'s stream and runs `models convert` and `quantize` as text jobs;
   - [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md), whose Downloads card runs these jobs against a server.

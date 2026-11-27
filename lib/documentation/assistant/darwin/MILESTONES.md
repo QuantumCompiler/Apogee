@@ -2107,7 +2107,7 @@ Probed on the branch's binary over a sandbox:
 - **The text sites beyond the document's list** (knowledge capture and query, collection search, graph explain) take `--` too: a node name can start with a dash, as Objective-C's `-[Foo bar]` does.
 - **Left as they were:**
   - option values, which the binary takes whole even when dash-leading;
-  - typed names in create, rename and targets, which the CLI validates;
+  - typed names in create, rename and targets, which the CLI validates *(revised by [M21](#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), 2026-11-26: most names are listed, not typed, and the parser refuses a dash-led one before the CLI's validation runs)*;
   - `mcp test`'s JSON, which never starts with a dash;
   - `config set` values;
   - `knowledge link`'s identifier.
@@ -2874,6 +2874,60 @@ Twenty-two of 35 new cases failed first. The rest pin the older binary and the d
 **Not done:**
 - No live pass of the app (M18 has not shipped).
 - The recorded `mock-actor.jsonl` predates the event; its next re-recording (`scripts/capture-fixture.sh`) will carry `tool_call` lines, which now decode, so `EventDecoderTests/recordedStream` stays green.
+
+### 2026-11-26 — `listed-name-reaches-the-verb` (maintenance item M21): a listed name reaches the verb as listed
+
+**Why.** The app lists what the CLI lists, and the CLI writes stores and datasets named `-x`, `-h`, `--graph` or ` sp` after `--` today; older configs and hand-edited JSONC keep backends named so. The app then acted on such a name by passing it before any `--`, and the CLI's parser (CLI11) read a dash-led one as an option before the verb ran. Measured 2026-11-26 against the built CLI in a sandbox:
+- a `-x` collection's page never loaded (`embed info -x` exits 106, "Run with --help for more information.");
+- deleting a dataset `-h` printed the verb's help with exit 0, which the app toasted as success, the dataset kept;
+- Ingest more… into ` sp` trimmed the name and wrote and registered a different store `sp`;
+- `config rename-backend -x <new>`, the way out the CLI's own edits point to, exited 106.
+
+This revises 4g's record, which left "typed names in create, rename and targets, which the CLI validates" before `--`: most names are read back from the CLI's listings, not typed, and for a dash-led one the CLI's validation never runs, because the parser refuses first. This item builds the seam and moves the rows where a person met harm; APP-M23 moves every other site.
+
+- [x] **`Argv.line(_:options:names:)`** (`business/reads/Argv.swift`): the command, then its typed options (`Argv.Option`: `.flag`, `.value`), then -- when there are names -- `--` and the names, so a line holds one end of options. An option the binary takes a following `--` as its own end is moved before the others: `endOfOptionsEaters`, by command, from the binary's recorded verdicts, never from the help's ` ...` (`agents create --mcp` shows one and eats nothing). `positionals(of:)` reads the words after `--`. `shown(_:)` renders the line a person types: options, then names, `--` only before a dash-led name, each word a shell would split or lose quoted. An option value that is itself `--` is written as one word, `--name=--`. `text`, `adding` and `options(of:)` stay.
+- [x] **Collections:** ingest, the two deletes, `embed info` and search put the collection after `--`. A name Ingest more… hands in is kept byte for byte while the field still holds it (`IngestForm.name`); typed text is trimmed. `ingest()` selects the name the line passed.
+- [x] **Graph:** the list is the binary's completion asked after `--` (`__complete graph stats -- ""`), every candidate kept as written, a description after its tab dropped, no name filtered for its dash. Stats, update, build, communities, both dedupes and delete put the graph after `--`. The option-value sites (query, explain, report, export) go through the builder with their lines unchanged. New graph runs `graph build --source <folder> --graph <name>`, since `--source` eats a following `--`.
+- [x] **Training:** a dataset's delete (`datasets delete --yes -- <name>`), create (`createArguments`) and synthesis put the name after `--`. The pipelines' completion fallback keeps its candidates as written.
+- [x] **Models, the Backends tab:** a rename (`Renaming.arguments(to:)`), `models info` (the details, the drafter read, an offered drafter), delete, remove, Unpair, a drafter paired from its base, a role (`RoleAssignment.arguments(pointingAt:)`) and the adapters edit put the backend after `--`. The adapters sheet's line names the backend once (`AdaptersForm.shown`).
+- [x] **The lines a person reads are the lines that run,** each from its argv with `Argv.shown`: the collection and record delete dialogs and the ingest sheet; the Graph delete, dedupe and New graph lines; Training's sheets and confirm dialog; the Backends tab's delete and remove dialogs, the pair, rename and adapters sheets, and the Unpair, Pair and adapters tooltips. The static builders behind them are `RecordsViewModel.deleteArguments`, `GraphViewModel.deleteArguments`, `dedupeArguments` and `buildArguments`, and `ModelsViewModel.deleteArguments`, `removeArguments` and `unpairArguments`.
+- [x] **Recorded from the built CLI** (`apogee 0.2.2`, `b83a533c`) over sandbox homes, `HOME` and `APOGEE_HOME` both scratch, the home written `/Users/someone`, a second run byte-identical:
+  - `argv-end-of-options-verdicts.txt` (61 lines): each candidate eater directly before `--` and earlier, every line this item builds with a dash-led name, and today's shapes refused;
+  - the dash-named stores' `embed list`, three `embed info`s and the Graph completion; a `-x` backend's `models list` and `models info`; the datasets' help and delete; the rename's output and the delete-backend refusal;
+  - the store-command verdicts' three rename lines again in the new order, through `refresh-store-commands-fixture.sh` run from a scratch copy with the built binary, the other 160 unchanged;
+  - the drafter-pairing verdicts: 3b's and M5's sandbox rebuilt from the CLI's own test configs (`tests/support/draft_head_configs.h`) and a placeholder mlx-vlm environment reproduced all seven recorded verdicts byte for byte. The base side's lines were then recorded in the new order: the two pairings, the refused cross-width pairing and Unpair. The file holds 9 lines, the store side's five unchanged.
+
+Decisions (2026-11-26), each for veto:
+- **The recorded decisions:** specced from the CLI's M45/M46 investigation and a sandboxed investigation with two skeptics and a critic; maintenance, as M21, ungated, gating M23; split three ways (this seam and the reachable rows, M22's job notes, M23's every other site); no CLI change, since `--` reads the same on every shipped binary and `graph build --graph` exists since v0.1.4.
+- **The document's five defaults, taken as stated:** no app-side check of typed names; a listed name passed and selected byte for byte, only typed text trimmed (a listed name edited in the sheet counts as typed), the Graph list's trim gone too; the dialogs show `Argv.shown`, `--` only before a dash-led name; the Graph list's `--` ask does not wait for CLI-M45; a CLI refusal after `--` is enough for the config entries it refuses.
+- **`Argv.shown` quotes what a shell would split or lose** *(flagged; the document left quoting open)*. An empty word is shown as `""`. Whitespace, quotes, `$`, globs, operators, `#`, `~`, zsh's `^` and a leading `=` go in single quotes. The review checked the quoting round-trips through `sh`, `bash` and `zsh`.
+- **The eater set is keyed by command** (`embed delete --source` takes one value; `graph build --source` eats). It holds APP-M23's eaters too, so that item inherits a complete set: `graph build --source`/`--lang`, `models convert --register-with`, `review targets add --skills`, `mcp create --args` and `video generate --lora`. A line whose only options eat has no safe order. That is documented and pinned by a test: the caller names the thing another way.
+- **An option value that is itself `--` is written as `--name=--`** *(found in review: a graph named `--`, now listed, broke `adding`)*. Probed: the verb reads `--` as the name.
+- **Every line these rows show comes from their argv,** beyond the document's list, since each would otherwise show the old order. Graph's option-value sites and the offered drafter's `models info` moved too, so Graph and the Backends tab keep no hand-ordered array; neither is on APP-M23's list. `DeletePlan`'s plan read stays APP-M23's, as its Evidence lists, so Delete… on a `-x` backend still stops at the plan read until then.
+- **New graph's monitor label reads `apogee graph build`.** `ChildRegistry`'s label stops at the first option, and the label is APP-M23's to build from `Argv.shown`.
+- **The previews answer a `models info` read after `--` too** (`ModelsPreviews.afterEnd`): the Backends tab and Stored weights share preview homes, and only the Backends tab moved. The review found one details preview over the store's home reading nothing, and it was fixed.
+- **`CollectionsViewModelTests/ingest` waits for its read-back.** Its moved expectation inherited a race under load, the one M20's record names, and it failed 2 of 10 iterations before the change and none after.
+- **The recording scripts stay in the scratchpad.** APP-M23 brings the refresh paths: a verdict sweep, the drafter verdicts' refresh, and the store script taking the binary as a required argument with `HOME` set.
+
+**Verified.**
+- **Red first.** Each new suite was run on the code before its change and failed: Collections 7 of 8 (only the listing passed), Graph 6 of 6, and Training, Models and `Argv` on the missing API.
+- **35 new cases** (Swift Testing, hermetic). A name before `--` is scripted to answer CLI11's refusal (exit 106, or the verb's help), and after `--` to answer the recorded document.
+  - `ArgvTests` +7: order and one `--`, eaters moved, a value that is `--`, positionals, `shown`, the eater table equal to the one the recorded verdicts derive, today's shape refused.
+  - `CollectionNamesTests` 9: the list byte for byte; `-x`, `--graph` and `-h` pages load; search; Ingest more… into `-x` and into ` sp`; deletes and the dialog line; a typed name trimmed.
+  - `GraphNamesTests` 7: the completion after `--` and kept as written; a description dropped; choose; every act after `--`; update; the shown lines; New graph and the CLI's refusal of `-g` in its words.
+  - `DatasetNamesTests` 4: `-h`'s delete toasts `removed.`; create; synth; the candidates.
+  - `BackendNamesTests` 7: the rename reaches the verb; the details load; a refusal in the CLI's words; delete, unpair and roles; the dialog lines; the adapters line; pairing.
+  - `KnowledgeViewModelTests` +1: the record delete's line.
+  - Every existing expectation that pinned an M21 line moved to the new order, in Knowledge, Graph, Training, Models and the app's `ChildrenSeenTests`. `StoreJobsTests.pinned` reads `Argv.options(of:)`.
+- **Repeat runs:** the new suites and the Knowledge bundle, 10 iterations, every new case passing each time. The two Knowledge flakes M20 recorded showed there (`CollectionsViewModelTests/ingest` 2 of 10, `RecordsViewModelTests/capture` 1 of 10); the first is fixed above, and the second is untouched by this item.
+- **The review** (a fresh reviewer over the working tree): no critical finding. Its important one (the store-home preview) and its minor ones (a value that is `--`, the `=` and `^` quoting, the tooltips, the rename sheet's line, `--graph`'s page, New graph's blank-name line) were fixed; the monitor label is recorded above.
+- **The gate** (`lib/scripts/cicd.sh --test`, run alone, on the final code): green. The CLI's 4,575 of 4,575 tests passed, two skipped as at the run's baseline (no `pdftotext`; the write guard's extended attributes). The macOS app's Release build was signed ad hoc and verified, then **1,312 of 1,312** cases passed by the result bundle's `totalTestCount` (1,277 before; 35 new), none skipped. `RealBinaryTests` ran against the installed binary in a throwaway `APOGEE_HOME`. The layering check held, and the log holds no Swift warning. Xcode, open on this Mac, re-saved one line of `project.pbxproj` during the run (the product reference renamed "Apogee Dev.app"): not this item's, and restored to the committed text.
+
+**Not done.**
+- **The user's look** (optional): on "Apogee Dev" (`lib/src/darwin/scripts/build.sh open`, driving `apogee-dev`), over a home holding a `-x` store (`apogee-dev embed ingest -- -x <file>`), select it: the page draws, and Delete… removes it. No app was launched in this run.
+- **Every other site, the layering rule and the verdict sweep** are APP-M23's, now unblocked.
+- **The design prototype's mirrors** of the Collections argv (`CollectionsViewModel.ts`) are a design follow-up, as the item's Out of scope says.
+- **Not run:** CI's rows, which wait for a push.
 
 ## Milestone F — Apogee in Xcode, the app's side
 

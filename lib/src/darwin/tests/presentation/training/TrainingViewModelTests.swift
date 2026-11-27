@@ -131,16 +131,16 @@ struct TrainingViewModelTests {
         model.createName = "notes"
         model.createFrom = "sessions"
         await model.createDataset()
-        #expect(runner.calls.contains("run datasets|create|notes|--from|sessions"))
+        #expect(runner.calls.contains("run datasets|create|--from|sessions|--|notes"))
         model.pending = .deleteDataset("heat-notes")
         try await model.confirm(#require(model.pending))
-        #expect(runner.calls.contains("run datasets|delete|heat-notes|--yes"))
+        #expect(runner.calls.contains("run datasets|delete|--yes|--|heat-notes"))
         #expect(TrainingViewModel.Pending.rollback(backend: "helper").arguments == ["train", "rollback", "helper"])
         model.newSynthesis()
         model.synthForm.name = "clerk-data"
         model.synthForm.count = "50"
         model.synthesize()
-        #expect(starter.starts.last == ["datasets", "synth", "clerk-data", "--teacher", "mock-chat", "--kit", model.kits[0].name, "--count", "50"])
+        #expect(starter.starts.last == ["datasets", "synth", "--teacher", "mock-chat", "--kit", model.kits[0].name, "--count", "50", "--", "clerk-data"])
         synth.end()
     }
 }

@@ -374,6 +374,13 @@ public struct RoleAssignment: Sendable, Equatable, Identifiable {
         role == "chat" ? ["config", "set-default"] : ["config", "set-default-\(role)"]
     }
 
+    /// The line that points the role at `backend`: its verb, then `--` and
+    /// the backend, so a backend an older config named `-x` is read as one
+    /// (`Argv`, GUI M21).
+    public func arguments(pointingAt backend: String) -> [String] {
+        Argv.line(verb, names: [backend])
+    }
+
     /// The roles `models status` resolves, in its order (the CLI's
     /// `role_status`). An allow-list: the document's other fields -- the
     /// `suite` it opens with under a suite, the `footprint` it ends with, any

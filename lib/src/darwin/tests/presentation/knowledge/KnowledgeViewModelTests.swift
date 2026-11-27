@@ -83,6 +83,15 @@ struct RecordsViewModelTests {
         #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
     }
 
+    @Test("the record delete's dialog line is the line the delete runs, as a person types it (GUI M21)")
+    func deleteLineShown() async throws {
+        let (model, runner, _) = await records()
+        let record = try #require(model.records.first)
+        #expect(Argv.shown(RecordsViewModel.deleteArguments(record)) == "knowledge delete \(record.id)")
+        await model.confirmDelete(record)
+        #expect(runner.calls.contains("run " + RecordsViewModel.deleteArguments(record).joined(separator: "|")))
+    }
+
     @Test("a capture is the clerk's run, supervised: its command as typed, overrides only where set")
     func capture() async {
         var form = RecordsViewModel.CaptureForm()
@@ -130,7 +139,7 @@ struct CollectionsViewModelTests {
         let (model, runner, _) = await collections()
         #expect(model.collections.map(\.name) == ["knowledge", "notes"])
         await model.select(model.collections[1])
-        #expect(runner.calls.contains("read embed|info|notes"))
+        #expect(runner.calls.contains("read embed|info|--|notes"))
         #expect(model.info?.sources.count == 5)
         #expect(model.info.map(CollectionsViewModel.vectors) == "none -- a text index only")
     }
@@ -163,7 +172,7 @@ struct CollectionsViewModelTests {
         await model.select(model.collections[1])
         model.question = "how does a heat pump work"
         await model.search()
-        #expect(runner.calls.contains("run embed|query|notes|--|how does a heat pump work"))
+        #expect(runner.calls.contains("run embed|query|--|notes|how does a heat pump work"))
         #expect(model.results?.hasPrefix("0.000  [lexical]  heat-pumps.md#0") == true)
     }
 
@@ -183,10 +192,10 @@ struct CollectionsViewModelTests {
         let (model, runner, _) = await collections()
         model.pendingDelete = .init(collection: "notes", source: "solar.md")
         try await model.confirmDelete(#require(model.pendingDelete))
-        #expect(runner.calls.contains("run embed|delete|notes|--source|solar.md"))
+        #expect(runner.calls.contains("run embed|delete|--source|solar.md|--|notes"))
         model.pendingDelete = .init(collection: "notes", source: nil)
         try await model.confirmDelete(#require(model.pendingDelete))
-        #expect(runner.calls.contains("run embed|delete|notes|--yes"))
+        #expect(runner.calls.contains("run embed|delete|--yes|--|notes"))
     }
 
     @Test("an ingest is its command, supervised; the collection is chosen and read when it ends")
@@ -194,19 +203,19 @@ struct CollectionsViewModelTests {
         var form = CollectionsViewModel.IngestForm()
         form.collection = "notes"
         form.path = "/Users/someone/notes"
-        #expect(form.arguments == ["embed", "ingest", "notes", "/Users/someone/notes"])
+        #expect(form.arguments == ["embed", "ingest", "--", "notes", "/Users/someone/notes"])
         form.retriever = "vector"
         form.graph = true
-        #expect(form.arguments == ["embed", "ingest", "notes", "/Users/someone/notes", "--retriever", "vector", "--graph"])
+        #expect(form.arguments == ["embed", "ingest", "--retriever", "vector", "--graph", "--", "notes", "/Users/someone/notes"])
         let job = ScriptedJob()
         let (model, runner, starter) = await collections([job])
         model.newIngest(into: "notes")
         model.ingestForm.path = "/Users/someone/notes"
         model.ingest()
-        #expect(starter.starts == [["embed", "ingest", "notes", "/Users/someone/notes"]])
+        #expect(starter.starts == [["embed", "ingest", "--", "notes", "/Users/someone/notes"]])
         job.say(.busy("[ingest] solar.md (file 2/3)"))
         job.end()
-        #expect(await eventually { !model.isRunning && model.selected == "notes" })
-        #expect(runner.calls.contains("read embed|info|notes"))
+        // The read-back follows the job's end: wait for it, not only the end.
+        #expect(await eventually { !model.isRunning && model.selected == "notes" && runner.calls.contains("read embed|info|--|notes") })
     }
 }

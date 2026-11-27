@@ -202,7 +202,7 @@ public final class TrainingViewModel {
         }
     }
 
-    /// `datasets synth <name> --teacher <b> --kit <k>`.
+    /// `datasets synth --teacher <b> --kit <k> -- <name>`.
     public struct SynthForm: Equatable, Sendable {
         public var name = ""
         public var teacher = ""
@@ -212,15 +212,17 @@ public final class TrainingViewModel {
 
         public init() {}
 
+        /// The line: the options, then the typed name, trimmed, after `--`
+        /// (`Argv`, GUI M21).
         public var arguments: [String]? {
             let name = name.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, !teacher.isEmpty, !kit.isEmpty else { return nil }
-            var arguments = ["datasets", "synth", name, "--teacher", teacher, "--kit", kit]
+            var options: [Argv.Option] = [.value("--teacher", teacher), .value("--kit", kit)]
             let count = count.trimmingCharacters(in: .whitespaces)
-            if !count.isEmpty { arguments += ["--count", count] }
+            if !count.isEmpty { options.append(.value("--count", count)) }
             let topic = topic.trimmingCharacters(in: .whitespaces)
-            if !topic.isEmpty { arguments += ["--topic", topic] }
-            return arguments
+            if !topic.isEmpty { options.append(.value("--topic", topic)) }
+            return Argv.line(["datasets", "synth"], options: options, names: [name])
         }
     }
 
@@ -248,13 +250,13 @@ public final class TrainingViewModel {
         case resumeCycle
 
         /// The command as a person types it -- `train rollback <b>`,
-        /// `datasets delete <d> --yes` (the person said yes here), a
-        /// pipeline's or the cycle's verb. A run is started with its stream
-        /// asked for besides.
+        /// `datasets delete --yes -- <d>` (the person said yes here; the
+        /// listed name after `--`, GUI M21), a pipeline's or the cycle's
+        /// verb. A run is started with its stream asked for besides.
         public var arguments: [String] {
             switch self {
             case .rollback(let backend): ["train", "rollback", backend]
-            case .deleteDataset(let name): ["datasets", "delete", name, "--yes"]
+            case .deleteDataset(let name): Argv.line(["datasets", "delete"], options: [.flag("--yes")], names: [name])
             case .runPipeline(let name): ["train", "pipeline", "run", "--pipeline", name]
             case .resumePipeline(let id, let pipeline): ["train", "pipeline", "resume", id] + (pipeline.map { ["--pipeline", $0] } ?? [])
             case .runCycle: ["train", "cycle", "run"]
@@ -533,12 +535,13 @@ public final class TrainingViewModel {
         return specFailure == nil ? specs.first { $0.name == name } : nil
     }
 
-    /// The completion's candidates: one a line, a description after a tab
-    /// where one follows, never an option.
+    /// The completion's candidates: one a line, as written -- a dash-led
+    /// name and a leading space kept (GUI M21) -- a description after a tab
+    /// where one follows.
     static func candidates(_ said: String) -> [String] {
         said.split(whereSeparator: \.isNewline)
-            .map { String($0.split(separator: "\t").first ?? "").trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("-") }
+            .map { String($0.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") }
+            .filter { !$0.isEmpty }
     }
 
     /// A pipeline run's page opened, its manifest read; `nil` opens the one
@@ -1283,14 +1286,20 @@ public final class TrainingViewModel {
         start(["datasets", "prepare", path], doing: "Preparing")
     }
 
-    /// `datasets create <name> --from <template|sessions|empty>`, read back;
-    /// the new dataset is selected only once the binary made it -- a refusal
-    /// keeps the selection and is said (GUI 4h).
-    public func createDataset() async {
+    /// `datasets create --from <template|sessions|empty> -- <name>`, the
+    /// typed name trimmed, after `--` (GUI M21); nil with no name.
+    public var createArguments: [String]? {
         let name = createName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
+        return name.isEmpty ? nil : Argv.line(["datasets", "create"], options: [.value("--from", createFrom)], names: [name])
+    }
+
+    /// `createArguments`, read back; the new dataset is selected only once
+    /// the binary made it -- a refusal keeps the selection and is said (GUI
+    /// 4h).
+    public func createDataset() async {
+        guard let arguments = createArguments, let name = Argv.positionals(of: arguments).first else { return }
         sheet = nil
-        if await change(["datasets", "create", name, "--from", createFrom]) { selectedDataset = name }
+        if await change(arguments) { selectedDataset = name }
     }
 
     /// The person said yes to `answer`, the question the dialog showed: a run

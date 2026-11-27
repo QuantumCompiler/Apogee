@@ -44,7 +44,7 @@ struct AdaptersSheet: View {
                 }
                 Button(form.isMLX ? "Add a directory…" : "Add a file…") { choosing = true }
                     .disabled(form.isMLX && !form.entries.isEmpty)
-                Text((["apogee"] + form.arguments.dropLast() + [form.value.isEmpty ? "\"\"" : form.value]).joined(separator: " "))
+                Text(form.shown)
                     .font(.apogeeCode)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(4)

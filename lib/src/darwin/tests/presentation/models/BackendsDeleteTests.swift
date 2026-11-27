@@ -33,8 +33,8 @@ struct BackendsDeleteTests {
         // The plans first, then the deletes, which a longer prefix picks out.
         runner.commanding(["models", "delete", Self.llama], .done(stdout: recorded("delete-plan-backend", "txt")))
         runner.commanding(["models", "delete", Self.gemma], .done(stdout: recorded("delete-plan-gemma", "txt")))
-        runner.commanding(["models", "delete", Self.gemma, "--yes"], .done(stdout: recorded("delete-kept", "txt")))
-        runner.commanding(["models", "delete", Self.llama, "--yes", "--and-backends"], .done(stdout: recorded("delete-and-backends", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--", Self.gemma], .done(stdout: recorded("delete-kept", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--and-backends", "--", Self.llama], .done(stdout: recorded("delete-and-backends", "txt")))
         let model = ModelsViewModel(runner: runner)
         await model.connect(binary: Self.binary)
         return (model, runner)
@@ -66,8 +66,8 @@ struct BackendsDeleteTests {
             "the backend entry stays unless you say -- --and-backends removes it with the weights.",
         ])
         #expect(model.offersAndBackends)
-        #expect(plan.question(running: "apogee models delete \(Self.llama) --yes").hasSuffix(
-            "removes it with the weights.\n\napogee models delete Llama3.2-1B-Instruct-Q4KM --yes -- this can't be undone."))
+        #expect(plan.question(running: "apogee " + Argv.shown(ModelsViewModel.deleteArguments(Self.llama))).hasSuffix(
+            "removes it with the weights.\n\napogee models delete --yes Llama3.2-1B-Instruct-Q4KM -- this can't be undone."), "the dialog's line, as typed (GUI M21)")
         #expect(!runner.calls.contains { $0.hasPrefix("run models delete") && $0.contains("--yes") })
         // A plan naming none -- no and-the-backends choice -- and a refused
         // plan are the shared reading's, pinned by ModelsViewModelTests'
@@ -83,7 +83,7 @@ struct BackendsDeleteTests {
         await model.askToDelete(gemma)
         runner.reading(["models", "list"], recorded("delete-list-after-kept"))
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
-        #expect(runner.calls.contains("run models delete \(Self.gemma) --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- \(Self.gemma)"))
         #expect(said == ["Deleted \(Self.gemma)"])
         let kept = try #require(model.narration, "the CLI's warning and doors, kept after the delete")
         #expect(kept.title == "Deleted \(Self.gemma)")
@@ -95,7 +95,7 @@ struct BackendsDeleteTests {
         await model.askToDelete(llama)
         runner.reading(["models", "list"], recorded("delete-list-after-removed"))
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: true)
-        #expect(runner.calls.contains("run models delete \(Self.llama) --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes --and-backends -- \(Self.llama)"))
         let removed = try #require(model.narration)
         #expect(removed.title == "Deleted \(Self.llama)")
         #expect(removed.lines.contains("removed backend 'Llama3.2-1B-Instruct-Q4KM' from /Users/someone/.apogee/config/config.json"))
@@ -114,8 +114,8 @@ struct BackendsDeleteTests {
         let kept = try #require(model.pendingDelete, "the dialog is built from the question")
         model.pendingDelete = nil
         await model.confirmDelete(kept, andBackends: false)
-        #expect(runner.calls.contains("run models delete \(Self.gemma) --yes"))
-        #expect(!runner.calls.contains("run models delete \(Self.gemma) --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes -- \(Self.gemma)"))
+        #expect(!runner.calls.contains("run models delete --yes --and-backends -- \(Self.gemma)"))
         #expect(said == ["Deleted \(Self.gemma)"])
         let llama = try #require(model.rows.first { $0.backend == Self.llama })
         await model.askToDelete(llama)
@@ -123,7 +123,7 @@ struct BackendsDeleteTests {
         #expect(model.offersAndBackends, "its plan names a backend")
         model.pendingDelete = nil
         await model.confirmDelete(removed, andBackends: true)
-        #expect(runner.calls.contains("run models delete \(Self.llama) --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes --and-backends -- \(Self.llama)"))
         #expect(said.last == "Deleted \(Self.llama)")
     }
 }

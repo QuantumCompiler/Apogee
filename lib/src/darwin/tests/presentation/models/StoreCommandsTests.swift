@@ -191,10 +191,10 @@ struct StoreCommandsTests {
         #expect(model.renaming == nil, "no model rename offered")
         model.askToRename(mlx, .backend)
         await model.rename(try #require(model.renaming), to: "gpt-oss-20b-mixed")
-        let backend = "config rename-backend GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed"
+        let backend = "config rename-backend -- GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed"
         #expect(runner.calls.contains("run " + backend))
         #expect(Self.verdicts[backend] == "taken")
-        let before = "models rename GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed"
+        let before = "models rename -- GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed"
         #expect(!runner.calls.contains("run " + before))
         #expect(Self.verdicts[before]?.hasPrefix("refused: apogee models: no model named 'GPT-OSS-20B-mixed_4_8'") == true,
                 "the user's refusal, recorded: \(Self.verdicts[before] ?? "not recorded")")
@@ -213,7 +213,7 @@ struct StoreCommandsTests {
         #expect(library.renamesAsModel(family), "the binary completes qwen3-8b")
         library.askToRename(family, .model)
         await library.rename(try #require(library.renaming), to: "qwen3-8b-chat")
-        let whole = "models rename qwen3-8b qwen3-8b-chat"
+        let whole = "models rename -- qwen3-8b qwen3-8b-chat"
         #expect(listed.calls.contains("run " + whole))
         #expect(Self.verdicts[whole] == "taken")
     }

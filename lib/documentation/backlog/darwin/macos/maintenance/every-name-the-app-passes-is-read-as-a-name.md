@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | Apple apps · macOS |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Every argv the app builds: Store, Downloads, Library, Review, Tasks, Sessions, Suites, Voice, Settings, Xcode, Records, ClipForm; the previews; the layering check |
 | **Labels** | `argv` `cli-parity` `layering-check` |
 | **Epic** | — |
-| **Blocked by** | [M21](a-listed-name-reaches-the-verb-as-listed.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The CLI-M45/M46 investigation (2026-11-22), then a sandboxed investigation, two skeptics and a critic (2026-11-26) |
 | **Created** | 2026-11-26 |
@@ -158,14 +158,14 @@ All hermetic: scripted runners and jobs, recorded verdicts, no window, no binary
 
 ## Out of scope
 
-- **The seam and the reachable rows** (Collections, Graph, Training's datasets, the Models backend rows): [APP-M21](a-listed-name-reaches-the-verb-as-listed.md).
+- **The seam and the reachable rows** (Collections, Graph, Training's datasets, the Models backend rows): [APP-M21](../../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed).
 - **A job's notes on done**: [APP-M22](a-jobs-notes-reach-the-person.md).
 - **The design prototype's mirrors**: a design follow-up.
 - **The CLI asides** (APP-M21's Out of scope), for the CLI queue.
 
 ## Links
 
-- **Blocked by:** [APP-M21](a-listed-name-reaches-the-verb-as-listed.md) · **Blocks:** —
+- **Blocked by:** — · **Blocks:** —
 - **Relates to:**
   - [APP-M22](a-jobs-notes-reach-the-person.md);
   - [APP-7c](../../v0.2.4/every-place-against-a-server.md) and [APP-7d](../../v0.2.4/apogeekit-swift-package.md): the argv baseline and the ApogeeKit carve read better after this lands;

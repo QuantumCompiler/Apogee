@@ -156,7 +156,7 @@ Each fixture fails on today's binary (measured 2026-11-22).
 ## Out of scope
 
 - **A name the config can't register**, refused before anything is written, the registration made one step, and the length caps: [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md).
-- **The Mac app passes no `--` before a collection name** (`CollectionsViewModel.swift:29-35`, `:48-50`), so a store named `-x` can't be read, ingested into or deleted from the app (exit 106): [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), and the app's other sites, [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md).
+- **The Mac app passes no `--` before a collection name** (`CollectionsViewModel.swift:29-35`, `:48-50`), so a store named `-x` can't be read, ingested into or deleted from the app (exit 106): [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), and the app's other sites, [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md).
 - **How far `--rag` into a live third-party database hurts it** beyond what was measured (tables added, WAL on). The fix makes it unreachable.
 
 ## Links
@@ -166,7 +166,7 @@ Each fixture fails on today's binary (measured 2026-11-22).
   - [CLI-M42](stubs-read-the-words-as-the-shell-does.md), whose investigation found the spaced collection;
   - 5c0d514e, the path rule's first commit;
   - DEVELOPER.md's `embed` row ("the path is built, never accepted");
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose Graph list relies on this item's completion offering dash names after `--`;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose Graph list relies on this item's completion offering dash names after `--`;
   - [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), the same read rule for datasets: whichever lands second shares the helper;
   - [CLI-M52](a-refused-scaffold-writes-nothing.md), whose dry run sits at the same agent add as this item's read rule;
   - [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), which also edits `admin_graph.cpp`: built one after the other.

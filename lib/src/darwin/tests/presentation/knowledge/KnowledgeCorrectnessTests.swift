@@ -185,8 +185,8 @@ struct KnowledgeCurrentTests {
     func collections(_ jobs: [ScriptedJob]) async -> (CollectionsViewModel, ScriptedRunner) {
         let runner = ScriptedRunner()
         runner.reading(["embed", "list"], fixture("collections-list-vectors"))
-        runner.reading(["embed", "info", "mixed"], fixture("collection-info-vectors-mixed"))
-        runner.reading(["embed", "info", "notes"], fixture("collection-info-vectors"))
+        runner.reading(["embed", "info", "--", "mixed"], fixture("collection-info-vectors-mixed"))
+        runner.reading(["embed", "info", "--", "notes"], fixture("collection-info-vectors"))
         runner.answering(["embed", "query"], .done(stdout: fixture("collection-query", "txt")))
         let model = CollectionsViewModel(runner: runner, starter: ScriptedJobs(jobs))
         await model.connect(binary: Self.binary)
@@ -205,7 +205,7 @@ struct KnowledgeCurrentTests {
         model.ingestForm.collection = "notes"
         model.ingestForm.path = "/Users/someone/notes"
         model.ingest()
-        let reading = runner.holding(["embed", "info", "notes"])
+        let reading = runner.holding(["embed", "info", "--", "notes"])
         job.end()
         #expect(await eventually { reading.arrived == 1 })
         #expect(model.selected == "notes")

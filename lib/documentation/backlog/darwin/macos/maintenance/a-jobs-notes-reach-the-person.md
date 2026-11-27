@@ -217,13 +217,13 @@ All hermetic: recorded output, scripted jobs, one real `/bin/sh` child, no windo
 - **Every other done path** (Training, Settings' fix, Sessions' compact, the Downloads card, the console's tail) and a source check that every done path reads notes. They are a follow-up, "every done path shows its notes".
 - **Warnings on stdout** (Evidence 11): the CLI's [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md), gated on this item, with [CLI-M59](../../../cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) and [CLI-M60](../../../cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md). Re-recording the `graph-update-source-gone` guard as a note once CLI-M58 ships is a chore for this queue.
 - **A remote job's notes** (APP-7c over CLI-59d): 7c fills `JobEnd.notes` from a server job's warnings.
-- **Names passed as flags**: [APP-M21](a-listed-name-reaches-the-verb-as-listed.md) and [APP-M23](every-name-the-app-passes-is-read-as-a-name.md).
+- **Names passed as flags**: [APP-M21](../../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) and [APP-M23](every-name-the-app-passes-is-read-as-a-name.md).
 
 ## Links
 
 - **Blocked by:** — · **Blocks:** [CLI-M58](../../../cli/maintenance/a-runs-notes-are-said-once-on-stderr.md), whose notes move to stderr only once this item shows them
 - **Relates to:**
-  - [APP-M21](a-listed-name-reaches-the-verb-as-listed.md), which also edits `ingest()`;
+  - [APP-M21](../../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), which also edits `ingest()`;
   - [CLI-M46](../../../cli/maintenance/a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose notes this item shows and whose refusals the failure path already shows;
   - [APP-7c](../../v0.2.4/every-place-against-a-server.md), a remote job's notes;
   - [CLI-M59](../../../cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) and [CLI-M60](../../../cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md), the HTTP graph jobs' and the models verbs' notes;

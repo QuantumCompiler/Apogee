@@ -284,7 +284,13 @@ public final class RecordsViewModel {
     /// `pendingDelete` is cleared only while it is still `record`.
     public func confirmDelete(_ record: KnowledgeRecord) async {
         if pendingDelete == record { pendingDelete = nil }
-        await change(["knowledge", "delete", record.id], doing: "Deleting")
+        await change(Self.deleteArguments(record), doing: "Deleting")
+    }
+
+    /// `knowledge delete <id>`: the line `confirmDelete` runs, which its
+    /// dialog shows as typed (GUI M21).
+    public static func deleteArguments(_ record: KnowledgeRecord) -> [String] {
+        ["knowledge", "delete", record.id]
     }
 
     /// `knowledge export --format json|markdown [--anonymize] -o <file>`.

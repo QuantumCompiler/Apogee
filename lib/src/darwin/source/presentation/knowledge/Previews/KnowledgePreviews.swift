@@ -12,11 +12,11 @@ enum KnowledgePreview {
         reads: [
             (["knowledge", "list"], KnowledgeDocuments.knowledgeList),
             (["embed", "list"], KnowledgeDocuments.collectionsList),
-            (["embed", "info", "notes"], KnowledgeDocuments.collectionInfo),
+            (["embed", "info", "--", "notes"], KnowledgeDocuments.collectionInfo),
         ],
         commands: [
             (["knowledge", "query"], KnowledgeDocuments.knowledgeQuery),
-            (["embed", "query", "notes"], KnowledgeDocuments.collectionQuery),
+            (["embed", "query", "--", "notes"], KnowledgeDocuments.collectionQuery),
         ])
 
     /// A record the branch's binary captured over GUI 4k's sandbox, and its

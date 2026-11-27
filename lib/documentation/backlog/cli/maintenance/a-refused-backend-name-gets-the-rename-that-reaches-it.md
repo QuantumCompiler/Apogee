@@ -283,7 +283,7 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 - **Doors on a backend not in the config.** That covers `check`'s `config add-backend … && config set-backend …` for an active version with no entry (`check.cpp:2750-2755`), and `train promote`'s `add it first` (`train.cpp:545-547`). No entry exists to rename, and 55f's add rule refuses such a name in its own words.
 - **Doors naming other verbs on such a backend** (`train rollback <backend>` at `check.cpp:2742`, `train promote … --as <backend>` at `:1050`). Whether those verbs reach a name outside the rule was not measured.
 - **The TUI's row actions.** Passing a dash-led name after `--` is [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md). The Config view's delete key calls the editor directly (`tui_workbench.h:23-27`), so by reading it meets 57e's refusal on such a name. That was not measured, and it is not in this item.
-- **The Mac app.** Its Models rename row passing `--` is [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md). It shows `check`'s remedy as text, so it needs no change here.
+- **The Mac app.** Its Models rename row passing `--` is [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed). It shows `check`'s remedy as text, so it needs no change here.
 - **Refusing such a name at load.** An older config loads (ADR 0006).
 
 ## Links
@@ -292,7 +292,7 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 - **Sibling:** [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md), the program word the rename door begins with; [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's row actions, from the same investigation.
 - **Relates to:**
   - [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), which makes `rename-backend` find a key in any case;
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose aside (`models delete` suggests `config delete-backend -x`) and Evidence 7 (the app's rename row) this item answers on the CLI's side;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose aside (`models delete` suggests `config delete-backend -x`) and Evidence 7 (the app's rename row) this item answers on the CLI's side;
   - [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), whose default relies on the CLI's refusal naming `rename-backend`;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which relays `check --output-format json` to a paired device byte for byte, the rename door included.
 - **Follows from:** M14 (00635d8a, MILESTONES 2026-10-19, "The doctor's doors run as printed"), 55f (8d5aec51, MILESTONES 2026-10-25, the add rule and "existing odd names reached by `rename-backend`") and 57e (MILESTONES 2026-11-01, the odd-name refusal); [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0006](../../../adrs/cli/backwards-compatibility.md).

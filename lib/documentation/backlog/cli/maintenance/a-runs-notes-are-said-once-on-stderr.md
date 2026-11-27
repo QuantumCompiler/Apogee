@@ -401,7 +401,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
 - **Relates to:**
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), built one after the other with this item: its notes keep the house voice, and they are routed through `say_note` by whichever lands second;
   - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), which shares `embed.cpp` and `graph.cpp` with no gate;
-  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose deferred stdout question this item answers, and [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose probes ran beside it;
+  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose deferred stdout question this item answers, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md), which reads a remote job's notes;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose Constraints carry the relay rule (2026-11-26);
   - CLI-58b (v0.2.2, [graphs and knowledge served](../v0.2.2/mcp-serve-graphs-and-knowledge.md)), which adds `graph list` to `graph.cpp` and shares the file, not the seam.

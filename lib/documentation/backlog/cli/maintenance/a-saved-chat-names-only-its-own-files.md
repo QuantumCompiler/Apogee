@@ -254,7 +254,7 @@ Hermetic: a temporary `APOGEE_HOME` three levels deep, with `sessions/`, `attach
   - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), whose escape-only read rule this rule takes its shape from;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which would run `chats delete` and `chats title` from a paired device;
   - CLI-63b (v0.2.4, [personal data has an owner](../v0.2.4/personal-data-has-an-owner.md)), which moves sessions, attachments and recall per person;
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md), whose CLI asides opened this investigation, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), the Mac app's Sessions argv;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose CLI asides opened this investigation, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), the Mac app's Sessions argv;
   - [darwin 7c](../../darwin/v0.2.4/every-place-against-a-server.md), Sessions run against a server through 59d's door;
   - [ADR 0006](../../../adrs/cli/backwards-compatibility.md), [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0007](../../../adrs/cli/tab-completion.md).
 - **Revises:** [Milestone H](../../../assistant/cli/MILESTONES.md#milestone-h--apogee-chat)'s "Resume that degrades, never fails" (a dated revision), keeping its "`chat_id` is immutable".

@@ -35,7 +35,7 @@ struct DraftersFromTheListTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("rows-drafts-list"))
         runner.reading(["models", "status"], recorded("rows-drafts-status"))
-        for base in bases { runner.reading(["models", "info", base], recorded("rows-drafts-info-\(base)")) }
+        for base in bases { runner.reading(["models", "info", "--", base], recorded("rows-drafts-info-\(base)")) }
         return runner
     }
 
@@ -79,7 +79,7 @@ struct DraftersFromTheListTests {
         let runner = Self.paired()
         let model = await connected(runner, vocabulary: "2026-10-26")
         await model.select(try row("Gemma4-12B-4bit", in: model))
-        #expect(runner.calls.filter { $0.hasPrefix("read models info") } == ["read models info Gemma4-12B-4bit"], "the selection's, alone")
+        #expect(runner.calls.filter { $0.hasPrefix("read models info") } == ["read models info -- Gemma4-12B-4bit"], "the selection's, alone")
         #expect(model.draft?.refusal == "there is no drafter at \(Self.gone) -- 'apogee models convert <a draft head> --mlx' makes one")
         #expect(model.drafterMark(try row("Gemma4-12B-4bit", in: model))?.drafts == false)
     }
@@ -103,7 +103,7 @@ struct DraftersFromTheListTests {
             runner.reading(["models", "list"], recorded("rows-drafts-list-older"))
             let model = await connected(runner, vocabulary: vocabulary)
             for base in Self.bases {
-                #expect(runner.calls.filter { $0 == "read models info \(base)" }.count == 1, "\(base), \(vocabulary ?? "unsaid")")
+                #expect(runner.calls.filter { $0 == "read models info -- \(base)" }.count == 1, "\(base), \(vocabulary ?? "unsaid")")
             }
             let e4b = try #require(model.drafterMark(try row("Gemma4-E4B-4bit", in: model)))
             #expect(e4b.drafts && e4b.said.hasPrefix("drafts beside it through mlx-vlm's speculative path"), "the CLI's words from its draft line")

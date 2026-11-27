@@ -1,0 +1,4 @@
+will remove:
+  /Users/someone/.apogee/training/datasets/-h.jsonl
+
+removed.

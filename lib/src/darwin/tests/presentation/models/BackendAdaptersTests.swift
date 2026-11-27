@@ -27,9 +27,9 @@ struct BackendAdaptersTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("models-list-adapters"))
         runner.reading(["models", "status"], #"{"fields":[]}"#)
-        runner.reading(["models", "info", "based"], recorded("models-info-adapters-based"))
-        runner.reading(["models", "info", "q4"], recorded("models-info-adapters-q4"))
-        runner.reading(["models", "info", "tuned"], #"{"name":"tuned","fields":[]}"#)
+        runner.reading(["models", "info", "--", "based"], recorded("models-info-adapters-based"))
+        runner.reading(["models", "info", "--", "q4"], recorded("models-info-adapters-q4"))
+        runner.reading(["models", "info", "--", "tuned"], #"{"name":"tuned","fields":[]}"#)
         runner.reading(["check"], recorded("check-adapters"))
         runner.commanding(["config", "get", "backends.based.adapters"], .done(stdout: recorded("config-get-adapters", "txt")))
         runner.commanding(["config", "get", "backends.q4.adapters"], .done(stdout: recorded("config-get-adapters-q4", "txt")))
@@ -87,14 +87,14 @@ struct BackendAdaptersTests {
         var form = try #require(model.editingAdapters)
         #expect(form.entries.map(\.scale) == ["", "0.5"])
         #expect(form.arguments == [
-            "config", "set-backend", "based", "--adapters",
-            "/Users/someone/.apogee/training/versions/based/v1.lora.gguf,/Users/someone/extra.lora.gguf:0.5",
+            "config", "set-backend", "--adapters",
+            "/Users/someone/.apogee/training/versions/based/v1.lora.gguf,/Users/someone/extra.lora.gguf:0.5", "--", "based",
         ])
         form.entries[1].scale = "1.5"
         form.add("/Users/someone/third.lora.gguf")
         #expect(form.value.hasSuffix(",/Users/someone/extra.lora.gguf:1.5,/Users/someone/third.lora.gguf"))
         for entry in form.entries { form.remove(entry.id) }
-        #expect(form.arguments == ["config", "set-backend", "based", "--adapters", ""], "--adapters \"\" clears it")
+        #expect(form.arguments == ["config", "set-backend", "--adapters", "", "--", "based"], "--adapters \"\" clears it")
         var mlx = AdaptersForm(backend: "qwen-mlx", backendType: "mlx", adapters: [BackendAdapter(path: "/Users/someone/adapter")])
         mlx.entries[0].scale = "0.5"
         #expect(mlx.value == "/Users/someone/adapter", "an mlx entry applies one adapter at its trained scale")
@@ -113,7 +113,7 @@ struct BackendAdaptersTests {
         let before = runner.calls.count
         await model.applyAdapters()
         let after = Array(runner.calls.dropFirst(before))
-        #expect(after.first == "run config set-backend based --adapters /Users/someone/.apogee/training/versions/based/v1.lora.gguf")
+        #expect(after.first == "run config set-backend --adapters /Users/someone/.apogee/training/versions/based/v1.lora.gguf -- based")
         #expect(after.contains("run config get backends.based.adapters") && after.last == "read check", "read back")
         #expect(model.editingAdapters == nil)
         #expect(said == [

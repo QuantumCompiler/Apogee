@@ -22,7 +22,7 @@ struct KnowledgeTextTests {
         #expect(form.arguments == ["knowledge", "capture", "--status", "rejected", "--", "- Ada: drop it? Bob: yes"])
     }
 
-    @Test("a question to the records and to a collection after --, the branch and the collection before it")
+    @Test("a question to the records and to a collection after --, the branch before it, the collection with it (GUI M21)")
     func questions() async {
         let runner = ScriptedRunner()
         runner.reading(["knowledge", "list"], fixture("knowledge-list"))
@@ -40,6 +40,6 @@ struct KnowledgeTextTests {
         await collections.select(collections.collections[1])
         collections.question = "-how does a heat pump work"
         await collections.search()
-        #expect(runner.calls.last == "run embed|query|notes|--|-how does a heat pump work")
+        #expect(runner.calls.last == "run embed|query|--|notes|-how does a heat pump work")
     }
 }

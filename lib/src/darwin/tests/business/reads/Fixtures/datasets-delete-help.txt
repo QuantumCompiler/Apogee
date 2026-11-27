@@ -1,0 +1,9 @@
+Remove a dataset
+Usage: apogee datasets delete [OPTIONS] name
+
+Positionals:
+  name DATASET REQUIRED       Dataset name
+
+Options:
+  -h,--help                   Print this help message and exit
+  -y,--yes                    Do not ask for confirmation

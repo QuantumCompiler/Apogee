@@ -131,7 +131,7 @@ All measured 2026-11-22 by an investigator, two skeptics and a critic, each in i
 - **Existing names keep working** ([ADR 0006](../../../adrs/cli/backwards-compatibility.md), and 55f's "existing odd names reached"). "New" means no store file at this spelling and no config reference to the name.
 - **The never-fatal policy stays for trouble after the write** (MILESTONES' "Registration failure | Reported, never fatal"). This item changes when a certain refusal is asked, not that policy. A dated revision records that registration now carries the chunking and the graph's enable.
 - **Mode parity** ([ADR 0002](../../../adrs/cli/mode-parity.md)): the three chains and their HTTP twins move together, and a refusal is a 400 over HTTP.
-- **The refusal is one line, and the last on stderr**, so the Mac app's failure line (`JobProgress.swift:141`, `stderrTail.lastLine`) shows it with no app change, for a name that reaches the verb. A flag-shaped name (`-x`, `-h`) is read by the parser as an option until the app passes it after `--` ([APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md)).
+- **The refusal is one line, and the last on stderr**, so the Mac app's failure line (`JobProgress.swift:141`, `stderrTail.lastLine`) shows it with no app change, for a name that reaches the verb. A flag-shaped name (`-x`, `-h`) is read by the parser as an option until the app passes it after `--` ([APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed)).
 - **Every note keeps the house voice on stderr**: one line beginning `apogee <verb>: `, the graph build's note before extraction included, never on stdout. The Mac app keeps exactly those lines as a finished run's notes ([APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md)), and the tests pin the prefix.
 
 ## Technical approach
@@ -208,7 +208,7 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
 - **The read rule at every reader**, the `--rag` path escape and the completion filters: [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md).
 - **Widening the config editor to quoted keys** (above).
 - **An `embed rename` verb**: a follow-up.
-- **The Mac app** passing `--` before a collection name ([APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md)), and showing a finished run's notes ([APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md)). The app needs no change to show this item's refusals for a name that reaches the verb, since they are the last stderr line.
+- **The Mac app** passing `--` before a collection name ([APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed)), and showing a finished run's notes ([APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md)). The app needs no change to show this item's refusals for a name that reaches the verb, since they are the last stderr line.
 
 ## Links
 
@@ -217,7 +217,7 @@ Each fixture fails on today's binary unless marked as a guard (measured 2026-11-
   - [CLI-M42](stubs-read-the-words-as-the-shell-does.md), whose investigation found the spaced collection;
   - [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md), whose refusals this item's dry run asks before the write;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which would relay today's exit 0 to devices;
-  - [APP-M21](../../darwin/macos/maintenance/a-listed-name-reaches-the-verb-as-listed.md) and [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), the Mac app's side;
+  - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) and [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), the Mac app's side;
   - [CLI-M48](a-suggested-command-runs-as-printed.md), whose renderer builds `check`'s two `embed ingest` remedies that this item quotes by hand (Evidence 8);
   - [CLI-M52](a-refused-scaffold-writes-nothing.md) and [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), the same create-rule shape for agents and datasets; M52's dry run keeps this item's `--collection` refusal before the first write, whichever lands second;
   - [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), which moves the notes of the same `embed ingest` tail, graph build and knowledge core to stderr: built one after the other, the second routing the other's notes through one writer;

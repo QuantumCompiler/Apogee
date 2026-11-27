@@ -1,0 +1,61 @@
+exit 109: The following argument was not expected: -x	graph build --source /Users/someone/code -- -x
+exit 1: apogee graph: '-x' is a collection -- a source tree builds into a named graph. Name one with --graph <name>; it may list '-x' as a member: apogee config add-graph <name> --collections -x --sources <dir>	graph build --source /Users/someone/code --quiet -- -x
+exit 109: The following argument was not expected: -x	graph build --lang c -- -x
+exit 1: apogee graph: '-x' is a collection -- a source tree builds into a named graph. Name one with --graph <name>; it may list '-x' as a member: apogee config add-graph <name> --collections -x --sources <dir>	graph build --lang c --quiet -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --server-tools web_search -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --server-tools web_search --temperature 0.5 -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --mcp-serve complete -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --mcp-serve complete --temperature 0.5 -- -x
+exit 106: model is required	models convert --register-with Q4_K_M -- -x
+exit 1: apogee models: no model '-x' in /Users/someone/.apogee/models	models convert --register-with Q4_K_M --base-name b -- -x
+exit 106: name is required	review targets add --repo o/r --skills security -- -x
+exit 1: apogee review: review target name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --skills security --repo o/r -- -x
+exit 106: name is required	mcp create --command /bin/echo --args a -- -x
+exit 1: apogee mcp: updating config: MCP server name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp create --args a --command /bin/echo -- -x
+exit 109: The following argument was not expected: -dash	video generate -o /Users/someone/a.mp4 --lora /Users/someone/l.safetensors -- -dash
+exit 1: apogee video: there is no LoRA at /Users/someone/l.safetensors	video generate --lora /Users/someone/l.safetensors -o /Users/someone/a.mp4 -- -dash
+exit 1: apogee agents: updating config: agent name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null (the prompt was written to /Users/someone/.apogee/prompts/-x.txt)	agents create --mcp srv -- -x
+exit 0: 1 file(s), 1 chunk(s)	embed ingest --retriever lexical -- -x /Users/someone/docs/b.txt
+exit 1: 1 file(s), 1 chunk(s)	embed ingest --retriever lexical --graph -- -x /Users/someone/docs/b.txt
+exit 0: will delete the whole collection:	embed delete --yes -- -x
+exit 0: removed 1 chunk(s) from 'a.txt'	embed delete --source a.txt -- -x
+exit 0: {"chunks":1,"collection":"-x","index":"ok","path":"/Users/someone/.apogee/embeddings/-x.db","schema":8,"sources":["a.txt"],"vectors":null}	embed info --output-format json -- -x
+exit 0: 0.000  [lexical]  a.txt#0	embed query -- -x fox
+exit 0: {"built":false,"graph":"-x","kind":"collection","object":"graph.stats"}	graph stats --output-format json -- -x
+exit 1: apogee graph: '-x' is not a named graph -- `graph update` refreshes a named graph's source trees; a collection's graph is rebuilt with `apogee graph build -x`	graph update -- -x
+exit 1: apogee graph: no extraction backend: pass -m <backend>, set graph.extract_backend on '-x', or set the extraction role	graph build -- -x
+exit 1: apogee graph: graph '-x' has no relations to cluster -- build it first: apogee graph build -x	graph communities -- -x
+exit 0: Prose entities: vector dedupe skipped -- no prose entities -- nothing to compare by vector; nothing to merge.	graph dedupe --dry-run -- -x
+exit 0: {"code_entities":0,"code_identity_merges":0,"dry_run":true,"groups":[],"merged_nodes":0,"prose_skipped":"no prose entities -- nothing to compare by vector","threshold":0.92,"vectors_cleared":0}	graph dedupe --dry-run --output-format json -- -x
+exit 0: Prose entities: vector dedupe skipped -- no prose entities -- nothing to compare by vector; nothing to merge.	graph dedupe -- -x
+exit 0: No graph to delete for "-x".	graph delete -- -x
+exit 1: apogee graph: no graph built for '-x' -- run: apogee graph build -x	graph query --graph -x --output-format json -- fox
+exit 1: apogee graph: no graph built for '-x' -- run: apogee graph build -x	graph explain --graph -x --output-format json -- fox
+exit 1: apogee graph: no graph built for '-x' -- run: apogee graph build -x	graph report --graph -x --output-format json
+exit 2: apogee graph: could not record graph '-g' in /Users/someone/.apogee/config/config.json: graph name '-g' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	graph build --source /Users/someone/code --graph -g
+exit 0: /Users/someone/.apogee/training/datasets/-d.jsonl	datasets create --from empty -- -d
+exit 0: will remove:	datasets delete --yes -- -h
+exit 1: apogee datasets: no kit named 'k' -- 'apogee datasets kits' lists them	datasets synth --teacher mock --kit k -- -d
+exit 1: apogee datasets: no kit named 'k' -- 'apogee datasets kits' lists them	datasets synth --teacher mock --kit k --count 3 -- -d
+exit 1: apogee datasets: no kit named 'k' -- 'apogee datasets kits' lists them	datasets synth --teacher mock --kit k --topic t -- -d
+exit 0: renamed backend '-x' to 'fixed' in /Users/someone/.apogee/config/config.json, every reference to it with it	config rename-backend -- -x fixed
+exit 1: apogee models: no model named '-x' -- name it as its backends share it (the backend without its level: -F16, -Q4KM, -4bit), or by its stored directory	models rename -- -x fixed
+exit 0: {"fields":[{"field":"backend","value":"-x"},{"field":"type","value":"mock"},{"field":"roles","value":"-"},{"field":"source","value":"remote (no local file to inspect)"},{"field":"thinking","value":"on (default), no budget -- no control here: this backend thinks as it decides"}],"name":"-x"}	models info --output-format json -- -x
+exit 1: apogee models: backend '-x' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -x'	models delete --yes -- -x
+exit 1: apogee models: backend '-x' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -x'	models delete --yes --and-backends -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config delete-backend -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft "" -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft /Users/someone/drafter -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --adapters "" -- -x
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --adapters /Users/someone/a.gguf -- -x
+exit 0: models.default = -x	config set-default -- -x
+exit 0: models.default_embedding = -x	config set-default-embedding -- -x
+exit 0: models.default_extraction = -x	config set-default-extraction -- -x
+exit 0: models.default_vision = -x	config set-default-vision -- -x
+exit 0: models.default_transcription = -x	config set-default-transcription -- -x
+exit 0: models.default_utility = -x	config set-default-utility -- -x
+exit 106: collection is required	embed info -x --output-format json
+help	embed info -h --output-format json
+exit 106: collection is required	embed delete -x --yes
+help	datasets delete -h --yes
+exit 106: new-name is required	config rename-backend -x fixed

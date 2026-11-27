@@ -1,4 +1,4 @@
-taken	config rename-backend GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
+taken	config rename-backend -- GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
 taken	models convert Nothing-Here/safetensors/000000000000
 taken	models convert Nothing-Here/safetensors/000000000000 --mlx
 taken	models convert Nothing-Here/safetensors/000000000000 --mlx --model-type gemma3
@@ -88,8 +88,8 @@ taken	models quantize Nothing-Here/gguf/000000000000 -t Q3_K_M
 taken	models quantize Nothing-Here/gguf/000000000000 -t Q5_K_M
 taken	models quantize Nothing-Here/gguf/000000000000 -t Q6_K
 taken	models quantize Nothing-Here/gguf/000000000000 -t Q8_0
-refused: apogee models: no model named 'GPT-OSS-20B-mixed_4_8' -- name it as its backends share it (the backend without its -F16 or -Q4KM), or by its stored directory	models rename GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
-taken	models rename qwen3-8b qwen3-8b-chat
+refused: apogee models: no model named 'GPT-OSS-20B-mixed_4_8' -- name it as its backends share it (the backend without its level: -F16, -Q4KM, -4bit), or by its stored directory	models rename -- GPT-OSS-20B-mixed_4_8 gpt-oss-20b-mixed
+taken	models rename -- qwen3-8b qwen3-8b-chat
 taken	models convert Nothing-Here/safetensors/000000000000 --mlx --text-only
 taken	models convert Nothing-Here/safetensors/000000000000 --mlx --text-only --model-type gemma3
 taken	models convert Nothing-Here/safetensors/000000000000 --mlx --text-only --register

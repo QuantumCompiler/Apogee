@@ -95,7 +95,7 @@ struct GraphActsTests {
         let jobs = ScriptedJobs([])
         let model = await connected(runner, jobs: jobs)
         await model.planDedupe()
-        #expect(runner.calls.last == "run graph dedupe demo --dry-run")
+        #expect(runner.calls.last == "run graph dedupe --dry-run -- demo")
         #expect(model.dedupe == .planned(printedText("graph-dedupe-dry-run.txt").trimmingCharacters(in: .newlines)))
         #expect(!model.dedupeMerges)
         model.confirmDedupe()
@@ -115,13 +115,13 @@ struct GraphActsTests {
         #expect(model.dedupeMerges)
         #expect(jobs.starts.isEmpty, "the dry run alone, so far")
         model.confirmDedupe()
-        #expect(jobs.starts.first?.arguments == ["graph", "dedupe", "demo"])
+        #expect(jobs.starts.first?.arguments == ["graph", "dedupe", "--", "demo"])
         #expect(model.dedupe == .merging)
         for line in printedText("graph-dedupe-merged-handmade.txt").split(separator: "\n") { job.say(.said(String(line))) }
         job.end()
         #expect(await eventually { if case .merged = model.dedupe { true } else { false } })
         #expect(model.dedupe == .merged(printedText("graph-dedupe-merged-handmade.txt").trimmingCharacters(in: .newlines)))
-        #expect(runner.calls.filter { $0 == "read graph stats demo" }.count == 2, "read back")
+        #expect(runner.calls.filter { $0 == "read graph stats -- demo" }.count == 2, "read back")
     }
 
     @Test("Delete the graph, in the dialog's order: the question cleared as the dialog closes, then the graph's name handed in -- graph delete runs, read back (GUI M20)")
@@ -135,7 +135,7 @@ struct GraphActsTests {
         let answer = try #require(model.pendingDelete, "the dialog is built from the question")
         model.pendingDelete = nil
         await model.confirmDelete(answer)
-        #expect(runner.calls.contains("run graph delete demo"))
+        #expect(runner.calls.contains("run graph delete -- demo"))
         #expect(said.first?.hasPrefix("Deleted graph") == true, "the CLI's own sentence")
     }
 
@@ -154,7 +154,7 @@ struct GraphActsTests {
         #expect(!runner.calls.contains { $0.hasPrefix("run graph delete") })
         runner.reading(["graph", "stats"], #"{"built":false,"collections":[],"graph":"demo","kind":"named","object":"graph.stats","sources":["/Users/someone/code/ingest"]}"#)
         try await model.confirmDelete(#require(model.pendingDelete))
-        #expect(runner.calls.contains("run graph delete demo"))
+        #expect(runner.calls.contains("run graph delete -- demo"))
         #expect(model.result == nil && model.pendingDelete == nil)
         #expect(said.first?.hasPrefix("Deleted graph \"spare\": 10 node(s), 13 edge(s)") == true, "the CLI's own sentence")
         #expect(model.stats?.built == false)

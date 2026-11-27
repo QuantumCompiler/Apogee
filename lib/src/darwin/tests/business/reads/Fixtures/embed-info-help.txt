@@ -1,0 +1,11 @@
+Show a collection's sources and health
+Usage: apogee embed info [OPTIONS] collection
+
+Positionals:
+  collection COLLECTION REQUIRED
+                              Collection name
+
+Options:
+  -h,--help                   Print this help message and exit
+  --output-format TEXT:{text,json}
+                              Output format: text (default) or json -- one JSON document of the same facts

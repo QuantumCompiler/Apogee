@@ -32,7 +32,7 @@ struct DedupeDocumentTests {
         let jobs = ScriptedJobs([job])
         let model = await connected(runner, vocabulary: "2026-10-26", jobs: jobs)
         await model.planDedupe()
-        #expect(runner.calls.last == "read graph dedupe demo --dry-run", "--dry-run asked: with the flag the read never merges")
+        #expect(runner.calls.last == "read graph dedupe --dry-run -- demo", "--dry-run asked: with the flag the read never merges")
         #expect(!runner.calls.contains { $0.hasPrefix("run graph dedupe") }, "the document answered: never both")
         guard case .found(let plan) = model.dedupe else {
             Issue.record("not the document's plan: \(String(describing: model.dedupe))")
@@ -41,7 +41,7 @@ struct DedupeDocumentTests {
         #expect(plan.groups.map(\.kept) == ["K8s", "Scheduler"] && plan.mergedNodes == 4)
         #expect(model.dedupeMerges)
         model.confirmDedupe()
-        #expect(jobs.starts.first?.arguments == ["graph", "dedupe", "demo"], "the merge: never --output-format, never --dry-run")
+        #expect(jobs.starts.first?.arguments == ["graph", "dedupe", "--", "demo"], "the merge: never --output-format, never --dry-run")
         #expect(model.dedupe == .merging)
         for line in printedText("graph-dedupe-merged-groups.txt").split(separator: "\n") { job.say(.said(String(line))) }
         job.end()
@@ -72,7 +72,7 @@ struct DedupeDocumentTests {
         runner.saying(["graph", "dedupe"], printedText("graph-dedupe-dry-run-groups.txt"))
         let model = await connected(runner, vocabulary: "2026-10-25")
         await model.planDedupe()
-        #expect(runner.calls.last == "run graph dedupe demo --dry-run" && !runner.calls.contains { $0.hasPrefix("read graph dedupe") })
+        #expect(runner.calls.last == "run graph dedupe --dry-run -- demo" && !runner.calls.contains { $0.hasPrefix("read graph dedupe") })
         #expect(model.dedupe == .planned(printedText("graph-dedupe-dry-run-groups.txt").trimmingCharacters(in: .newlines)))
         #expect(model.dedupeMerges, "its text names the merges")
     }
@@ -86,7 +86,7 @@ struct DedupeDocumentTests {
         runner.saying(["graph", "dedupe"], printedText("graph-dedupe-dry-run.txt"))
         let model = await connected(runner, vocabulary: "2026-10-26")
         await model.planDedupe()
-        #expect(runner.calls.suffix(2) == ["read graph dedupe demo --dry-run", "run graph dedupe demo --dry-run"])
+        #expect(runner.calls.suffix(2) == ["read graph dedupe --dry-run -- demo", "run graph dedupe --dry-run -- demo"])
         #expect(model.dedupe == .planned(printedText("graph-dedupe-dry-run.txt").trimmingCharacters(in: .newlines)))
         let unsaid = await connected(ScriptedRunner(), vocabulary: nil)
         await unsaid.planDedupe()

@@ -23,9 +23,11 @@ struct StoreJobsTests {
     static let snapshot = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"
     static let f16 = "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"
 
-    /// Every flag the form writes is one the binary's help names.
+    /// Every flag the form writes is one the binary's help names -- each word
+    /// before the end of options, so a name after `--` is never taken for a
+    /// flag (`Argv.options(of:)`, GUI M21).
     func pinned(_ arguments: [String], to help: String) {
-        for word in arguments where word.hasPrefix("-") {
+        for word in Argv.options(of: arguments) where word.hasPrefix("-") {
             #expect(help.contains(word), "\(word) is no flag of the binary's: \(help.prefix(80))")
         }
     }

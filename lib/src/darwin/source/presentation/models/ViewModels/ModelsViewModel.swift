@@ -64,9 +64,14 @@ public final class ModelsViewModel {
         /// The name being changed: the backend's, or the model's.
         public var name: String { kind == .backend ? row.backend : row.renameName }
 
-        /// The command, as typed, before its new name.
-        public var command: [String] {
-            kind == .backend ? ["config", "rename-backend", row.backend] : ["models", "rename", row.renameName]
+        /// The line that renames it to `name`: `config rename-backend --
+        /// <backend> <name>` or `models rename -- <model> <name>`, both names
+        /// after `--` -- so `-x`, the name the CLI's edits refuse and point
+        /// here for, reaches the verb (`Argv`, GUI M21).
+        public func arguments(to name: String) -> [String] {
+            kind == .backend
+                ? Argv.line(["config", "rename-backend"], names: [row.backend, name])
+                : Argv.line(["models", "rename"], names: [row.renameName, name])
         }
     }
 
@@ -240,7 +245,7 @@ public final class ModelsViewModel {
                 continue
             }
             guard !stated, Self.readsDraft(row) else { continue }
-            if let info = await runner.read(binary: binary, ["models", "info", row.backend]).document.map(ModelInfo.init),
+            if let info = await runner.read(binary: binary, Argv.line(["models", "info"], names: [row.backend])).document.map(ModelInfo.init),
                 let draft = BackendDraft(info)
             {
                 found[row.backend] = draft
@@ -273,7 +278,7 @@ public final class ModelsViewModel {
 
     private func readInfo(_ name: String) async {
         guard let binary else { return }
-        let outcome = await runner.read(binary: binary, ["models", "info", name])
+        let outcome = await runner.read(binary: binary, Argv.line(["models", "info"], names: [name]))
         guard selected == name else { return }
         if let document = outcome.document {
             let read = ModelInfo(document: document)
@@ -353,14 +358,14 @@ public final class ModelsViewModel {
         }
         var offers: [DrafterPairing.Offer] = []
         for handle in stdout.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) }) where !handle.isEmpty {
-            let info = await runner.read(binary: binary, ["models", "info", handle]).document.map(ModelInfo.init)
+            let info = await runner.read(binary: binary, Argv.line(["models", "info"], names: [handle])).document.map(ModelInfo.init)
             offers.append(DrafterPairing.Offer(handle: handle, path: info?.field("model_path"), said: info?.field("drafter")))
         }
         working = nil
         pairingDrafter = DrafterPairing(backend: row.backend, offers: offers)
     }
 
-    /// The person's yes: `config set-backend <base> --draft <drafter path>`,
+    /// The person's yes: `config set-backend --draft <drafter path> -- <base>`,
     /// read back -- the details' Drafter and the table's mark then say it as
     /// the CLI does.
     public func pairDrafter() async {
@@ -499,7 +504,7 @@ public final class ModelsViewModel {
     /// backends that use its files: only where its plan names one.
     public var offersAndBackends: Bool { pendingDelete?.plan.backends.isEmpty == false }
 
-    /// `models delete <name> --yes` -- the person said yes here, to `answer`,
+    /// `models delete --yes -- <name>` -- the person said yes here, to `answer`,
     /// the delete the dialog showed -- with `--and-backends` only when they
     /// chose it too (the CLI's `--yes` never implies it), and only where its
     /// plan named a backend; read back, its words kept. The dialog's closing
@@ -510,10 +515,20 @@ public final class ModelsViewModel {
         let pending = answer
         let withBackends = andBackends && !pending.plan.backends.isEmpty
         if pendingDelete == answer { pendingDelete = nil }
-        var arguments = ["models", "delete", pending.row.name, "--yes"]
-        if withBackends { arguments.append("--and-backends") }
-        await run(arguments, doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)", narrated: true)
+        await run(Self.deleteArguments(pending.row.name, andBackends: withBackends), doing: "Deleting \(pending.row.name)", done: "Deleted \(pending.row.name)", narrated: true)
         if selected == pending.row.name { close() }
+    }
+
+    /// `models delete --yes [--and-backends] -- <name>`: the line a confirmed
+    /// delete runs, and its dialog shows as typed (GUI M21).
+    public static func deleteArguments(_ name: String, andBackends: Bool = false) -> [String] {
+        Argv.line(["models", "delete"], options: [.flag("--yes")] + (andBackends ? [.flag("--and-backends")] : []), names: [name])
+    }
+
+    /// `config delete-backend -- <name>`: the line a confirmed removal runs,
+    /// and its dialog shows as typed (GUI M21).
+    public static func removeArguments(_ name: String) -> [String] {
+        Argv.line(["config", "delete-backend"], names: [name])
     }
 
     /// Asks before removing a backend's entry.
@@ -521,7 +536,7 @@ public final class ModelsViewModel {
         removing = row.backend
     }
 
-    /// `config delete-backend <name>`: the entry goes; its weights stay under
+    /// `config delete-backend -- <name>`: the entry goes; its weights stay under
     /// Stored weights, ready to register again. Read back, a role the CLI
     /// cleared with it said in its words (the CLI's M33). `name` is the
     /// backend the dialog showed, handed in because its closing clears
@@ -529,14 +544,20 @@ public final class ModelsViewModel {
     /// still `name`.
     public func confirmRemove(_ name: String) async {
         if removing == name { removing = nil }
-        await run(["config", "delete-backend", name], doing: "Removing \(name)", done: "Removed the backend \(name)")
+        await run(Self.removeArguments(name), doing: "Removing \(name)", done: "Removed the backend \(name)")
         if selected == name { close() }
     }
 
-    /// `config set-backend <backend> --draft ""`: the backend lets its
+    /// `config set-backend --draft "" -- <backend>`: the backend lets its
     /// drafter go, and answers alone again (the CLI's 53i). Read back.
     public func unpair(_ row: ModelRow) async {
-        await run(["config", "set-backend", row.backend, "--draft", ""], doing: "Unpairing", done: "\(row.backend) drafts with nothing now")
+        await run(Self.unpairArguments(row.backend), doing: "Unpairing", done: "\(row.backend) drafts with nothing now")
+    }
+
+    /// `config set-backend --draft "" -- <backend>`: Unpair's line, and what
+    /// its tooltip shows as typed (GUI M21).
+    public static func unpairArguments(_ backend: String) -> [String] {
+        Argv.line(["config", "set-backend"], options: [.value("--draft", "")], names: [backend])
     }
 
     /// The adapters sheet, over what `row` applies now.
@@ -546,7 +567,7 @@ public final class ModelsViewModel {
             backend: row.backend, backendType: row.backendType, adapters: adapters?.rows.map(\.adapter) ?? [])
     }
 
-    /// `config set-backend <name> --adapters …` as the sheet leaves it --
+    /// `config set-backend --adapters … -- <name>` as the sheet leaves it --
     /// `""` takes them all off -- read back: the list and the doctor's pins
     /// again, the CLI's own line said, a refusal in its words.
     public func applyAdapters() async {
@@ -566,13 +587,13 @@ public final class ModelsViewModel {
         renaming = Renaming(row: row, kind: kind)
     }
 
-    /// `config rename-backend <backend> <new name>`, or `models rename <model>
-    /// <new name>`, read back.
+    /// `config rename-backend -- <backend> <new name>`, or `models rename --
+    /// <model> <new name>`, read back; the typed new name trimmed.
     public func rename(_ renaming: Renaming, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         self.renaming = nil
         guard !name.isEmpty, name != renaming.name else { return }
-        await run(renaming.command + [name], doing: "Renaming", done: "Renamed to \(name)")
+        await run(renaming.arguments(to: name), doing: "Renaming", done: "Renamed to \(name)")
     }
 
     /// `models repair <name>`: verifies against the record, fixes a damaged
@@ -586,7 +607,7 @@ public final class ModelsViewModel {
     /// through `models status`.
     public func assign(_ role: RoleAssignment, to backend: String) async {
         guard backend != role.backend || !role.isSet else { return }
-        await run(role.verb + [backend], doing: "Setting \(role.role)", done: "\(role.role) is \(backend)")
+        await run(role.arguments(pointingAt: backend), doing: "Setting \(role.role)", done: "\(role.role) is \(backend)")
     }
 
     /// Runs a change and reads back, its result said. `narrated`, what the
@@ -752,9 +773,10 @@ public struct DrafterMark: Equatable, Sendable {
     public var help: String { "Drafter: " + drafter + (said.isEmpty ? "" : " -- " + said) }
 }
 
-/// `config set-backend <base> --draft <drafter path>`, as the pair sheet on a
-/// base builds it (GUI M5; the CLI's 53i): a drafter chosen among those the
-/// binary's completion offers that base, never worked out here.
+/// `config set-backend --draft <drafter path> -- <base>`, as the pair sheet on
+/// a base builds it (GUI M5; the CLI's 53i): a drafter chosen among those the
+/// binary's completion offers that base, never worked out here. The base after
+/// `--` (GUI M21).
 public struct DrafterPairing: Equatable, Identifiable, Sendable {
     /// A drafter the completion offers, as its `models info` says it.
     public struct Offer: Equatable, Identifiable, Sendable {
@@ -797,7 +819,7 @@ public struct DrafterPairing: Equatable, Identifiable, Sendable {
 
     /// The command, as typed; `nil` while none is offered.
     public var arguments: [String]? {
-        offer.map { ["config", "set-backend", backend, "--draft", $0.draft] }
+        offer.map { Argv.line(["config", "set-backend"], options: [.value("--draft", $0.draft)], names: [backend]) }
     }
 }
 

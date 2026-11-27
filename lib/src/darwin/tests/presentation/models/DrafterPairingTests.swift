@@ -51,6 +51,8 @@ struct DrafterPairingTests {
         for (backend, handle) in Self.sets {
             let pairedBase = paired && backend == "Gemma4-E4B-4bit"
             runner.reading(["models", "info", backend], recorded("drafts-info-backend-\(backend)" + (pairedBase ? "-paired" : "")))
+            // The Backends tab reads the backend after `--` (GUI M21).
+            runner.reading(["models", "info", "--", backend], recorded("drafts-info-backend-\(backend)" + (pairedBase ? "-paired" : "")))
             runner.reading(["models", "info", "/Users/someone/.apogee/models/" + handle], recorded("drafts-info-path-\(backend)"))
             runner.reading(["models", "info", handle], recorded("drafts-info-set-\(backend)"))
             runner.commanding(["__complete", "config", "set-backend", backend, "--draft"], .done(stdout: recorded("drafts-complete-\(backend)", "txt")))
@@ -85,7 +87,7 @@ struct DrafterPairingTests {
     @Test("the pairing's commands are pinned to the binary's verdicts: the base and the clearing taken, the other bases refused in its words")
     func commandsPinned() async throws {
         let verdicts = pairingVerdicts()
-        #expect(verdicts.count == 7, "3b's five and the base side's two (GUI M5): \(verdicts.keys.sorted())")
+        #expect(verdicts.count == 9, "3b's five and the base side's four (GUI M5, in M21's order): \(verdicts.keys.sorted())")
         let (store, set) = try await store(runner())
         await store.askToPair(set)
         let pair = try #require(store.pairing?.arguments).joined(separator: " ")
@@ -146,11 +148,11 @@ struct DrafterPairingTests {
         #expect(draft.said == "drafts beside it through mlx-vlm's speculative path (mtp, mlx-vlm's default block); the answer is the base's")
         #expect(draft.drafter == "a drafter (Gemma4AssistantForCausalLM) for a 2560-wide gemma4 model, its record naming Gemma4-E4B")
         #expect(models.facts.contains { $0.label == "draft" } && !models.recordFacts.contains { $0.label == "draft" || $0.label == "drafter" })
-        runner.reading(["models", "info", "Gemma4-E4B-4bit"], recorded("drafts-info-backend-Gemma4-E4B-4bit"))
+        runner.reading(["models", "info", "--", "Gemma4-E4B-4bit"], recorded("drafts-info-backend-Gemma4-E4B-4bit"))
         await models.unpair(row)
-        #expect(runner.calls.contains("run config set-backend Gemma4-E4B-4bit --draft "))
+        #expect(runner.calls.contains("run config set-backend --draft  -- Gemma4-E4B-4bit"))
         #expect(models.draft == nil, "read back: no drafter")
-        #expect(pairingVerdicts()["config set-backend Gemma4-E4B-4bit --draft \"\""] == "taken")
+        #expect(pairingVerdicts()["config set-backend --draft \"\" -- Gemma4-E4B-4bit"] == "taken")
     }
 
     @Test("against a binary before the CLI's 53i nothing changes: no draft in a backend's details, its record whole")
@@ -158,7 +160,7 @@ struct DrafterPairingTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("store-list-kinds-registered"))
         runner.reading(["models", "status"], recorded("models-status-kinds-registered"))
-        runner.reading(["models", "info", "Gemma4-E4B-4bit"], recorded("store-info-kinds-backend-vision"))
+        runner.reading(["models", "info", "--", "Gemma4-E4B-4bit"], recorded("store-info-kinds-backend-vision"))
         let models = ModelsViewModel(runner: runner)
         await models.connect(binary: Self.binary)
         await models.select(try #require(models.rows.first { $0.backend == "Gemma4-E4B-4bit" }))

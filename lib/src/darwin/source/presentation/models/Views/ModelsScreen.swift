@@ -88,7 +88,7 @@ public struct ModelsScreen<Downloads: View>: View {
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
-            Text(model.pendingDelete.map { $0.plan.question(running: "apogee models delete \($0.row.name) --yes") } ?? "")
+            Text(model.pendingDelete.map { $0.plan.question(running: "apogee " + Argv.shown(ModelsViewModel.deleteArguments($0.row.name))) } ?? "")
         }
         .confirmationDialog(
             "Remove the backend \(model.removing ?? "")?",
@@ -100,7 +100,8 @@ public struct ModelsScreen<Downloads: View>: View {
             }
             Button("Cancel", role: .cancel) { model.removing = nil }
         } message: {
-            Text("apogee config delete-backend \(model.removing ?? "") -- its config entry goes; the weights stay under Stored weights, ready to register again.")
+            Text("apogee " + (model.removing.map { Argv.shown(ModelsViewModel.removeArguments($0)) } ?? "")
+                + " -- its config entry goes; the weights stay under Stored weights, ready to register again.")
         }
         .sheet(item: $model.editingAdapters) { _ in
             AdaptersSheet(model: model)
@@ -241,6 +242,12 @@ struct DrafterGlyph: View {
 
 /// A model's details: its record, the typed facts where there are some, its
 /// lineage, and what can be done with it.
+/// A name as a line a person types names it last: after `--` when it begins
+/// with a dash, quoted when a shell would split it (`Argv.shown`, GUI M21).
+private func shownName(_ name: String) -> String {
+    Argv.shown(Argv.line([], names: [name]))
+}
+
 struct ModelDetails: View {
     @Bindable var model: ModelsViewModel
     /// Opens the backend's set under Stored weights.
@@ -375,9 +382,9 @@ struct ModelDetails: View {
             }
             Button("Unpair") { Task { await model.unpair(row) } }
                 .disabled(model.working != nil)
-                .help(draft.drafts
-                    ? "apogee config set-backend \(row.backend) --draft \"\" -- the backend answers alone again; the drafter stays under Stored weights"
-                    : "apogee config set-backend \(row.backend) --draft \"\" -- the way out the doctor names: the backend answers alone again")
+                .help("apogee " + Argv.shown(ModelsViewModel.unpairArguments(row.backend)) + (draft.drafts
+                    ? " -- the backend answers alone again; the drafter stays under Stored weights"
+                    : " -- the way out the doctor names: the backend answers alone again"))
         }
     }
 
@@ -392,7 +399,7 @@ struct ModelDetails: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button("Pair a drafter…") { Task { await model.askToPairDrafter(row) } }
                 .disabled(model.working != nil)
-                .help("apogee config set-backend \(row.backend) --draft <a drafter the binary offers it>")
+                .help("apogee config set-backend --draft <a drafter the binary offers it> \(shownName(row.backend))")
         }
     }
 
@@ -473,7 +480,7 @@ struct AdaptersSection: View {
             }
             Button("Edit adapters…") { model.editAdapters(row) }
                 .disabled(model.working != nil || model.adapters == nil)
-                .help("apogee config set-backend \(row.backend) --adapters <path>[:<scale>],… -- each pinned to the weights it runs now")
+                .help("apogee config set-backend --adapters <path>[:<scale>],… \(shownName(row.backend)) -- each pinned to the weights it runs now")
         }
     }
 
@@ -589,7 +596,7 @@ struct PairDrafterSheet: View {
                     }
                 }
                 if let arguments = form.arguments {
-                    Text((["apogee"] + arguments).joined(separator: " "))
+                    Text("apogee " + Argv.shown(arguments))
                         .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -620,6 +627,9 @@ struct RenameModelSheet: View {
         _name = State(initialValue: renaming.name)
     }
 
+    /// The new name as the rename passes it: trimmed, as typed.
+    private var typed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text(renaming.kind == .backend ? "Rename backend" : "Rename model").font(.apogeeHeading)
@@ -630,7 +640,8 @@ struct RenameModelSheet: View {
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Name", text: $name).textFieldStyle(.roundedBorder)
-            Text((["apogee"] + renaming.command + ["…"]).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+            Text("apogee " + Argv.shown(renaming.arguments(to: typed.isEmpty || typed == renaming.name ? "…" : typed)))
+                .font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -639,7 +650,7 @@ struct RenameModelSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(typed.isEmpty)
             }
         }
         .padding(Spacing.xl)

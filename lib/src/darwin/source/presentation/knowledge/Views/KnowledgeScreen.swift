@@ -152,7 +152,8 @@ struct RecordsView: View {
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
-            Text("apogee knowledge delete \(model.pendingDelete?.id ?? "") -- the record and its raw conversation are removed; this can't be undone.")
+            Text("apogee " + (model.pendingDelete.map { Argv.shown(RecordsViewModel.deleteArguments($0)) } ?? "")
+                + " -- the record and its raw conversation are removed; this can't be undone.")
         }
     }
 
@@ -333,7 +334,7 @@ struct CollectionsView: View {
             }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
-            Text("apogee " + (model.pendingDelete?.arguments.joined(separator: " ") ?? "") + " -- this can't be undone.")
+            Text("apogee " + (model.pendingDelete.map { Argv.shown($0.arguments) } ?? "") + " -- this can't be undone.")
         }
     }
 
@@ -492,7 +493,7 @@ struct IngestSheet: View {
             }
             Toggle("Build the collection's graph after (a model reads every chunk)", isOn: $model.ingestForm.graph)
             if let arguments = model.ingestForm.arguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3)
             }
             HStack {
                 Spacer()

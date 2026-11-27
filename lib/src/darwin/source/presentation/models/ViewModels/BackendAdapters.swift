@@ -78,9 +78,16 @@ public struct AdaptersForm: Equatable, Sendable, Identifiable {
         }.joined(separator: ",")
     }
 
-    /// The command, as typed.
+    /// The command: `config set-backend --adapters <value> -- <backend>`,
+    /// the backend after `--` (`Argv`, GUI M21).
     public var arguments: [String] {
-        ["config", "set-backend", backend, "--adapters", value]
+        Argv.line(["config", "set-backend"], options: [.value("--adapters", value)], names: [backend])
+    }
+
+    /// The command as a person types it, `apogee` first: an empty value as
+    /// `""`, the backend once -- with `--` only when it begins with a dash.
+    public var shown: String {
+        "apogee " + Argv.shown(arguments)
     }
 
     /// Adds `path`, at scale 1.

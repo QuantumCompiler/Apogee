@@ -18,11 +18,11 @@ enum ModelsPreview {
     /// holds them (`list`, `status`, and its `details` test's document): two
     /// local backends, a stored pipeline, a cloud API and a subscription.
     static let backendsRunner = PreviewRunner(
-        reads: [
+        reads: afterEnd([
             (["models", "list"], list),
             (["models", "status"], status),
             (["models", "info", "qwen3-8b-Q4KM"], ggufInfo),
-        ],
+        ]),
         // The names `models rename` takes, as the binary completed them over
         // a GGUF family and an MLX model (M2's recording).
         commands: [(["__complete", "models", "rename"], ModelsDocuments.renameNames)])
@@ -47,6 +47,15 @@ enum ModelsPreview {
       "lineage":[{"kind":"quantized","from":"qwen3-8b/gguf/F16","detail":"Q4_K_M","inferred":false,"missing":false},{"kind":"pulled","from":"Qwen/Qwen3-8B","detail":null,"inferred":true,"missing":false}]}}
     """#
 
+    /// `rules`, each `models info <name>` read answered too where the name
+    /// comes after `--`, as the Backends tab reads it (GUI M21); Stored
+    /// weights reads it before `--` still.
+    static func afterEnd(_ rules: [([String], String)]) -> [([String], String)] {
+        rules + rules.compactMap { rule in
+            rule.0.count == 3 && rule.0.starts(with: ["models", "info"]) ? (["models", "info", Argv.endOfOptions, rule.0[2]], rule.1) : nil
+        }
+    }
+
     /// The backends' rows, as `models list` lists them.
     static var rows: [ModelRow] { ModelRow.list(from: ReadDocument(text: list)!) }
 
@@ -70,12 +79,12 @@ enum ModelsPreview {
     /// both pinned; `q4` one whose base was rewritten under it, so the doctor
     /// fails its row and names the promote that mends it; `tuned` none.
     static let adaptersRunner = PreviewRunner(
-        reads: [
+        reads: afterEnd([
             (["models", "list"], ModelsDocuments.adaptersList),
             (["models", "info", "based"], ModelsDocuments.adaptersInfoBased),
             (["models", "info", "q4"], ModelsDocuments.adaptersInfoQ4),
             (["check"], ModelsDocuments.adaptersCheck),
-        ],
+        ]),
         commands: [
             (["config", "get", "backends.based.adapters"], ModelsDocuments.adaptersGet),
             (["config", "get", "backends.q4.adapters"], ModelsDocuments.adaptersGetQ4),
@@ -114,7 +123,7 @@ enum ModelsPreview {
     /// registered); a voice model, its `models info` M1's recording of the same
     /// set. `config scan` answers with its recorded report.
     static let storeRunner = PreviewRunner(
-        reads: [
+        reads: afterEnd([
             (["models", "list"], ModelsDocuments.storeList),
             (["models", "list", "--all"], ModelsDocuments.storeListAll),
             (["models", "info", "llama3.2-1b-Q4KM"], ModelsDocuments.storeInfoBackend),
@@ -124,7 +133,7 @@ enum ModelsPreview {
             (["models", "info", snapshot], ModelsDocuments.storeInfoSnapshot),
             (["models", "info", mlx], ModelsDocuments.storeInfoMLX),
             (["models", "info", voice], ModelsDocuments.storedInfoVoice),
-        ],
+        ]),
         commands: [(["config", "scan"], ModelsDocuments.configScan)])
 
     /// Stored weights over the store, with the snapshots conversions consumed
@@ -211,7 +220,7 @@ enum ModelsPreview {
     /// registers -- the chat, vision and embedding sets, each an `mlx` entry
     /// -- each found through its backend's `models info` and its path's.
     static let kindsRegisteredRunner = PreviewRunner(
-        reads: [
+        reads: afterEnd([
             (["models", "list"], ModelsDocuments.kindsRegisteredList),
             (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
             (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.kindsBackendChat),
@@ -224,7 +233,7 @@ enum ModelsPreview {
             (["models", "info", kindChat], ModelsDocuments.kindsPathChat),
             (["models", "info", kindVision], ModelsDocuments.kindsPathVision),
             (["models", "info", kindEmbedding], ModelsDocuments.kindsPathEmbedding),
-        ])
+        ]))
 
     /// Stored weights over the registered kinds; not connected.
     static func kindsRegisteredStore() -> StoreViewModel {
@@ -264,7 +273,7 @@ enum ModelsPreview {
     /// documents read back after `config set-backend Gemma4-E4B-4bit --draft`.
     static func draftsRunner(paired: Bool) -> PreviewRunner {
         PreviewRunner(
-            reads: [
+            reads: afterEnd([
                 (["models", "list"], ModelsDocuments.draftsList),
                 (["models", "info", drafter], paired ? ModelsDocuments.draftsInfoDrafterPaired : ModelsDocuments.draftsInfoDrafter),
                 (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.draftsBackendBasePaired : ModelsDocuments.draftsBackendBase),
@@ -276,7 +285,7 @@ enum ModelsPreview {
                 (["models", "info", draftBase], ModelsDocuments.draftsSetBase),
                 (["models", "info", "Gemma4-12B/mlx/7a8b9c0d1e2f"], ModelsDocuments.draftsSetWider),
                 (["models", "info", "Qwen3-8B/mlx/1a2b3c4d5e6f"], ModelsDocuments.draftsSetChat),
-            ],
+            ]),
             commands: [
                 (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.draftsCompleteBase),
                 (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.draftsCompleteWider),
@@ -297,7 +306,7 @@ enum ModelsPreview {
     /// same bytes either way.
     static func basePairRunner(paired: Bool) -> PreviewRunner {
         PreviewRunner(
-            reads: [
+            reads: afterEnd([
                 (["models", "list"], ModelsDocuments.basePairList),
                 (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
                 (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.basePairBackendBasePaired : ModelsDocuments.basePairBackendBase),
@@ -305,7 +314,7 @@ enum ModelsPreview {
                 (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.basePairBackendChat),
                 (["models", "info", drafter], ModelsDocuments.basePairDrafter),
                 (["models", "info", drafter12B], ModelsDocuments.basePairDrafterWider),
-            ],
+            ]),
             commands: [
                 (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.basePairCompleteBase),
                 (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.basePairCompleteWider),
@@ -315,20 +324,20 @@ enum ModelsPreview {
     /// The same home with the E4B paired and its drafter's directory then
     /// deleted, its environment holding what the mlx ladder asks before the
     /// draft rung, so the CLI's refusal is the draft's.
-    static let draftGoneRunner = PreviewRunner(reads: [
+    static let draftGoneRunner = PreviewRunner(reads: afterEnd([
         (["models", "list"], ModelsDocuments.draftGoneList),
         (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
         (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftGoneBackend),
-    ])
+    ]))
 
     /// The E4B paired, then its directory's record rewritten as mlx-lm's build
     /// (`chat`, `mlx_lm.convert 4bit`) -- a fake directory standing for a base
     /// converted again as mlx-lm's build, its files unchanged.
-    static let draftRebuiltRunner = PreviewRunner(reads: [
+    static let draftRebuiltRunner = PreviewRunner(reads: afterEnd([
         (["models", "list"], ModelsDocuments.draftRebuiltList),
         (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
         (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftRebuiltBackend),
-    ])
+    ]))
 
     /// Reads the backends, then opens `backend`'s details, as a person does.
     static func showing(_ models: ModelsViewModel, _ backend: String) async {
@@ -529,13 +538,13 @@ enum ModelsPreview {
     /// then deleted, Qwen3 unpaired -- each drafter on its `models list` row,
     /// so the table reads no `models info`; each backend's answers only when
     /// its details open.
-    static let rowsDraftsRunner = PreviewRunner(reads: [
+    static let rowsDraftsRunner = PreviewRunner(reads: afterEnd([
         (["models", "list"], ModelsDocuments.rowsDraftsList),
         (["models", "status"], ModelsDocuments.rowsDraftsStatus),
         (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.rowsDraftsInfoBase),
         (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.rowsDraftsInfoWider),
         (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.rowsDraftsInfoChat),
-    ])
+    ]))
 
     /// The library on a binary dated for the CLI's M32, as the launch's
     /// vocabulary read says it.
@@ -555,7 +564,7 @@ enum ModelsPreview {
                 (["models", "list"], ModelsDocuments.removeList),
                 (["models", "status"], ModelsDocuments.removeStatus),
             ],
-            commands: [(["config", "delete-backend", "Gemma4-12B-4bit"], ModelsDocuments.deleteBackendClears)])
+            commands: [(ModelsViewModel.removeArguments("Gemma4-12B-4bit"), ModelsDocuments.deleteBackendClears)])
     }
 
     /// Reads the backends, asks to remove the 12B -- the default -- and
@@ -572,7 +581,7 @@ enum ModelsPreview {
 
     /// The same bases, Qwen3 the default and the utility role; its weights
     /// deleted from the Backends tab with its backend -- the plan read first,
-    /// then `models delete Qwen3-8B-4bit --yes --and-backends`, which clears
+    /// then `models delete --yes --and-backends -- Qwen3-8B-4bit`, which clears
     /// both roles that named it -- and the list and roles read back.
     static func deleteRolesStore() -> PreviewStore {
         PreviewStore(
@@ -582,7 +591,7 @@ enum ModelsPreview {
             ],
             commands: [
                 (["models", "delete", "Qwen3-8B-4bit"], ModelsDocuments.deleteRolesPlan),
-                (["models", "delete", "Qwen3-8B-4bit", "--yes", "--and-backends"], ModelsDocuments.deleteRolesAndBackends),
+                (ModelsViewModel.deleteArguments("Qwen3-8B-4bit", andBackends: true), ModelsDocuments.deleteRolesAndBackends),
             ])
     }
 
@@ -707,8 +716,8 @@ enum ModelsPreview {
                 (["__complete", "models", "rename"], ModelsDocuments.backendsCompleteRename),
                 (["models", "delete", "Llama3.2-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanBackend),
                 (["models", "delete", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanGemma),
-                (["models", "delete", "Gemma3-1B-Instruct-Q4KM", "--yes"], ModelsDocuments.deleteKept),
-                (["models", "delete", "Llama3.2-1B-Instruct-Q4KM", "--yes", "--and-backends"], ModelsDocuments.deleteAndBackends),
+                (ModelsViewModel.deleteArguments("Gemma3-1B-Instruct-Q4KM"), ModelsDocuments.deleteKept),
+                (ModelsViewModel.deleteArguments("Llama3.2-1B-Instruct-Q4KM", andBackends: true), ModelsDocuments.deleteAndBackends),
             ])
     }
 

@@ -62,7 +62,7 @@ struct RoleLinesNarratedTests {
         runner.reading(["models", "list"], recorded("remove-list-after"))
         runner.reading(["models", "status"], recorded("remove-status-after"))
         try await model.confirmRemove(#require(model.removing))
-        #expect(runner.calls.contains("run config delete-backend Gemma4-12B-4bit"))
+        #expect(runner.calls.contains("run config delete-backend -- Gemma4-12B-4bit"))
         let narration = try #require(model.narration, "the cleared role, shown")
         #expect(narration.title == "Removed the backend Gemma4-12B-4bit")
         #expect(narration.lines == [
@@ -89,11 +89,11 @@ struct RoleLinesNarratedTests {
     func deleteWithBackendsSaysTheRoles() async throws {
         let (model, runner) = await backends(list: "delete-roles-list", status: "delete-roles-status")
         runner.commanding(["models", "delete", "Qwen3-8B-4bit"], .done(stdout: recorded("delete-roles-plan", "txt")))
-        runner.commanding(["models", "delete", "Qwen3-8B-4bit", "--yes"], .done(stdout: recorded("delete-roles-and-backends", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--and-backends", "--", "Qwen3-8B-4bit"], .done(stdout: recorded("delete-roles-and-backends", "txt")))
         await model.askToDelete(try #require(model.rows.first { $0.backend == "Qwen3-8B-4bit" }))
         #expect(model.offersAndBackends, "the plan names the backend")
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: true)
-        #expect(runner.calls.contains("run models delete Qwen3-8B-4bit --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes --and-backends -- Qwen3-8B-4bit"))
         let narration = try #require(model.narration)
         #expect(narration.lines == lines(recorded("delete-roles-and-backends", "txt")))
         #expect(narration.lines.suffix(2) == [
@@ -109,7 +109,7 @@ struct RoleLinesNarratedTests {
         runner.commanding(["config", "set-default-embedding"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: refused))
         let embedding = try #require(model.roles.first { $0.role == "embedding" })
         await model.assign(embedding, to: "Qwen3-8B-4bit")
-        #expect(runner.calls.contains("run config set-default-embedding Qwen3-8B-4bit"))
+        #expect(runner.calls.contains("run config set-default-embedding -- Qwen3-8B-4bit"))
         #expect(model.failure?.hasPrefix("apogee config: backend 'Qwen3-8B-4bit' cannot take a role:") == true)
         #expect(model.failure?.contains("point the chat role at it ('apogee config set-default Qwen3-8B-4bit') and the embedding role at a backend that embeds") == true)
     }
