@@ -224,8 +224,8 @@ HttpResponse admin_capture_knowledge(const AdminConfigContext& context, Handler&
         // The clerk, the overrides, the normalisation, the validation -- and
         // then nothing: the HTTP twin of `capture --dry-run`. The draft lives
         // with the client from here.
-        const commands::CaptureResult result =
-            commands::draft_capture(plane.harness(), *loaded.config, inputs, clerk);
+        const commands::CaptureResult result = commands::draft_capture(
+            plane.harness(), *loaded.config, context.config_path, inputs, clerk);
         if (!result.ok()) {
             return failure(result);
         }
@@ -281,7 +281,7 @@ HttpResponse admin_create_knowledge(const AdminConfigContext& context, Handler& 
         return loaded.failure;
     }
     const commands::StoreDecision decision =
-        commands::decide_store(plane.harness(), *loaded.config, db, retriever);
+        commands::decide_store(plane.harness(), *loaded.config, context.config_path, db, retriever);
     const commands::CaptureResult result = commands::store_record(
         plane.harness(), *loaded.config, context.config_path, std::move(record), raw, decision);
     if (!result.ok()) {

@@ -18,6 +18,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 #include "machine/json_reporter.h"
+#include "operations/collections.h"
 #include "operations/read_views.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
@@ -171,6 +172,15 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         spec.save_filename = flags->save_name;
         spec.save_subdir = flags->save_subdir;
         spec.mcp = flags->mcp;
+        // A new collection is one the config can hold (CLI-M46): refused
+        // before any file, unless a store or the config already names it.
+        if (!spec.collection.empty()) {
+            if (const std::string refused =
+                    collection_reference_error(spec.collection, config_path_for(context));
+                !refused.empty()) {
+                fail(refused);
+            }
+        }
         scaffold::AgentResult result;
         try {
             result = scaffold::create_agent(config_path_for(context), spec);

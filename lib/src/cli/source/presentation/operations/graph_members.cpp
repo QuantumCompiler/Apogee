@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include "contracts/collection_name.h"
+#include "contracts/config_yaml.h"
 #include "graph/code_languages.h"
 #include "operations/collections.h"
 #include "operations/graph_sources.h"
@@ -73,6 +74,14 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
         out.error = "'" + std::string{name} + "' is not a plain graph name";
         return out;
     }
+    // A new graph's name keeps the collections' margin (CLI-M46): its
+    // database and build lock sit beside each other under `graphs/`.
+    if (config.find_graph(name) == nullptr && name.size() > harness::kNewCollectionNameMax) {
+        out.error = "graph name '" + std::string{name} + "' is " + std::to_string(name.size()) +
+                    " bytes -- a new name is at most " +
+                    std::to_string(harness::kNewCollectionNameMax);
+        return out;
+    }
     if (graph.collections.empty() && graph.sources.empty()) {
         out.error =
             "at least one member collection or source tree is required (--collections a,b, or "
@@ -82,6 +91,13 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
     for (const std::string& collection : graph.collections) {
         if (harness::name_leaves_folder(collection)) {
             out.error = "'" + collection + "' is not a plain collection name";
+            return out;
+        }
+        // A new member is one the config can hold (CLI-M46), unless a store
+        // or the config already names it: an ingest could never register it.
+        if (const std::string refused = new_collection_error(collection, &config);
+            !refused.empty()) {
+            out.error = "member " + refused;
             return out;
         }
     }
@@ -139,8 +155,19 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
         return out;
     }
     for (const std::string& collection : graph.collections) {
-        if (config.find_embedding(collection) == nullptr &&
-            !file_exists(collection_path(collection))) {
+        if (config.find_embedding(collection) != nullptr ||
+            file_exists(collection_path(collection))) {
+            continue;
+        }
+        // "Registers it" only of a name the config can hold (CLI-M46): one the
+        // config refers to already but cannot hold is written without an entry.
+        if (!harness::yaml_plain_key(collection)) {
+            const std::string held = harness::collection_create_error(collection, {});
+            out.warnings.push_back("member collection '" + collection +
+                                   "' is not configured yet, and an ingest writes it without an "
+                                   "entry: " +
+                                   held);
+        } else {
             out.warnings.push_back("member collection '" + collection +
                                    "' is not configured yet (ingest registers it on first use)");
         }

@@ -14,6 +14,7 @@
 #include "contracts/assets.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "operations/collections.h"
 #include "operations/read_views.h"
 #include "scaffold/agent.h"
 
@@ -115,6 +116,15 @@ HttpResponse scaffold_agent(const AdminConfigContext& context, const HttpRequest
     }
     if (spec.name.empty()) {
         return error_response(400, "name is required");
+    }
+    // A new collection is one the config can hold (CLI-M46), as the CLI's
+    // door refuses it: before any file, unless a store or the config names it.
+    if (!spec.collection.empty()) {
+        if (const std::string refused =
+                commands::collection_reference_error(spec.collection, context.config_path);
+            !refused.empty()) {
+            return error_response(400, refused);
+        }
     }
     scaffold::AgentResult result;
     try {

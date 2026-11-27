@@ -391,3 +391,33 @@ TEST_CASE("config migrate and config upgrade complete as verbs", "[commands][con
     CHECK(apogee::commands::completion_candidates(request, apogee::harness::Config{}, tree) ==
           std::vector<std::string>{"upgrade"});
 }
+
+TEST_CASE("an ingest whose registration fails after the write says what it left, and --graph stops",
+          "[commands][config][embed][M46]") {
+    // CLI-M46: the plan's dry run takes the certain refusals before the
+    // write; what reaches the registration after it -- here a lock held past
+    // the editor's wait -- keeps the never-fatal answer, in one line naming
+    // the store left on disk, and --graph does not go on to the graph.
+    const CliHome home{kYaml};
+    const std::filesystem::path docs = home.home() / "docs";
+    std::filesystem::create_directories(docs);
+    std::ofstream{docs / "a.md", std::ios::binary} << "the zarquon protocol requires widgets\n";
+    const std::string before = home.config_text();
+    Run run;
+    {
+        const apogee::platform::FileLock held =
+            apogee::harness::lock_config_file(home.config_path());
+        run.code = home.run({"embed", "ingest", "--graph", "-q", "notes", docs.string()}, &run.out,
+                            &run.err);
+    }
+    CHECK(run.code == 0);
+    CHECK(std::filesystem::exists(home.home() / "embeddings" / "notes.db"));
+    CHECK(home.config_text() == before);
+    INFO(run.err);
+    CHECK(std::ranges::count(run.err, '\n') == 1);
+    CHECK(run.err.starts_with("apogee embed: could not register 'notes'"));
+    CHECK(run.err.find((home.home() / "embeddings" / "notes.db").string()) != std::string::npos);
+    CHECK(run.err.find("--graph was not run") != std::string::npos);
+    CHECK(run.out.find("Building") == std::string::npos);
+    CHECK(run.out.find("could not register") == std::string::npos);
+}

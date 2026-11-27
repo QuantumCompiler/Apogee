@@ -4676,9 +4676,9 @@ One of those needed a second attempt: the first "leak into history" mutation cha
 | `auto_rag` arity *(open call, default taken)* | **One collection**, a top-level key beside `status_mode` and `color` | Several would mean merging incomparable score scales, which is `vector-hybrid-rerank`'s problem. |
 | `--rag ""` | **The off switch for one run**, distinct from no flag | A key that cannot be overridden per invocation is a key people stop using. `flag_given` is therefore a separate input from `flag_value.empty()` — an absent flag falls through to the config, a present-but-empty one does not. |
 | When `auto_rag` is read | **At turn build, from the file**, on every chat turn | So an edit mid-session takes effect on the next question like every other config value. `RagSettings` holds a *path*, not a value. An unreadable config costs that turn its `auto_rag` and says so; it never ends the turn. |
-| Registration failure | **Reported, never fatal** | The corpus is already on disk. Telling a user their ingest failed because their config could not be edited would be a lie about what happened. |
+| Registration failure | **Reported, never fatal** | The corpus is already on disk. Telling a user their ingest failed because their config could not be edited would be a lie about what happened. **Revised 2026-11-27** ([CLI-M46](#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written)): the policy is for trouble after the write -- a lock held past the wait, a raced edit. A refusal certain before the write (a new name the config cannot hold, a layout its editor refuses) is asked first, by a dry run of the edit, and refuses the write. |
 | A setter for `auto_rag` | **None**; it is hand-edited like `status_mode` and `color` | The template documents it commented-out, which is the documented flow for every other top-level key. A subcommand can come when something needs to set it programmatically. |
-| Registered-vs-exists | **Registration is a convenience, not a requirement** | A collection works the moment its file exists, and `auto_rag` may name one that was never registered. Retrieval never depended on config and does not start to. |
+| Registered-vs-exists | **Registration is a convenience, not a requirement** | A collection works the moment its file exists, and `auto_rag` may name one that was never registered. Retrieval never depended on config and does not start to. **Revised 2026-11-27** ([CLI-M46](#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written)): retrieval still reads an unregistered store, but the entry now carries what a collection keeps -- its chunking, and the `graph.enabled` its own graph's expansion needs -- so a new collection is one the config can register. |
 
 **Guardrails, each mutation-tested (17 mutations, all caught).** Eleven judged by the unit suite: an empty flag falling through to the config; the config beating the flag; injection from config not announced; the retriever not named; a new entry landing below trailing comments; no blank separator; the entry's fields in another order; delete leaving the separator behind; colliding names merged silently; `auto_rag` parsed but dropped; `find_embedding` never finding. Six judged by the two exec-style tests: a known collection re-registered on every ingest; the entry's chunk size ignored on re-ingest; `complete` and then `chat` unable to tell `--rag ""` from no flag; `chat` reading `auto_rag` once at startup instead of every turn; `complete` injecting silently.
 
@@ -4728,6 +4728,72 @@ Every input was local (a flag, the config, an admin-token call), so it was a dat
   - **`knowledge.db`'s load-time check is left as it is** (any `..`, `/` or `\` refused at load), outside this item's files and ADR 0006's load contract. So `--db a..b` reads while `knowledge.db: a..b` still fails the load, and a Windows root name there is the load check's to take up.
 
 **Verified.** The full gate, `lib/scripts/cicd.sh --test`. A Windows root name is proven by CI's Windows rows.
+
+### 2026-11-27 — `a-collection-the-config-cannot-hold-is-refused-before-it-is-written` (maintenance item M46): a collection the config cannot hold is refused before it is written
+
+**Why.** CLI-M42's probes, then a sandboxed investigation, two skeptics and a critic (2026-11-22): `apogee embed ingest "my notes" <file>` wrote `embeddings/my notes.db`, then printed `could not register 'my notes' in config` and exited 0.
+- **The store chains checked a new name with the path rule only.** The config's add rule (`yaml_plain_key`, 55f) refused it afterwards, a refusal certain before the first byte. Of 30 probed names, 23 left a half-made store.
+- **The half-made store lost what registration carries**: its chunking (7 chunks, then 1 on a flagless re-ingest) and its graph for retrieval (`graph build` built it, refused both edits, exited 0, and `--rag` never expanded through it). Every re-ingest repeated the error.
+- **The knowledge store and `graph build` did the same**, over the CLI and HTTP: `POST /v1/admin/knowledge {"db":"kn x"}` answered 201 with `"registered":false`, after the clerk ran. The graph build job's `config_warning` named the wrong edit, and the graph toggle answered 404 for an entry the config held.
+- **The adds took such names too**: `config add-graph team --collections "my notes,notes"` said "ingest registers it on first use", which no ingest could. A 245-byte name failed after creating a 0-byte `.db`, and `check`'s remedies printed `apogee embed ingest fresh one <path>`, which ingests `fresh`.
+`models pull`'s `check_registrations` had the cure ("refused now by the one edit that will add it, run on the text and kept nowhere"); the store chains never adopted it.
+
+**What was built**
+
+- [x] **One create rule, in contracts** (`contracts/collection_name.h/.cpp`). `collection_create_error(name, existing)` asks CLI-M45's read rule first, then the config's add rule less `/` (letters, digits, `_`, `-` and `.`, first neither `-` nor `.`, not a null word), a 200-byte cap (`kNewCollectionNameMax`), the Windows device names on every platform (`con`, `prn`, `aux`, `nul`, `com1`-`com9`, `lpt1`-`lpt9`, case-folded, before any `.`), and a refusal for a name that differs only in case from an entry or a store, naming it. `collection_references(config)` is every collection name the config refers to: its entries, `auto_rag`, `knowledge.db`, agents' collections and named graphs' members. `quoted_collection_name` says a name on one line, its control characters escaped.
+- [x] **One plan and one registration step** (`operations/collections.h/.cpp`).
+  - A name is **new** when no store exists at its spelling and the config refers to no name spelled that way (`collection_is_new`).
+  - `plan_collection_write` runs before any file, clerk call, embedding or extraction. It asks the read rule, then the create rule for a new name. It then dry-runs, on the config's text read unlocked and kept nowhere (57f), only the edits today's conditions run: the entry when there is none, and `graph.enabled` when it is not already true. Which edits those are is decided from that text, not the caller's older copy.
+  - It answers go, refuse (`...; nothing was written`), or go-with-a-note. A note is for a store on disk, or a name the config refers to, that the config cannot register. It names what the store cannot keep (its chunking or settings, its graph's expansion) and, when the name is the reason, the way out: move the store to a plain name and re-ingest (for a knowledge store, capture with `--db`, or set `knowledge.db`).
+  - `register_collection` runs the planned edits under the lock after the write. Its failure stays never fatal, in one line naming the edit that failed, the store left on disk, and why.
+  - `new_collection_error` and `collection_reference_error` are the same rule for a door that adds a reference.
+- [x] **Every store chain asks it, CLI and HTTP.**
+  - `embed ingest`: the plan follows the chunking, before the embedder or the store. A refusal is exit 1, the last stderr line. A note goes to stderr in place of today's `could not register`. A registration that fails after the write leaves `--graph` unrun and says so.
+  - `graph build` over a collection: the note is said on stderr before extraction, and the doomed edits are skipped, exit 0. The chained build of an ingest's `--graph` does not repeat the ingest's note.
+  - The HTTP build job plans before it starts. Its `config_warning` is the note, or the failed edit's words (`could not register` or `could not set graph.enabled`).
+  - `PUT /v1/admin/embeddings/{id}/graph` answers 404 only for an absent entry, and 400 for every other refusal of the editor, a held lock included.
+  - The knowledge core plans in `decide_store`. A new name the config cannot hold is the decision's refusal, so `knowledge capture`, chat's `/capture`, `auto_capture`, `POST /v1/admin/knowledge` and `/capture` refuse before the clerk and before any record, archive or store (exit 1, or 400). A referenced `knowledge.db` is written with one note.
+- [x] **The adds that name a collection.** `validate_named_graph` (`config add-graph`, `graph build --source`, `POST`/`PUT /v1/admin/graphs`) refuses a new member the create rule refuses, unless a store or a reference exists. It says "ingest registers it on first use" only of a name the config can hold, and caps a new graph name at 200 bytes. `agents create --collection` and `POST`/`PUT /v1/admin/agents` refuse a new collection the same way, before any file.
+- [x] **`check`'s two `embed ingest` remedies** pass the name through `check.cpp`'s own `shell_word`: `apogee embed ingest "fresh one" <path>`.
+- [x] **Tests**, each failing on the old code unless named a guard:
+  - the rule's table, the cap, the device names, the fold and the one-line quoting (`contracts/collection_name_test`);
+  - the plan's outcomes (`operations/collections_test`, new): new, existing and referenced names; a config present and absent; a 4-space YAML config's dry-run refusal; hand-written entries; a case variant on either filesystem; an older config copy; a post-write failure injected by holding `config.json.lock` with a short wait;
+  - `config_lifecycle_test`: an ingest under a held lock, one line, `--graph` not run;
+  - `admin_graph_test`: a build over an unregistrable store warning of its registration; the toggle's 404, a held lock's 400 and a quoted key's 400;
+  - `admin_knowledge_test` (400, no clerk call, no store or archive; a referenced `knowledge.db` noted once), `knowledge_test`, `admin_agents_test`, `admin_graphs_test`, `graph_members_test` and `check_test`;
+  - on the real binary, in `cli.config_lifecycle`:
+    - `my notes`, `a@b`, `café`, `null`, `.x` and `-x` refused after `--`, the last stderr line naming the rule and that nothing was written, no store, the config byte-identical;
+    - a 245-byte name refused before any file, and a 244-byte store registering (guard);
+    - an existing `my notes` read, deleted and written into with one note;
+    - hand-written JSONC entries re-chunked by their own entry and rebuilt with no edit (guards), and `graph build a@b` told before extraction;
+    - a graph member `my notes` ingested with one note, `complete --rag` expanding through `[Knowledge graph: team]`;
+    - `add-graph` and `agents create` refusing `new one`;
+    - a case variant on either filesystem.
+- [x] **Docs.**
+  - CLAUDE.md's codebase map (`collection_name.h`, `operations/`).
+  - DEVELOPER.md's `collection_name`, `collections`, `embed` and test rows.
+  - [http-api.md](../../reference/cli/http-api.md): the knowledge routes' 400, the build job's `config_warning`, and the toggle's 404 and 400.
+  - The two dated revisions of the lexical-embeddings decisions above. SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - the config's rule wins, and the editor does not learn quoted keys;
+  - an existing or referenced name is written into, with one note;
+  - `graph build` over one builds, says so first, and skips the doomed edits;
+  - a 200-byte cap for new collection and graph names;
+  - "new" means no store at this spelling and no reference, and a fold onto another spelling is refused;
+  - no `embed rename`.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **The 244-byte guard is a store already on disk**, read against the 200-byte cap on new names. It runs on POSIX only, since a Windows path that long needs the long-path setting.
+  - **`check` quotes through its existing `shell_word`** rather than a second helper. CLI-M48's renderer replaces both, names holding `"`, `$` or a backtick among its cases.
+  - **The agent doors ask the reference rule themselves**, not `scaffold::create_agent`. "New" needs the store folder and the config, which the Business layer cannot reach through `operations`.
+  - **The edits are decided from the file as the plan reads it**, not the caller's loaded copy (found by the review).
+  - **A refusal or a note is one line whatever the name.** The move to a plain name is named only when the add rule is the reason, and a knowledge store's way out is its own (found by the review).
+  - **`embed ingest --graph` says the registration once** (found by the review).
+  - **The device names** are those the item lists, judged before the first `.`.
+  - **The toggle's 404** is decided by the config's entry before the edit.
+
+**Verified.** The full gate, `lib/scripts/cicd.sh --test`; clang-format; Homebrew clang 22 and MinGW g++ over every changed source, no warning of ours. Windows' device names and a long path there are proven by CI's Windows rows.
 
 ---
 

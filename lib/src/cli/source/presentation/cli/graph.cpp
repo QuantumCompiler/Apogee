@@ -37,6 +37,7 @@
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
+#include "operations/collections.h"
 #include "operations/graph_dedupe_pass.h"
 #include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
@@ -947,6 +948,22 @@ void build_collection(const harness::Config& config, const std::filesystem::path
                   "' has no chunks to extract from -- ingest documents first with 'apogee embed "
                   "ingest'");
     }
+    // The edits the first build makes -- the entry when there is none,
+    // graph.enabled when it is not already true -- dry-run before extraction
+    // (CLI-M46): one the config would refuse is said now, on stderr, and never
+    // attempted after the build. The store is on disk, so the build goes on.
+    CollectionWrite write;
+    write.name = target.name;
+    write.config = &config;
+    write.config_path = config_path;
+    write.enable_graph = true;
+    const CollectionWritePlan plan = plan_collection_write(write);
+    if (plan.refused()) {
+        fail_user(plan.words);
+    }
+    if (!plan.words.empty() && !request.registration_said) {
+        std::cerr << "apogee graph: " << plan.words << "\n";
+    }
     const Providers providers{config, config_path};
     const Generation generation =
         resolve_generation(config, providers.harness, request.model, target, "graph build");
@@ -977,30 +994,18 @@ void build_collection(const harness::Config& config, const std::filesystem::path
     }
     // The first successful build records that the graph exists, through the
     // one path that writes a config file -- the same edit the admin twin
-    // makes. Reported and never fatal: the graph is already built.
-    if (target.entry == nullptr) {
-        try {
-            harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::append_embedding(content, target.name, harness::EmbeddingConfig{},
-                                                 false);
-            });
-            std::cout << "registered '" << target.name << "' in " << config_path.string() << "\n";
-        } catch (const std::exception& e) {
-            std::cerr << "apogee graph: could not register '" << target.name << "' in config -- "
-                      << e.what() << "\n";
-        }
+    // makes, only those the plan's dry run took. Reported and never fatal:
+    // the graph is already built.
+    const CollectionRegistration done = register_collection(write, plan);
+    if (done.registered) {
+        std::cout << "registered '" << target.name << "' in " << config_path.string() << "\n";
     }
-    if (target.entry == nullptr || !target.entry->graph.enabled) {
-        try {
-            harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::set_embedding_graph_enabled(content, target.name, true);
-            });
-            std::cout << "graph.enabled set on '" << target.name
-                      << "' -- retrieval expands through it from now on\n";
-        } catch (const std::exception& e) {
-            std::cerr << "apogee graph: could not set graph.enabled on '" << target.name << "' -- "
-                      << e.what() << "\n";
-        }
+    if (done.enabled) {
+        std::cout << "graph.enabled set on '" << target.name
+                  << "' -- retrieval expands through it from now on\n";
+    }
+    if (!done.ok()) {
+        std::cerr << "apogee graph: " << done.error << "\n";
     }
 }
 

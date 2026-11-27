@@ -735,6 +735,38 @@ TEST_CASE("check fails an auto_rag or an agent collection that is a path, naming
     CHECK(row_with(plain, "auto_rag") == nullptr);
 }
 
+TEST_CASE("check's ingest remedies quote the collection's name for the shell",
+          "[commands][check][embeddings][M46]") {
+    // CLI-M46: `run: apogee embed ingest fresh one <path>` would ingest a
+    // collection named `fresh`. Quoted as check quotes every word a person
+    // copies (`shell_word`, 53a); a plain name is written as before.
+    const Install install;
+    const CheckReport report = run_checks(inputs_with_config(
+        install,
+        "backends:\n  mock:\n    type: mock\n"
+        "agents:\n  spaced:\n    prompts: [prompts/security-review.txt]\n"
+        "    collection: fresh one\n  plain:\n    prompts: [prompts/security-review.txt]\n"
+        "    collection: fresh\n"
+        "graphs:\n  work:\n    collections: [\"it's here\"]\n"));
+    bool spaced = false;
+    bool plain = false;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.name == "agent: spaced" && row.detail.find("does not exist") != std::string::npos) {
+            spaced = true;
+            CHECK(row.remedy.find("apogee embed ingest \"fresh one\" <path>") != std::string::npos);
+        }
+        if (row.name == "agent: plain" && row.detail.find("does not exist") != std::string::npos) {
+            plain = true;
+            CHECK(row.remedy.find("apogee embed ingest fresh <path>") != std::string::npos);
+        }
+    }
+    CHECK(spaced);
+    CHECK(plain);
+    const apogee::commands::CheckRow* work = row_with(report, "named graph: work");
+    REQUIRE(work != nullptr);
+    CHECK(work->remedy.find("apogee embed ingest \"it's here\" <path>") != std::string::npos);
+}
+
 TEST_CASE(
     "the doctor's Graph section: an unconfigured extractor fails, an enabled graph that is "
     "not built warns, a built one reports its shape",

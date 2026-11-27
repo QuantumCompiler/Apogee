@@ -456,18 +456,30 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
     const graph::EntityEmbedder entity_embedder = resolve_embedder(plane, *config, target);
     const graph::EmbedFn embed = entity_embedder.embed;
     const std::string embed_model = entity_embedder.model;
-    const bool already_enabled = target.entry != nullptr && target.entry->graph.enabled;
-    const bool registered = target.entry != nullptr;
+    // The edits a collection's first build makes, dry-run before the job
+    // starts (CLI-M46), as the CLI's build does: one the config would refuse
+    // is never attempted, and the job's warning names it.
+    commands::CollectionWrite write;
+    write.name = target.name;
+    write.config = &*config;
+    write.config_path = context.config_path;
+    write.enable_graph = !target.is_named();
+    commands::CollectionWritePlan plan;
+    if (!target.is_named()) {
+        plan = commands::plan_collection_write(write);
+        if (plan.refused()) {
+            return error_response(400, plan.words);
+        }
+    }
+    write.config = nullptr;  // the job outlives the request's config
 
     const JobRegistry::Started started =
         jobs.start(std::string{kBuildJobKind}, target.job_fields(generation->key));
     const std::string job_id = started.id;
-    const std::filesystem::path config_path = context.config_path;
     const std::string backend = generation->key;
     const std::string kg_model = generation->kg_model;
     workers.run(started.cancellation, [&plane, &jobs, job_id, target, members, backend, kg_model,
-                                       embed, embed_model, force, limit, already_enabled,
-                                       registered, config_path,
+                                       embed, embed_model, force, limit, write, plan,
                                        cancellation = started.cancellation] {
         try {
             graph::BuildOptions options;
@@ -519,27 +531,21 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
                 fields["code"] = std::move(*code);
             }
             // A collection's first successful build records that the graph
-            // exists, through the same editor the CLI uses -- byte-identical.
-            // A failure is a warning on the result: the graph is already
-            // built. A named graph has nothing to enable: its entry is the
-            // enablement.
+            // exists, through the same editor the CLI uses -- byte-identical,
+            // and only the edits the plan's dry run took. A failure, or an
+            // edit the dry run refused, is a warning on the result naming the
+            // edit: the graph is already built. A named graph has nothing to
+            // enable: its entry is the enablement.
             if (!target.is_named()) {
-                try {
-                    if (!registered) {
-                        harness::edit_config_file(config_path, [&](std::string_view content) {
-                            return harness::append_embedding(content, target.name,
-                                                             harness::EmbeddingConfig{}, false);
-                        });
-                    }
-                    if (!already_enabled) {
-                        harness::edit_config_file(config_path, [&](std::string_view content) {
-                            return harness::set_embedding_graph_enabled(content, target.name, true);
-                        });
-                        fields["enabled"] = true;
-                    }
-                } catch (const std::exception& e) {
-                    fields["config_warning"] =
-                        std::string{"could not set graph.enabled: "} + e.what();
+                const commands::CollectionRegistration done =
+                    commands::register_collection(write, plan);
+                if (done.enabled) {
+                    fields["enabled"] = true;
+                }
+                if (!plan.words.empty()) {
+                    fields["config_warning"] = plan.words;
+                } else if (!done.ok()) {
+                    fields["config_warning"] = done.error;
                 }
             }
             jobs.finish(job_id, std::move(fields));
@@ -768,12 +774,25 @@ HttpResponse admin_set_graph_enabled(const AdminConfigContext& context, std::str
         return error_response(400, "enabled (a boolean) is required");
     }
     const bool enabled = it->get<bool>();
+    // An absent entry is a 404; every other refusal of the editor -- a name it
+    // cannot edit in a hand-written entry, a lock held past the wait -- is the
+    // edit's 400 (CLI-M46), never "not found" for an entry the config holds.
+    HttpResponse unreadable;
+    const std::optional<harness::Config> config = load_now(context, unreadable);
+    if (!config.has_value()) {
+        return unreadable;
+    }
+    if (config->find_embedding(collection) == nullptr) {
+        return error_response(404,
+                              "collection '" + std::string{collection} + "' not found in config",
+                              kNotFoundError);
+    }
     try {
         harness::edit_config_file(context.config_path, [&](std::string_view content) {
             return harness::set_embedding_graph_enabled(content, collection, enabled);
         });
     } catch (const harness::ConfigEditError& e) {
-        return error_response(404, e.what(), kNotFoundError);
+        return error_response(400, e.what());
     } catch (const harness::ConfigError& e) {
         return error_response(500, std::string{"the config cannot be read: "} + e.what(),
                               kConfigError);

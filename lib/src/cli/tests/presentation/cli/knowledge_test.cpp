@@ -799,3 +799,39 @@ TEST_CASE(
     CHECK(err.find("no record 'kr-nope'") != std::string::npos);
     CHECK(fixture.run({"knowledge", "reindex", "-m", "nope"}, &out, &err) == 1);
 }
+
+TEST_CASE("a capture into a new collection the config cannot hold is refused before the clerk",
+          "[commands][knowledge][M46]") {
+    // CLI-M46: the record, the raw archive and the store were written, then
+    // the config refused the name and the capture exited 0.
+    const Fixture fixture;
+    const Footprint before = fixture.footprint();
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"knowledge", "capture", "--db", "kn x", "Ada: drop it? Bob: yes"}, &out,
+                      &err) == 1);
+    const std::string last = err.substr(err.rfind('\n', err.size() - 2) + 1);
+    CHECK(last.starts_with("apogee knowledge: "));
+    CHECK(last.find("a name is letters, digits") != std::string::npos);
+    CHECK(last.find("nothing was written") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.collection("kn x")));
+    CHECK(fixture.footprint() == before);
+}
+
+TEST_CASE("a capture into a knowledge.db the config cannot register is written, and said once",
+          "[commands][knowledge][M46]") {
+    // A hand-set `knowledge.db: team notes` is a name the config refers to:
+    // not new, so the record is stored and one note says what it lacks.
+    const Fixture fixture{"knowledge:\n  db: team notes\n"};
+    const std::string config_before = bytes(fixture.config_path);
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"knowledge", "capture", "Ada: drop it? Bob: yes"}, &out, &err) == 0);
+    CHECK(std::filesystem::exists(fixture.collection("team notes")));
+    CHECK(err.find("apogee knowledge: 'team notes' cannot be registered in the config") !=
+          std::string::npos);
+    CHECK(std::count(err.begin(), err.end(), '\n') == 1);
+    CHECK(out.find("cannot be registered") == std::string::npos);
+    CHECK(out.find("registered '") == std::string::npos);
+    CHECK(bytes(fixture.config_path) == config_before);
+}

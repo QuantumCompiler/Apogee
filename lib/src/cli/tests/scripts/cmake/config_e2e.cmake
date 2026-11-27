@@ -565,6 +565,194 @@ file(REMOVE "${APOGEE_WORK_DIR}/foreign.db" "${APOGEE_WORK_DIR}/embeddings/my no
      "${APOGEE_WORK_DIR}/embeddings/a..b.db" "${APOGEE_WORK_DIR}/prompts/pathed.txt")
 file(WRITE "${CONFIG_FILE}" "${WITH_AUTO_RAG}")
 
+# --- CLI-M46: a collection the config can't hold is refused before it is written
+# `embed ingest "my notes"` wrote the store, then the config refused the name
+# and the command exited 0: 23 of 30 probed names left a store that forgot
+# its chunking and its graph. A new name is now asked the create rule and a
+# dry run of its registration first; a store already on disk, or a name the
+# config refers to, goes ahead with one note on stderr.
+set(M46_BASE "${WITH_AUTO_RAG}")
+set(EMBEDDINGS "${APOGEE_WORK_DIR}/embeddings")
+# The last line of stderr: what the Mac app shows as a run's failure.
+function(last_stderr_line out)
+    string(STRIP "${APOGEE_ERR}" stripped)
+    string(REGEX REPLACE ".*\n" "" last "${stripped}")
+    set(${out} "${last}" PARENT_SCOPE)
+endfunction()
+function(expect_config_is expected what)
+    file(READ "${CONFIG_FILE}" now)
+    if(NOT now STREQUAL expected)
+        message(FATAL_ERROR "${what} changed the config:\n${now}")
+    endif()
+endfunction()
+# Exactly one line on stderr, in the verb's voice, and none of it on stdout.
+function(expect_one_note prefix what)
+    string(STRIP "${APOGEE_ERR}" stripped)
+    if(stripped MATCHES "\n" OR NOT stripped MATCHES "^${prefix}")
+        message(FATAL_ERROR "${what}: expected one '${prefix}' line on stderr, got:\n${APOGEE_ERR}")
+    endif()
+    if(APOGEE_OUT MATCHES "cannot be registered|${prefix}")
+        message(FATAL_ERROR "${what}: the note reached stdout:\n${APOGEE_OUT}")
+    endif()
+endfunction()
+
+foreach(odd "my notes" "a@b" "café" "null" ".x" "-x")
+    apogee_run(1 embed ingest -- "${odd}" "${CORPUS_DIR}")
+    last_stderr_line(last)
+    if(NOT last MATCHES "^apogee embed: .*a name is letters, digits.*nothing was written$")
+        message(FATAL_ERROR "embed ingest '${odd}' did not refuse in the create rule's words:\n${APOGEE_ERR}")
+    endif()
+    if(EXISTS "${EMBEDDINGS}/${odd}.db")
+        message(FATAL_ERROR "a refused ingest of '${odd}' wrote its store")
+    endif()
+    expect_config_is("${M46_BASE}" "a refused ingest of '${odd}'")
+endforeach()
+
+# The length cap: 245 bytes is refused before any file exists. A 244-byte
+# store already on disk still reads, and registers (POSIX: Windows paths
+# that long need the long-path setting).
+string(REPEAT "n" 245 LONG_245)
+apogee_run(1 embed ingest -- "${LONG_245}" "${CORPUS_DIR}")
+last_stderr_line(last)
+if(NOT last MATCHES "at most 200; nothing was written$")
+    message(FATAL_ERROR "a 245-byte name was not refused by the cap:\n${APOGEE_ERR}")
+endif()
+file(GLOB long_files "${EMBEDDINGS}/nnnnnnnnnnnnnnnnnnnn*")
+if(long_files)
+    message(FATAL_ERROR "a refused 245-byte name left files: ${long_files}")
+endif()
+if(NOT CMAKE_HOST_WIN32)
+    string(REPEAT "n" 244 LONG_244)
+    file(COPY_FILE "${EMBEDDINGS}/notes.db" "${EMBEDDINGS}/${LONG_244}.db")
+    apogee_run(0 embed ingest -- "${LONG_244}" "${CORPUS_DIR}")
+    if(NOT APOGEE_OUT MATCHES "registered '${LONG_244}'")
+        message(FATAL_ERROR "a 244-byte store on disk did not register:\n${APOGEE_OUT}${APOGEE_ERR}")
+    endif()
+    apogee_run(0 embed query -- "${LONG_244}" zarquon)
+    file(REMOVE "${EMBEDDINGS}/${LONG_244}.db")
+    file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
+endif()
+
+# A store already on disk under such a name reads, deletes, and takes an
+# ingest with one note, the config untouched.
+file(COPY_FILE "${EMBEDDINGS}/notes.db" "${EMBEDDINGS}/my notes.db")
+apogee_run(0 embed list)
+if(NOT APOGEE_OUT MATCHES "my notes")
+    message(FATAL_ERROR "embed list lost a store the config cannot hold:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info -- "my notes")
+apogee_run(0 embed query -- "my notes" zarquon)
+apogee_run(0 embed delete --yes -- "my notes")
+if(EXISTS "${EMBEDDINGS}/my notes.db")
+    message(FATAL_ERROR "embed delete --yes left the store")
+endif()
+file(COPY_FILE "${EMBEDDINGS}/notes.db" "${EMBEDDINGS}/my notes.db")
+apogee_run(0 embed ingest -- "my notes" "${CORPUS_DIR}")
+expect_one_note("apogee embed: " "an ingest into an existing 'my notes'")
+if(NOT APOGEE_ERR MATCHES "chunking" OR NOT APOGEE_ERR MATCHES "plain name and re-ingest")
+    message(FATAL_ERROR "the note did not name what is lost and the way out:\n${APOGEE_ERR}")
+endif()
+expect_config_is("${M46_BASE}" "an ingest into an existing 'my notes'")
+# --graph on it: the build that follows does not say it again.
+apogee_run(0 embed ingest --graph -q -- "my notes" "${CORPUS_DIR}")
+string(REGEX MATCHALL "cannot be registered" said "${APOGEE_ERR}")
+list(LENGTH said said_count)
+if(NOT said_count EQUAL 1)
+    message(FATAL_ERROR "embed ingest --graph said the registration ${said_count} times:\n${APOGEE_ERR}")
+endif()
+expect_config_is("${M46_BASE}" "embed ingest --graph into an existing 'my notes'")
+file(REMOVE "${EMBEDDINGS}/my notes.db")
+
+# Hand-written JSONC entries: an enabled one is written into, re-chunked by
+# its own entry and rebuilt with no edit; one whose graph the editor cannot
+# enable is told so before extraction, and builds.
+set(EXTRACTOR_SCRIPT "${APOGEE_WORK_DIR}/extractor.json")
+file(WRITE "${EXTRACTOR_SCRIPT}"
+    "{\"turns\": [{\"text\": \"{\\\"entities\\\": [{\\\"name\\\": \\\"Zarquon\\\", \\\"type\\\": \\\"system\\\", \\\"description\\\": \\\"requires widgets\\\"}, {\\\"name\\\": \\\"Widget\\\", \\\"type\\\": \\\"system\\\", \\\"description\\\": \\\"each one logged\\\"}], \\\"relations\\\": [{\\\"source\\\": \\\"Zarquon\\\", \\\"target\\\": \\\"Widget\\\", \\\"relation\\\": \\\"requires\\\", \\\"description\\\": \\\"\\\"}]}\"}]}\n")
+set(ECHO_SCRIPT "${APOGEE_WORK_DIR}/echo.json")
+file(WRITE "${ECHO_SCRIPT}" "{\"turns\": [{\"text\": \"SYSTEM WAS: {{system}}\"}]}\n")
+apogee_run(0 config add-backend extractor --type mock --model-path "${EXTRACTOR_SCRIPT}")
+apogee_run(0 config add-backend echo --type mock --model-path "${ECHO_SCRIPT}")
+file(READ "${CONFIG_FILE}" M46_BACKENDS)
+apogee_run(0 embed ingest -q --chunk-size 64 --chunk-overlap 8 plain64 "${CORPUS_DIR}")
+string(REGEX MATCH "([0-9]+) chunk\\(s\\)" _ "${APOGEE_OUT}")
+set(CHUNKS_64 "${CMAKE_MATCH_1}")
+string(REPLACE "\n{\n"
+    "\n{\n  \"embeddings\": {\"my notes\": {\"chunk_size\": 64, \"chunk_overlap\": 8, \"graph\": {\"enabled\": true}}, \"a@b\": {\"chunk_size\": 64}},\n"
+    HAND_WRITTEN "${M46_BACKENDS}")
+file(WRITE "${CONFIG_FILE}" "${HAND_WRITTEN}")
+apogee_run(0 embed ingest -- "my notes" "${CORPUS_DIR}")
+string(REGEX MATCH "([0-9]+) chunk\\(s\\)" _ "${APOGEE_OUT}")
+if(NOT CMAKE_MATCH_1 STREQUAL CHUNKS_64 OR NOT APOGEE_ERR STREQUAL "")
+    message(FATAL_ERROR "a hand-written entry's chunking was not read, or it complained "
+        "(${CMAKE_MATCH_1} vs ${CHUNKS_64}):\n${APOGEE_OUT}${APOGEE_ERR}")
+endif()
+apogee_run(0 graph build "my notes" -m extractor -q)
+expect_config_is("${HAND_WRITTEN}" "a rebuild of an enabled hand-written entry")
+if(NOT APOGEE_ERR STREQUAL "")
+    message(FATAL_ERROR "a rebuild of an enabled hand-written entry complained:\n${APOGEE_ERR}")
+endif()
+file(COPY_FILE "${EMBEDDINGS}/notes.db" "${EMBEDDINGS}/a@b.db")
+apogee_run(0 graph build a@b -m extractor -q)
+expect_one_note("apogee graph: " "graph build a@b")
+if(NOT APOGEE_ERR MATCHES "graph.enabled cannot be set on 'a@b'" OR APOGEE_ERR MATCHES "could not set")
+    message(FATAL_ERROR "graph build a@b did not say the graph cannot be enabled, once:\n${APOGEE_ERR}")
+endif()
+if(NOT APOGEE_OUT MATCHES "Graph build complete")
+    message(FATAL_ERROR "graph build a@b did not build:\n${APOGEE_OUT}")
+endif()
+expect_config_is("${HAND_WRITTEN}" "graph build a@b")
+file(REMOVE "${EMBEDDINGS}/my notes.db" "${EMBEDDINGS}/a@b.db" "${EMBEDDINGS}/plain64.db")
+
+# A name the config refers to -- a named graph's member -- is written with
+# one note, and retrieval expands through the graph that names it.
+string(REPLACE "\n{\n"
+    "\n{\n  \"graphs\": {\"team\": {\"collections\": [\"notes\", \"my notes\"], \"extract_backend\": \"extractor\"}},\n"
+    REFERENCED "${M46_BACKENDS}")
+file(WRITE "${CONFIG_FILE}" "${REFERENCED}")
+apogee_run(0 embed ingest --graph -q -- "my notes" "${CORPUS_DIR}")
+expect_one_note("apogee embed: " "embed ingest --graph into a referenced 'my notes'")
+expect_config_is("${REFERENCED}" "embed ingest --graph into a referenced 'my notes'")
+apogee_run(0 complete -m echo --rag "my notes" --retriever lexical "zarquon protocol widgets")
+if(NOT APOGEE_OUT MATCHES "\\[Knowledge graph: team\\]")
+    message(FATAL_ERROR "retrieval did not expand through the graph naming 'my notes':\n${APOGEE_OUT}${APOGEE_ERR}")
+endif()
+file(REMOVE "${EMBEDDINGS}/my notes.db" "${EMBEDDINGS}/graphs/team.db")
+file(WRITE "${CONFIG_FILE}" "${M46_BACKENDS}")
+
+# A new reference at add is held to the create rule too.
+apogee_run(1 config add-graph g --collections "new one")
+if(NOT APOGEE_ERR MATCHES "member collection name 'new one'.*a name is letters, digits")
+    message(FATAL_ERROR "add-graph took a member the config cannot hold:\n${APOGEE_ERR}")
+endif()
+expect_config_is("${M46_BACKENDS}" "a refused add-graph")
+apogee_run(1 agents create h --collection "new one")
+if(NOT APOGEE_ERR MATCHES "a name is letters, digits")
+    message(FATAL_ERROR "agents create took a collection the config cannot hold:\n${APOGEE_ERR}")
+endif()
+expect_config_is("${M46_BACKENDS}" "a refused agents create")
+if(EXISTS "${APOGEE_WORK_DIR}/prompts/h.txt")
+    message(FATAL_ERROR "a refused agents create wrote the agent's prompt")
+endif()
+
+# Case variants: on a folding filesystem `Notes` is the `notes` store, as
+# before; on a case-sensitive one it is a new name refused, naming `notes`.
+file(GLOB DB_BEFORE "${EMBEDDINGS}/*.db")
+if(EXISTS "${EMBEDDINGS}/NOTES.db")
+    apogee_run(0 embed ingest Notes "${CORPUS_DIR}")
+else()
+    apogee_run(1 embed ingest Notes "${CORPUS_DIR}")
+    last_stderr_line(last)
+    if(NOT last MATCHES "differs only in case from the collection 'notes'")
+        message(FATAL_ERROR "a case variant was not refused naming 'notes':\n${APOGEE_ERR}")
+    endif()
+endif()
+file(GLOB DB_AFTER "${EMBEDDINGS}/*.db")
+if(NOT DB_AFTER STREQUAL DB_BEFORE)
+    message(FATAL_ERROR "a case variant made a second store: ${DB_AFTER}")
+endif()
+file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
+
 # --- vector and hybrid retrieval through the real binary ------------------
 # A mock embedder from config (a mock entry with an embedding_model) stands in
 # for a real one: free, deterministic, and -- the point -- a second one with a

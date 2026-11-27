@@ -20,6 +20,7 @@
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/layout.h"
 #include "events/bus.h"
 #include "graph/build.h"
 #include "graph/extract.h"
@@ -340,6 +341,53 @@ TEST_CASE(
     CHECK(fixture.create({{"intent", "x"}, {"status", "perhaps"}}).status == 400);
     CHECK(fixture.create({{"intent", "x"}, {"retriever", "vector"}}).status == 400);
     CHECK(store.list().size() == 2);
+}
+
+TEST_CASE("a new collection the config cannot hold is refused before the clerk and the store",
+          "[httpserver][admin][knowledge][M46]") {
+    // CLI-M46: `{"db": "kn x"}` answered 201 with "registered": false after
+    // the clerk ran and wrote `kn x.db`, which the config then refused.
+    Fixture fixture;
+    const std::string before = bytes(fixture.config_path);
+    const std::filesystem::path raw_dir = apogee::harness::knowledge_raw_dir();
+    for (const std::string db : {"kn x", "a@b", "-x"}) {
+        INFO(db);
+        HttpResponse response =
+            fixture.capture({{"raw", "Ada: drop the button? Bob: yes"}, {"db", db}});
+        CHECK(response.status == 400);
+        const std::string message = parsed(response)["error"]["message"].get<std::string>();
+        CHECK(message.find("a name is letters, digits") != std::string::npos);
+        CHECK(message.find("nothing was written") != std::string::npos);
+        nlohmann::json record = nlohmann::json::parse(kRecord);
+        record["db"] = db;
+        response = fixture.create(record);
+        CHECK(response.status == 400);
+        CHECK(!std::filesystem::exists(fixture.home.path() / "embeddings" / (db + ".db")));
+    }
+    CHECK(fixture.provider->requests().empty());
+    CHECK(bytes(fixture.config_path) == before);
+    std::error_code code;
+    CHECK((!std::filesystem::exists(raw_dir, code) || std::filesystem::is_empty(raw_dir, code)));
+}
+
+TEST_CASE("a collection the config refers to but cannot register is written, and said once",
+          "[httpserver][admin][knowledge][M46]") {
+    Fixture fixture;
+    {
+        std::ofstream out{fixture.config_path, std::ios::app | std::ios::binary};
+        out << "knowledge:\n  db: team notes\n";
+    }
+    const std::string before = bytes(fixture.config_path);
+    const HttpResponse response = fixture.capture({{"raw", "Ada: drop the button? Bob: yes"}});
+    REQUIRE(response.status == 201);
+    const nlohmann::json body = parsed(response);
+    CHECK(body["db"] == "team notes");
+    CHECK(body["registered"] == false);
+    REQUIRE(body.contains("notes"));
+    REQUIRE(body["notes"].size() == 1);
+    CHECK(body["notes"][0].get<std::string>().find("cannot be registered") != std::string::npos);
+    CHECK(std::filesystem::exists(fixture.home.path() / "embeddings" / "team notes.db"));
+    CHECK(bytes(fixture.config_path) == before);
 }
 
 TEST_CASE("a record captured over HTTP is the record the CLI captures from the same conversation",

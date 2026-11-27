@@ -51,3 +51,62 @@ TEST_CASE("a member written as a path is never opened; a plain one is",
     CHECK(bytes_of(foreign) == before);
     CHECK_FALSE(std::filesystem::exists(root.path() / "foreign.db-wal"));
 }
+
+TEST_CASE("a new member the config cannot hold is refused; one it refers to is said honestly",
+          "[operations][graph][collection_name][M46]") {
+    // CLI-M46: `config add-graph team --collections "my notes,notes"` said
+    // "ingest registers it on first use" of a name no ingest could register.
+    const apogee::testing::TempDir root{"m46-members-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard home{"APOGEE_HOME", (root.path() / "home").string()};
+    apogee::harness::Config config;
+    apogee::harness::NamedGraphConfig graph;
+
+    graph.collections = {"new one"};
+    apogee::commands::NamedGraphValidation result =
+        apogee::commands::validate_named_graph(config, "team", graph);
+    CHECK(result.error.find("member collection name 'new one'") != std::string::npos);
+    CHECK(result.error.find("a name is letters, digits") != std::string::npos);
+
+    graph.collections = {"fresh"};
+    result = apogee::commands::validate_named_graph(config, "team", graph);
+    CHECK(result.error.empty());
+    REQUIRE(result.warnings.size() == 1);
+    CHECK(result.warnings.front().find("ingest registers it on first use") != std::string::npos);
+
+    // A name the config already refers to is not new: kept, and said as it is.
+    apogee::harness::AgentConfig agent;
+    agent.collection = "new one";
+    config.agents["h"] = agent;
+    graph.collections = {"new one"};
+    result = apogee::commands::validate_named_graph(config, "team", graph);
+    CHECK(result.error.empty());
+    REQUIRE(result.warnings.size() == 1);
+    CHECK(result.warnings.front().find("without an entry") != std::string::npos);
+    CHECK(result.warnings.front().find("registers it") == std::string::npos);
+
+    // A store already on disk is a member, whatever its name.
+    {
+        apogee::embedstore::Store store{apogee::commands::collection_path("on disk")};
+        store.replace_source("a.md", {"the hound"});
+    }
+    graph.collections = {"on disk"};
+    result = apogee::commands::validate_named_graph(apogee::harness::Config{}, "team", graph);
+    CHECK(result.error.empty());
+    CHECK(result.warnings.empty());
+}
+
+TEST_CASE("a new graph's name is at most 200 bytes; an existing one keeps its own",
+          "[operations][graph][M46]") {
+    const apogee::testing::TempDir root{"m46-graph-name-" + std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard home{"APOGEE_HOME", (root.path() / "home").string()};
+    apogee::harness::Config config;
+    apogee::harness::NamedGraphConfig graph;
+    graph.collections = {"notes"};
+    CHECK(
+        apogee::commands::validate_named_graph(config, std::string(200, 'g'), graph).error.empty());
+    const std::string long_name(201, 'g');
+    CHECK(apogee::commands::validate_named_graph(config, long_name, graph)
+              .error.find("at most 200") != std::string::npos);
+    config.graphs.emplace_back(long_name, graph);
+    CHECK(apogee::commands::validate_named_graph(config, long_name, graph).error.empty());
+}

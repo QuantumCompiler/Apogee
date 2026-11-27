@@ -406,6 +406,62 @@ TEST_CASE("PUT /embeddings/{name}/graph is the twin of the auto-enable write",
         apogee::harness::load_config(fixture.config_path).find_embedding("notes")->graph.enabled);
 }
 
+TEST_CASE("PUT /embeddings/{name}/graph answers 404 only for an absent entry",
+          "[httpserver][admin][graph][enabled][M46]") {
+    // CLI-M46: every editor refusal was a 404, though the entry was there --
+    // a lock held past the wait, a hand-written key the editor cannot edit.
+    Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                    true,
+                    false,
+                    "embeddings:\n  notes:\n    chunk_size: 512\n"};
+    const std::string before = bytes(fixture.config_path);
+    CHECK(fixture.enable("ghost", nlohmann::json{{"enabled", true}}).status == 404);
+    SECTION("a lock held past the editor's wait") {
+        const apogee::platform::FileLock held =
+            apogee::harness::lock_config_file(fixture.config_path);
+        const HttpResponse response = fixture.enable("notes", nlohmann::json{{"enabled", true}});
+        CHECK(response.status == 400);
+        CHECK(parsed(response)["error"]["message"].get<std::string>().find("lock") !=
+              std::string::npos);
+        CHECK(bytes(fixture.config_path) == before);
+    }
+    SECTION("a hand-written key the line editor does not edit") {
+        std::ofstream{fixture.config_path, std::ios::binary}
+            << "models:\n  default: mock\nbackends:\n  mock:\n    type: mock\n"
+            << "embeddings:\n  \"my notes\":\n    chunk_size: 512\n";
+        const std::string written = bytes(fixture.config_path);
+        REQUIRE(apogee::harness::load_config(fixture.config_path).find_embedding("my notes") !=
+                nullptr);
+        const HttpResponse response = fixture.enable("my notes", nlohmann::json{{"enabled", true}});
+        CHECK(response.status == 400);
+        CHECK(bytes(fixture.config_path) == written);
+    }
+}
+
+TEST_CASE("a build over a store the config cannot register warns, naming the registration",
+          "[httpserver][admin][graph][build][M46]") {
+    Fixture fixture;
+    {
+        Store store{fixture.home.path() / "embeddings" / "my notes.db"};
+        store.replace_source("a.md", {"Atlas collects readings from the field probes."});
+    }
+    const std::string before = bytes(fixture.config_path);
+    const HttpResponse response = fixture.build("my notes");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord done =
+        fixture.wait(parsed(response)["job_id"].get<std::string>());
+    INFO(done.error);
+    CHECK(done.status == JobStatus::Succeeded);
+    CHECK(done.result["nodes_upserted"] == 2);
+    REQUIRE(done.result.contains("config_warning"));
+    const std::string warning = done.result["config_warning"].get<std::string>();
+    INFO(warning);
+    CHECK(warning.find("cannot be registered") != std::string::npos);
+    CHECK(warning.find("retrieval won't expand") != std::string::npos);
+    CHECK_FALSE(done.result.contains("enabled"));
+    CHECK(bytes(fixture.config_path) == before);
+}
+
 TEST_CASE("the graph routes sit behind the gate and dispatch through the mux",
           "[httpserver][admin][graph][mux]") {
     Fixture fixture;

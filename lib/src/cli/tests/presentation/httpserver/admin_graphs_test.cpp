@@ -167,6 +167,23 @@ TEST_CASE("POST refuses what the CLI refuses with a 400, and an existing name wi
     CHECK(post(nlohmann::json{{"name", "Work"}, {"collections", {"docs"}}}).status == 409);
 }
 
+TEST_CASE("POST refuses a new member the config cannot hold, and a new name over 200 bytes",
+          "[httpserver][admin][graphs][refusals][M46]") {
+    // CLI-M46, mode parity with `config add-graph`: one rule decides both.
+    const Fixture fixture;
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const auto post = [&](const nlohmann::json& body) {
+        return admin_create_graph(fixture.context(), with_body("POST", body));
+    };
+    const HttpResponse spaced = post(nlohmann::json{{"name", "g"}, {"collections", {"new one"}}});
+    CHECK(spaced.status == 400);
+    CHECK(parsed(spaced)["error"]["message"].get<std::string>().find(
+              "member collection name 'new one'") != std::string::npos);
+    CHECK(post(nlohmann::json{{"name", std::string(201, 'g')}, {"collections", {"docs"}}}).status ==
+          400);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+}
+
 TEST_CASE("PUT replaces the entry in place and DELETE removes it, leaving the database",
           "[httpserver][admin][graphs][put][delete]") {
     const Fixture fixture;

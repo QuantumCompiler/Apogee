@@ -500,7 +500,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         if (flags->dry_run) {
             // The clerk and every override, exactly as a real run -- and then
             // nothing: no chunk, no raw file, no config edit.
-            const CaptureResult result = draft_capture(harness, config, inputs, clerk);
+            const CaptureResult result = draft_capture(harness, config, config_path, inputs, clerk);
             if (!result.ok()) {
                 deliver_failure(result);
             }

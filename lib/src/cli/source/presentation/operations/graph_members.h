@@ -40,7 +40,10 @@ struct GraphMembers {
 /// `extract_backend` when one is named, sane knobs; since 27k, source trees
 /// absolute and distinctly named, and only vendored languages. Unknown
 /// members and missing trees are warnings, not errors -- ingest registers
-/// collections on first use. A non-empty `error` means the entry is refused.
+/// collections on first use -- except a new member the config cannot hold
+/// (CLI-M46: no store, no other reference, refused by the create rule), and
+/// since CLI-M46 a new graph's name is at most 200 bytes. A non-empty `error`
+/// means the entry is refused.
 struct NamedGraphValidation {
     std::string error;
     std::vector<std::string> warnings;

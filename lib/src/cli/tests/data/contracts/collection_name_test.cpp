@@ -2,8 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "contracts/config.h"
 
 using apogee::harness::collection_read_error;
 using apogee::harness::name_leaves_folder;
@@ -54,4 +58,114 @@ TEST_CASE("a root name refuses only where the platform has one", "[harness][coll
     CHECK_FALSE(name_leaves_folder("C:notes"));
     CHECK(collection_read_error("D:x").empty());
 #endif
+}
+
+// The create rule (CLI-M46): which names may be CREATED -- the read rule,
+// the config's add rule less `/`, a 200-byte cap, no Windows device name,
+// and no name that differs only in case from one that exists. Every name
+// it takes is one the config can register; the read rule above still
+// reads every store on disk.
+
+using apogee::harness::collection_create_error;
+using apogee::harness::collection_references;
+using apogee::harness::kNewCollectionNameMax;
+using apogee::harness::quoted_collection_name;
+
+TEST_CASE("a new name is one the config can hold, in the rule's words",
+          "[harness][collection_name][M46]") {
+    for (const std::string name :
+         {"notes", "true", "x.db", "a..b", "my_notes", "my-notes", "Notes2", "a.b-c_d"}) {
+        INFO(name);
+        CHECK(collection_create_error(name, {}).empty());
+    }
+    for (const std::string name :
+         {"my notes", "a@b", "café",  "null",   "Null", "NULL", "~",    ".x",
+          "-x",       ":",   "#",     "\"q\"",  "[x]",  ",",    "a\tb", "a\nb",
+          ".",        "-",   " lead", "trail ", "*",    "{x}",  "|"}) {
+        INFO(name);
+        const std::string refused = collection_create_error(name, {});
+        CHECK(refused.find("a name is letters, digits, '_', '-' and '.'") != std::string::npos);
+        CHECK(refused.find(quoted_collection_name(name)) != std::string::npos);
+        CHECK(refused.find('\n') == std::string::npos);
+    }
+}
+
+TEST_CASE("a name is said on one line, its control characters escaped",
+          "[harness][collection_name][M46]") {
+    CHECK(quoted_collection_name("my notes") == "'my notes'");
+    CHECK(quoted_collection_name("a\nb") == "'a\\nb'");
+    CHECK(quoted_collection_name("a\tb\r") == "'a\\tb\\r'");
+    CHECK(quoted_collection_name(std::string{"a\x01\x7f"}) == "'a\\x01\\x7f'");
+    CHECK(quoted_collection_name("café") == "'café'");
+}
+
+TEST_CASE("the read rule comes first, in its own words", "[harness][collection_name][M46]") {
+    CHECK(collection_create_error("", {}) == "a collection needs a name");
+    for (const std::string name : {"..", "a/b", "a\\b", "../x"}) {
+        INFO(name);
+        CHECK(collection_create_error(name, {}) == "'" + name + "' is not a plain collection name");
+    }
+}
+
+TEST_CASE("a new name is at most 200 bytes", "[harness][collection_name][M46]") {
+    CHECK(kNewCollectionNameMax == 200);
+    CHECK(collection_create_error(std::string(200, 'n'), {}).empty());
+    for (const std::size_t length : {std::size_t{201}, std::size_t{244}, std::size_t{245}}) {
+        const std::string refused = collection_create_error(std::string(length, 'n'), {});
+        INFO(refused);
+        CHECK(refused.find(std::to_string(length) + " bytes") != std::string::npos);
+        CHECK(refused.find("at most 200") != std::string::npos);
+    }
+}
+
+TEST_CASE("a Windows device name is refused on every platform, folded",
+          "[harness][collection_name][M46]") {
+    for (const std::string name : {"con", "CON", "prn", "aux", "Nul", "com1", "COM9", "lpt1",
+                                   "lpt9", "con.x", "nul.notes"}) {
+        INFO(name);
+        const std::string refused = collection_create_error(name, {});
+        CHECK(refused.find("device name") != std::string::npos);
+    }
+    for (const std::string name :
+         {"console", "com", "com10", "lpt0", "com0", "auxiliary", "x.con"}) {
+        INFO(name);
+        CHECK(collection_create_error(name, {}).empty());
+    }
+}
+
+TEST_CASE("a new name that folds onto one that exists is refused, naming it",
+          "[harness][collection_name][M46]") {
+    const std::vector<std::string> existing{"notes", "Team"};
+    const std::string refused = collection_create_error("Notes", existing);
+    CHECK(refused.find("'Notes'") != std::string::npos);
+    CHECK(refused.find("'notes'") != std::string::npos);
+    CHECK(refused.find("only in case") != std::string::npos);
+    CHECK_FALSE(collection_create_error("team", existing).empty());
+    // The same spelling is not a fold: it is that collection.
+    CHECK(collection_create_error("notes", existing).empty());
+    CHECK(collection_create_error("other", existing).empty());
+}
+
+TEST_CASE("the names a config refers to are every collection key it holds",
+          "[harness][collection_name][M46]") {
+    apogee::harness::Config config;
+    config.embeddings["my notes"] = {};
+    config.auto_rag = "auto one";
+    config.knowledge.db = "team notes";
+    apogee::harness::AgentConfig agent;
+    agent.collection = "agent one";
+    config.agents["h"] = agent;
+    apogee::harness::NamedGraphConfig graph;
+    graph.collections = {"notes", "graph one"};
+    config.graphs.emplace_back("team", graph);
+    const std::vector<std::string> names = collection_references(config);
+    for (const std::string name :
+         {"my notes", "auto one", "team notes", "agent one", "notes", "graph one"}) {
+        INFO(name);
+        CHECK(std::ranges::find(names, name) != names.end());
+    }
+    // The default knowledge collection is a name the rule takes anyway, and
+    // an unset key refers to nothing.
+    CHECK(std::ranges::find(names, std::string{}) == names.end());
+    CHECK(collection_references(apogee::harness::Config{}).empty());
 }

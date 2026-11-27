@@ -83,6 +83,9 @@ struct GraphBuildRequest {
     std::vector<std::string> languages;
     /// Name every skipped file, however many.
     bool show_skipped = false;
+    /// The run already said why the collection cannot be registered -- an
+    /// ingest's `--graph` -- so the build does not say it again (CLI-M46).
+    bool registration_said = false;
 };
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request);

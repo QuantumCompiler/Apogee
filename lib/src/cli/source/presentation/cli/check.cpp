@@ -1785,7 +1785,7 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
                    !std::filesystem::exists(collection_path(agent.collection), code)) {
             add(report, Status::Warn, "Agents", label,
                 "collection '" + agent.collection + "' does not exist; the agent runs without it",
-                "apogee embed ingest " + agent.collection + " <path>");
+                "apogee embed ingest " + shell_word(agent.collection) + " <path>");
             clean = false;
         }
         for (const std::string& server : agent.mcp) {
@@ -2162,7 +2162,7 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
                 !std::filesystem::exists(member_db, code)) {
                 add(report, Status::Fail, "Graph", label,
                     "member collection '" + member + "' does not exist",
-                    "apogee embed ingest " + member +
+                    "apogee embed ingest " + shell_word(member) +
                         " <path>, or remove it from the graph's collections");
                 members_ok = false;
             }

@@ -232,3 +232,28 @@ TEST_CASE("put edits in place with force implied; delete removes the entry and, 
     CHECK(admin_delete_agent(fixture.context(), "merge-request", keep).status == 404);
     CHECK(apogee::harness::load_config(fixture.http_config).agents.empty());
 }
+
+TEST_CASE(
+    "a new collection the config cannot hold is refused at POST and PUT, as the CLI refuses it",
+    "[httpserver][admin][agents][parity][M46]") {
+    // CLI-M46: an agent naming a new collection the config cannot hold would
+    // send every ingest into a store that could never be registered.
+    const Fixture fixture;
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse posted = admin_create_agent(
+        fixture.context(),
+        with_body("POST", nlohmann::json{{"name", "reader"}, {"collection", "new one"}}));
+    CHECK(posted.status == 400);
+    CHECK(parsed(posted)["error"]["message"].get<std::string>().find("a name is letters, digits") !=
+          std::string::npos);
+    const HttpResponse put = admin_put_agent(
+        fixture.context(), "reader", with_body("PUT", nlohmann::json{{"collection", "a@b"}}));
+    CHECK(put.status == 400);
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+    CHECK_FALSE(std::filesystem::exists(fixture.home.path() / "http" / "prompts" / "reader.txt"));
+    // A plain new name is taken, as before.
+    CHECK(admin_create_agent(
+              fixture.context(),
+              with_body("POST", nlohmann::json{{"name", "reader"}, {"collection", "new_one"}}))
+              .status == 201);
+}

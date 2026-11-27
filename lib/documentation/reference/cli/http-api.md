@@ -544,7 +544,9 @@ so the result is byte-identical to the CLI's. `201` with the view plus
 `prompt_path` and `schema_path`; `409` (`type: conflict`) when the agent or
 its files exist without `force`; `400` on an invalid name, policy, format, or
 body, and on a `collection` written as a path (CLI-M45), in the CLI's words
-(`'../x' is not a plain collection name`), before any file is written. No restart is needed: `analyze` reads the config on every run.
+(`'../x' is not a plain collection name`), or a new collection the config
+cannot hold, with no store on disk and no other reference in the config
+(CLI-M46), before any file is written. No restart is needed: `analyze` reads the config on every run.
 
 ### `GET /v1/admin/agents/{id}`
 
@@ -652,7 +654,13 @@ same spend rule), and `draft` (below).
 `registered` says the collection was added under `embeddings:` by this call
 (the first capture into a new name); `note` carries the resolver's fallback
 reason when there is one, `notes` anything non-fatal (a `supersedes` target
-that does not exist). When the server's suite validates extraction (27g --
+that does not exist, a collection already on disk or named by the config
+that the config cannot register, a registration that failed after the
+record was stored). **A new collection the config cannot hold is a `400`
+before the clerk runs** (CLI-M46), nothing stored: the words name the rule
+-- letters, digits, `_`, `-` and `.`, first neither `-` nor `.`, at most
+200 bytes, no Windows device name, no name differing only in case from
+another -- and say nothing was written. When the server's suite validates extraction (27g --
 `validate: {extraction: on}`), `validation` says what its verifier made of
 the record, checked against `raw` before any override: `{result, verifier,
 objection?, revisions, verifier_calls, insisted?, notes?}`, `result` one of
@@ -662,7 +670,7 @@ clerk kept -- never silently overridden) or `unchecked` (the verifier could
 not decide; `notes` say why). The raw conversation is archived on the server
 under `knowledge/raw/` and never returned. `400` on a missing `raw`, a bad status,
 a bad retriever, or a resolver refusal (an explicit `vector` with no embedding
-backend); `501` when the server serves no generation backend; `502` when the
+backend, a new collection the config cannot hold); `501` when the server serves no generation backend; `502` when the
 clerk failed to produce a conforming record after its one retry.
 
 **`"draft": true`** runs the clerk, applies the overrides, normalises and
@@ -807,9 +815,15 @@ progress names the member being extracted), and the finished counts at
 `mentions_added`, `entities_embedded`, `record_nodes`, `supersedes_edges`,
 `supersedes_skipped`, `limit_hit`, an `embed_error` when entity vectors
 stopped early; for a collection `collection` and `enabled: true` the first
-time the build set `graph.enabled` on its `embeddings:` entry -- through the
-same config editor the CLI uses, byte-identical; a `config_warning` when it
-could not; for a named graph `graph` and `collections`, and nothing enabled:
+time the build set `graph.enabled` on its `embeddings:` entry -- registering
+the collection first when it has no entry, through the same config editor the
+CLI uses, byte-identical, and only the edits a dry run on the config's text
+took before the job started (CLI-M46); a `config_warning` naming the edit
+when one could not land -- `'<name>' cannot be registered in the config ...`
+or `graph.enabled cannot be set on '<name>' ...` for a store the config cannot
+register (the edit is not attempted, and retrieval does not expand through
+that graph), `could not register ...` or `could not set graph.enabled ...` for
+trouble after the build; for a named graph `graph` and `collections`, and nothing enabled:
 the entry is the enablement). `DELETE /v1/admin/jobs/{id}` cancels between
 chunks; what finished stays, and the next build resumes. **A named graph's
 build holds its build lock** (57t) -- a `FileLock` on `<graph db>.build.lock`
@@ -1068,8 +1082,10 @@ other byte kept -- and answers `{"collection", "enabled"}`. What gates
 retrieval-time expansion through a collection's own graph on every surface.
 (A built named graph covering the collection takes precedence regardless;
 the block is left as it is and resumes the moment the collection leaves.)
-`404` when the entry does not exist under `embeddings:`; `400` for a body
-without the boolean.
+`404` only when the entry does not exist under `embeddings:`; `400` for a
+body without the boolean, and for any refusal of the edit itself -- an entry
+the config holds that the line editor cannot edit (a quoted YAML key), or the
+config's lock held past the editor's wait (CLI-M46).
 
 ### `GET /v1/admin/graphs`
 
@@ -1097,8 +1113,11 @@ named like a member collection, or an unknown language is a `400`. The CLI's rul
 least one member collection or source tree, **no collision with a collection name** (resolution is
 graphs-first, so a collision would make the collection's own graph
 unreachable), a configured `extract_backend` when one is named, knobs in
-range. A member that is not configured yet is a `warnings` entry, never a
-refusal -- ingest registers collections on first use. `201 {"data": {…},
+range. A member that is not configured yet is a `warnings` entry -- ingest
+registers collections on first use -- unless it is a new collection the config
+cannot hold, with no store on disk and no other reference in the config: that
+is a `400` in the CLI's words (CLI-M46), as is a new graph name over 200
+bytes. `201 {"data": {…},
 "warnings"?: […]}`; `409` when the name exists -- `PUT` replaces.
 
 ### `GET /v1/admin/graphs/{id}`
@@ -1249,7 +1268,8 @@ fields at the top level (`intent` required; `status` must be canonical;
 attribution}`, `supersedes` as the client has them), plus optionally `raw`
 (archived beside it), `db` and `retriever` as above. An `id` and `timestamp`
 are assigned when absent and kept when present. `201` with the same envelope
-as capture; `400` when the record does not validate. It needs no generation
+as capture; `400` when the record does not validate, or when `db` is a new
+collection the config cannot hold (CLI-M46, as capture: nothing stored). It needs no generation
 backend: only the embedder, when the retriever resolves to `vector`.
 
 ### `GET /v1/admin/datasets`

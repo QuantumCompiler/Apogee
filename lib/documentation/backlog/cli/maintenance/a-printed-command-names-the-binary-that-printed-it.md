@@ -281,7 +281,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 - **Relates to:**
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose remedy aside started the seam;
   - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), which keeps the house-voice lines this item leaves alone;
-  - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose two `check` remedies M48 builds and this item names the binary in;
+  - [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27), whose two `check` remedies M48 builds and this item names the binary in;
   - [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), which says a run's notes as `apogee <verb>: …`, the voice this item doesn't touch;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)) and darwin 7c ([every place against a server](../../darwin/v0.2.4/every-place-against-a-server.md)), where a server's printed commands are read elsewhere;
   - [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0006](../../../adrs/cli/backwards-compatibility.md);

@@ -375,6 +375,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/operations/graph_members_test.cpp
+    presentation/operations/collections_test.cpp
     presentation/operations/renames_test.cpp
     presentation/operations/store_references_test.cpp
     presentation/operations/backend_fields_test.cpp

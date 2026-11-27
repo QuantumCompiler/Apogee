@@ -28,6 +28,7 @@
 #include "embedstore/store.h"
 #include "harness/harness.h"
 #include "machine/json_reporter.h"
+#include "operations/collections.h"
 #include "views/status_line.h"
 
 namespace apogee::commands {
@@ -297,6 +298,24 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             chunking.overlap = static_cast<std::size_t>(*registered->chunk_overlap);
         }
 
+        // The plan before the first byte, model call or embedding (CLI-M46):
+        // a new name the config cannot hold is refused here, by the create
+        // rule and a dry run of the registration below -- never written and
+        // then half-registered. A store already on disk, or a name the config
+        // refers to, goes ahead and says once what it cannot keep.
+        CollectionWrite write;
+        write.name = *in_collection;
+        write.config = config.has_value() ? &*config : nullptr;
+        write.config_path = config.has_value() ? config_path : std::filesystem::path{};
+        write.entry =
+            harness::EmbeddingConfig{.chunk_size = static_cast<std::int64_t>(chunking.size),
+                                     .chunk_overlap = static_cast<std::int64_t>(chunking.overlap),
+                                     .description = {}};
+        const CollectionWritePlan plan = plan_collection_write(write);
+        if (plan.refused()) {
+            fail(plan.words);
+        }
+
         // Lexical or vector, decided ONCE by the shared resolver -- and under
         // the user's spend rule: a whole collection is never pushed through a
         // paid embedder unless asked. The pin is the collection's own.
@@ -440,27 +459,29 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
 
         // Register a collection the config has not met, through the one path
         // that writes a config file -- so this edit is byte-for-byte the edit
-        // `apogee config` would have made, and every comment survives it.
+        // `apogee config` would have made, and every comment survives it. The
+        // plan dry-ran it before the write, so what fails here is trouble
+        // after it -- a lock held past the wait, an edit raced in.
         //
         // Reported and never fatal: the corpus is already on disk, and telling
         // the user their ingest failed because their config could not be
-        // edited would be a lie about what happened.
+        // edited would be a lie about what happened. --graph does not follow
+        // a registration that failed.
+        bool registration_failed = false;
         if (!config_trouble.empty()) {
             std::cerr << "apogee embed: not registered in config -- " << config_trouble << "\n";
-        } else if (registered == nullptr) {
-            const harness::EmbeddingConfig entry{
-                .chunk_size = static_cast<std::int64_t>(chunking.size),
-                .chunk_overlap = static_cast<std::int64_t>(chunking.overlap),
-                .description = {}};
-            try {
-                harness::edit_config_file(config_path, [&](std::string_view content) {
-                    return harness::append_embedding(content, *in_collection, entry, false);
-                });
+        } else if (!plan.words.empty()) {
+            std::cerr << "apogee embed: " << plan.words << "\n";
+        } else if (plan.register_entry) {
+            const CollectionRegistration done = register_collection(write, plan);
+            if (done.registered) {
                 std::cout << "registered '" << *in_collection << "' in " << config_path.string()
                           << "\n";
-            } catch (const std::exception& e) {
-                std::cerr << "apogee embed: could not register '" << *in_collection
-                          << "' in config -- " << e.what() << "\n";
+            }
+            if (!done.ok()) {
+                registration_failed = true;
+                std::cerr << "apogee embed: " << done.error
+                          << (*in_graph ? "; --graph was not run" : "") << "\n";
             }
         }
 
@@ -472,10 +493,11 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         // collection's own, and loads a fresh config so it sees the entry
         // the registration just wrote. Ingest's -m stays the embedding
         // override; the extractor resolves as `graph build` resolves it.
-        if (*in_graph) {
+        if (*in_graph && !registration_failed) {
             GraphBuildRequest request;
             request.name = *in_collection;
             request.quiet = *in_quiet;
+            request.registration_said = !plan.words.empty();
             try {
                 const harness::Config fresh = harness::load_config(config_path);
                 if (const std::optional<agentloop::CoveringGraph> covering =

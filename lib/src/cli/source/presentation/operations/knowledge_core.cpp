@@ -41,6 +41,20 @@ namespace {
     return agentloop::resolve_embedder(harness, config, collection_backend, reason);
 }
 
+/// The write a capture into `db` makes, as its plan reads it: the entry the
+/// registration adds.
+[[nodiscard]] CollectionWrite knowledge_write(const harness::Config& config,
+                                              const std::filesystem::path& config_path,
+                                              const std::string& db) {
+    CollectionWrite write;
+    write.name = db;
+    write.config = &config;
+    write.config_path = config_path;
+    write.entry.description = "captured decision records (apogee knowledge)";
+    write.records = true;
+    return write;
+}
+
 }  // namespace
 
 std::string knowledge_collection(const harness::Config& config, std::string_view db) {
@@ -48,9 +62,17 @@ std::string knowledge_collection(const harness::Config& config, std::string_view
 }
 
 StoreDecision decide_store(const harness::Harness& harness, const harness::Config& config,
-                           std::string_view db, std::string_view retriever_flag) {
+                           const std::filesystem::path& config_path, std::string_view db,
+                           std::string_view retriever_flag) {
     StoreDecision decision;
     decision.db = knowledge_collection(config, db);
+    // The collection's plan first (CLI-M46): a new name the config cannot
+    // hold is refused before the clerk, the embedding or the first byte.
+    decision.plan = plan_collection_write(knowledge_write(config, config_path, decision.db));
+    if (decision.plan.refused()) {
+        decision.warning = decision.plan.words;
+        return decision;
+    }
     const harness::EmbeddingConfig* registered = config.find_embedding(decision.db);
     const std::string pin = registered != nullptr ? registered->retriever : std::string{};
     std::string reason;
@@ -69,11 +91,12 @@ StoreDecision decide_store(const harness::Harness& harness, const harness::Confi
 }
 
 CaptureResult draft_capture(const harness::Harness& harness, const harness::Config& config,
-                            const CaptureInputs& inputs, const knowledge::ClerkFn& clerk) {
+                            const std::filesystem::path& config_path, const CaptureInputs& inputs,
+                            const knowledge::ClerkFn& clerk) {
     CaptureResult result;
     // Decided BEFORE the clerk runs, so the dry run reports exactly the
     // decision a real run makes, from the same config.
-    result.decision = decide_store(harness, config, inputs.db, inputs.retriever_flag);
+    result.decision = decide_store(harness, config, config_path, inputs.db, inputs.retriever_flag);
     // The extraction seam (27g): the active suite's verifier, asked within a
     // turn of the capture's own -- the suite's per-turn cap bounding it.
     std::optional<agentloop::MemberCalls> calls;
@@ -187,19 +210,17 @@ CaptureResult store_record(const harness::Harness& harness, const harness::Confi
     result.stored = true;
 
     // Register a collection the config has not met, through the one path that
-    // writes a config file -- the same edit `embed ingest` makes. Reported and
-    // never fatal: the record is already on disk.
-    if (config.find_embedding(decision.db) == nullptr && !config_path.empty()) {
-        harness::EmbeddingConfig entry;
-        entry.description = "captured decision records (apogee knowledge)";
-        try {
-            harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::append_embedding(content, decision.db, entry, false);
-            });
-            result.registered = true;
-        } catch (const std::exception& e) {
-            result.notes.push_back("could not register '" + decision.db + "' in " +
-                                   config_path.string() + " -- " + e.what());
+    // writes a config file -- the same edit `embed ingest` makes, dry-run by
+    // the plan before the clerk. Reported and never fatal: the record is
+    // already on disk. A store the config cannot register says so once.
+    if (!decision.plan.words.empty()) {
+        result.notes.push_back(decision.plan.words);
+    } else if (decision.plan.register_entry) {
+        const CollectionRegistration done =
+            register_collection(knowledge_write(config, config_path, decision.db), decision.plan);
+        result.registered = done.registered;
+        if (!done.ok()) {
+            result.notes.push_back(done.error);
         }
     }
     return result;
@@ -211,14 +232,15 @@ CaptureResult capture_and_store(const harness::Harness& harness, const harness::
     // The store decision BEFORE the clerk: a refusal the resolver can make
     // up front -- an explicit vector ask with no embedder -- must not cost a
     // model call first. A dry run reports the same refusal as a warning.
-    const StoreDecision decision = decide_store(harness, config, inputs.db, inputs.retriever_flag);
+    const StoreDecision decision =
+        decide_store(harness, config, config_path, inputs.db, inputs.retriever_flag);
     if (!decision.warning.empty()) {
         CaptureResult refused;
         refused.decision = decision;
         refused.error = decision.warning;
         return refused;
     }
-    CaptureResult drafted = draft_capture(harness, config, inputs, clerk);
+    CaptureResult drafted = draft_capture(harness, config, config_path, inputs, clerk);
     if (!drafted.ok()) {
         return drafted;
     }

@@ -13,6 +13,7 @@
 #include "harness/harness.h"
 #include "knowledge/clerk.h"
 #include "knowledge/record.h"
+#include "operations/collections.h"
 
 /// The capture core every surface calls.
 ///
@@ -57,6 +58,11 @@ struct StoreDecision {
     std::string warning;
     /// The embedder's model, when vectors were (or would be) written.
     std::string embed_model;
+    /// The collection's plan (CLI-M46): a new name the config cannot hold
+    /// refused before the clerk runs (its words are `warning`), the
+    /// registration it will make, or the note a store it cannot register
+    /// carries.
+    CollectionWritePlan plan{};
 };
 
 /// The outcome of a capture or a store.
@@ -90,10 +96,14 @@ struct CaptureResult {
 
 /// Decides how a record captured into `db` would be indexed: the flag, the
 /// collection's pin, the embedder the harness resolves -- through the ONE
-/// ingest resolver `embed ingest` uses, under the same spend rule.
+/// ingest resolver `embed ingest` uses, under the same spend rule -- and the
+/// collection's plan against the config at `config_path` (CLI-M46): a new
+/// name the config cannot hold is the decision's `warning`, so a capture
+/// refuses it before the clerk and a store before the first byte.
 [[nodiscard]] StoreDecision decide_store(const harness::Harness& harness,
-                                         const harness::Config& config, std::string_view db,
-                                         std::string_view retriever_flag);
+                                         const harness::Config& config,
+                                         const std::filesystem::path& config_path,
+                                         std::string_view db, std::string_view retriever_flag);
 
 /// Runs the clerk over `inputs.raw` and drafts the record -- what a dry run
 /// prints: id-less, timestamp-less, nothing written. `decision` is filled
@@ -103,6 +113,7 @@ struct CaptureResult {
 /// opened here, and `validation` says what came of it.
 [[nodiscard]] CaptureResult draft_capture(const harness::Harness& harness,
                                           const harness::Config& config,
+                                          const std::filesystem::path& config_path,
                                           const CaptureInputs& inputs,
                                           const knowledge::ClerkFn& clerk);
 
