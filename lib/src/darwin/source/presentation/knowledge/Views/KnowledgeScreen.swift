@@ -463,7 +463,7 @@ struct CaptureSheet: View {
             }
             TextField("Linked to (optional)", text: $model.captureForm.link).textFieldStyle(.roundedBorder)
             if let arguments = model.captureForm.arguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).lineLimit(3)
             }
             HStack {
                 Spacer()

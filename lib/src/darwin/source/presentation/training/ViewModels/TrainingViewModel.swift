@@ -71,19 +71,19 @@ public final class TrainingViewModel {
 
         public var arguments: [String]? {
             guard !student.isEmpty, !dataset.isEmpty else { return nil }
-            var arguments = ["train", "run", student, "--dataset", dataset]
-            if let method { arguments += ["--method", method] }
+            var options: [Argv.Option] = [.value("--dataset", dataset)]
+            if let method { options.append(.value("--method", method)) }
             for (flag, value) in [("--iters", iters), ("--batch-size", batchSize), ("--num-layers", numLayers)] {
                 let value = value.trimmingCharacters(in: .whitespaces)
-                if !value.isEmpty { arguments += [flag, value] }
+                if !value.isEmpty { options.append(.value(flag, value)) }
             }
-            if gradCheckpoint { arguments.append("--grad-checkpoint") }
-            if maskPrompt { arguments.append("--mask-prompt") }
-            return arguments
+            if gradCheckpoint { options.append(.flag("--grad-checkpoint")) }
+            if maskPrompt { options.append(.flag("--mask-prompt")) }
+            return Argv.line(["train", "run"], options: options, names: [student])
         }
     }
 
-    /// `train promote <run> --as <backend>`, the gate honoured unless the
+    /// `train promote --as <backend> … -- <run>`, the gate honoured unless the
     /// person forces it: merged -- fused, converted, registered -- or, with
     /// `--adapter` (the CLI's 53b), the run's adapter alone, registered on an
     /// existing entry's adapters over the base it runs. Each mode carries only
@@ -120,20 +120,20 @@ public final class TrainingViewModel {
         public var arguments: [String]? {
             let backend = backend.trimmingCharacters(in: .whitespaces)
             guard !run.isEmpty, !backend.isEmpty else { return nil }
-            var arguments = ["train", "promote", run, "--as", backend]
+            var options: [Argv.Option] = [.value("--as", backend)]
             if adapter {
-                arguments.append("--adapter")
+                options.append(.flag("--adapter"))
                 let suite = suite.trimmingCharacters(in: .whitespaces)
-                if !suite.isEmpty { arguments += ["--suite", suite] }
-                if let judge { arguments += ["--judge", judge] }
+                if !suite.isEmpty { options.append(.value("--suite", suite)) }
+                if let judge { options.append(.value("--judge", judge)) }
             } else {
-                if let target { arguments += ["--target", target] }
-                if let quantize { arguments += ["--quantize", quantize] }
-                if keepFused { arguments.append("--keep-fused") }
+                if let target { options.append(.value("--target", target)) }
+                if let quantize { options.append(.value("--quantize", quantize)) }
+                if keepFused { options.append(.flag("--keep-fused")) }
             }
-            if let trainer { arguments += ["--trainer", trainer] }
-            if force { arguments.append("--force") }
-            return arguments
+            if let trainer { options.append(.value("--trainer", trainer)) }
+            if force { options.append(.flag("--force")) }
+            return Argv.line(["train", "promote"], options: options, names: [run])
         }
 
         /// The form the CLI's refusal points at: the other mode where the
@@ -249,16 +249,18 @@ public final class TrainingViewModel {
         /// `train cycle resume`: the halt and the failure count cleared.
         case resumeCycle
 
-        /// The command as a person types it -- `train rollback <b>`,
+        /// The command as a person types it -- `train rollback -- <b>`,
         /// `datasets delete --yes -- <d>` (the person said yes here; the
         /// listed name after `--`, GUI M21), a pipeline's or the cycle's
-        /// verb. A run is started with its stream asked for besides.
+        /// verb, every positional after `--` (GUI M23). A run is started with
+        /// its stream asked for besides, through `Argv.adding`.
         public var arguments: [String] {
             switch self {
-            case .rollback(let backend): ["train", "rollback", backend]
+            case .rollback(let backend): Argv.line(["train", "rollback"], names: [backend])
             case .deleteDataset(let name): Argv.line(["datasets", "delete"], options: [.flag("--yes")], names: [name])
-            case .runPipeline(let name): ["train", "pipeline", "run", "--pipeline", name]
-            case .resumePipeline(let id, let pipeline): ["train", "pipeline", "resume", id] + (pipeline.map { ["--pipeline", $0] } ?? [])
+            case .runPipeline(let name): Argv.line(["train", "pipeline", "run"], options: [.value("--pipeline", name)])
+            case .resumePipeline(let id, let pipeline):
+                Argv.line(["train", "pipeline", "resume"], options: pipeline.map { [.value("--pipeline", $0)] } ?? [], names: [id])
             case .runCycle: ["train", "cycle", "run"]
             case .haltCycle: ["train", "cycle", "halt"]
             case .resumeCycle: ["train", "cycle", "resume"]
@@ -514,9 +516,15 @@ public final class TrainingViewModel {
         await readSpec(name)
     }
 
+    /// A named pipeline's spec read, `train pipeline show -- <name>`, which
+    /// its tooltip shows as typed.
+    public static func specArguments(_ name: String) -> [String] {
+        Argv.line(["train", "pipeline", "show"], names: [name])
+    }
+
     private func readSpec(_ name: String) async {
         guard let binary else { return }
-        let read = await runner.read(binary: binary, ["train", "pipeline", "show", name])
+        let read = await runner.read(binary: binary, Self.specArguments(name))
         guard openedSpec == name else { return }
         if let document = read.document, let spec = PipelineSpec(document: document) {
             shownSpec = spec
@@ -556,7 +564,7 @@ public final class TrainingViewModel {
 
     private func readPipelineRun(_ id: String) async {
         guard let binary else { return }
-        let read = await runner.read(binary: binary, ["train", "pipeline", "status", id])
+        let read = await runner.read(binary: binary, Argv.line(["train", "pipeline", "status"], names: [id]))
         guard selectedPipelineRun == id else { return }
         if let document = read.document, let manifest = PipelineRun(document: document) {
             pipelineRun = manifest
@@ -759,7 +767,7 @@ public final class TrainingViewModel {
             return "This pipeline is running now (\(pid > 0 ? "process \(pid)" : "its lock names no process it can read")); a resume is refused while it runs."
         }
         let found = run.hasResumeField ? run.resume?.pipeline != nil : pipelineSpecs.contains(run.specName)
-        return found ? nil : "Resume needs its spec: run 'apogee train pipeline resume \(run.id) --pipeline <spec>' in the console."
+        return found ? nil : "Resume needs its spec: run 'apogee train pipeline resume --pipeline <spec> \(Argv.shown(Argv.line([], names: [run.id])))' in the console."
     }
 
     /// Whether `run` can be resumed from here: the CLI says where it resumes
@@ -778,7 +786,7 @@ public final class TrainingViewModel {
     /// Resume…'s help: the command, and where it starts -- as the document
     /// says (57h), or as an older binary's page read it.
     public static func resumeHelp(_ run: PipelineRun) -> String {
-        "apogee " + resume(run).arguments.joined(separator: " ")
+        "apogee " + Argv.shown(resume(run).arguments)
             + (run.hasResumeField ? ": after the last stage that passed" : ": from the first stage that has not passed")
     }
 
@@ -1183,12 +1191,12 @@ public final class TrainingViewModel {
         sheet = .pull
     }
 
-    /// `datasets pull <ref>`, as typed -- what the sheet shows: nothing
+    /// `datasets pull -- <ref>`, as typed -- what the sheet shows: nothing
     /// without a reference. A binary that streams the pull is started with
     /// its stream asked for besides (`pull()`).
     public var pullArguments: [String]? {
         let ref = pullRef.trimmingCharacters(in: .whitespaces)
-        return ref.isEmpty ? nil : ["datasets", "pull", ref]
+        return ref.isEmpty ? nil : Argv.line(["datasets", "pull"], names: [ref])
     }
 
     /// The vocabulary's date from which `datasets pull` streams as a job
@@ -1238,9 +1246,15 @@ public final class TrainingViewModel {
         start(arguments, doing: "Training")
     }
 
-    /// `train eval <run>`: the gate, on the run's own suite unless named.
+    /// `train eval [--suite s] -- <run>`: the gate, on the run's own suite
+    /// unless named.
     public func gate(_ run: TrainingRun, suite: String? = nil) {
-        start(["train", "eval", run.id] + (suite.map { ["--suite", $0] } ?? []), doing: "Gating")
+        start(Self.gateArguments(run.id, suite: suite), doing: "Gating")
+    }
+
+    /// The gate's line, which its tooltip shows as typed.
+    public static func gateArguments(_ run: String, suite: String? = nil) -> [String] {
+        Argv.line(["train", "eval"], options: suite.map { [.value("--suite", $0)] } ?? [], names: [run])
     }
 
     public func promote() {
@@ -1251,7 +1265,7 @@ public final class TrainingViewModel {
         start(arguments, doing: "Promoting", act: .promote(promoteForm))
     }
 
-    /// `datasets pull <ref>`: a Hugging Face dataset's data files downloaded
+    /// `datasets pull -- <ref>`: a Hugging Face dataset's data files downloaded
     /// for `datasets prepare`, supervised, Stop as Ctrl-C. On a binary that
     /// streams it (M30) a job's stream -- its bytes, its document naming the
     /// folder; on an older one its lines as text. Once done, Prepare is
@@ -1261,7 +1275,7 @@ public final class TrainingViewModel {
         sheet = nil
         pulled = nil
         let streamed = streamsPull
-        start(arguments + (streamed ? Self.stream : []), doing: "Pulling", act: .pull(streamed: streamed))
+        start(streamed ? Argv.adding(Self.stream, to: arguments) : arguments, doing: "Pulling", act: .pull(streamed: streamed))
     }
 
     /// The pulled dataset's banner, once read.
@@ -1269,10 +1283,15 @@ public final class TrainingViewModel {
         pulled = nil
     }
 
-    /// `train regime run <name>`: synth, pipeline, promote -- the regime's own
-    /// tuning unless the spec names none.
+    /// `train regime run -- <name>`: synth, pipeline, promote -- the regime's
+    /// own tuning unless the spec names none.
     public func runRegime(_ regime: TrainingRegime) {
-        start(["train", "regime", "run", regime.name], doing: "Running \(regime.name)")
+        start(Self.regimeArguments(regime.name), doing: "Running \(regime.name)")
+    }
+
+    /// A regime's run, which its tooltip shows as typed.
+    public static func regimeArguments(_ name: String) -> [String] {
+        Argv.line(["train", "regime", "run"], names: [name])
     }
 
     public func synthesize() {
@@ -1281,9 +1300,14 @@ public final class TrainingViewModel {
         start(arguments, doing: "Synthesizing")
     }
 
-    /// `datasets prepare <path>`: a local file made trainer-ready.
+    /// `datasets prepare -- <path>`: a local file made trainer-ready.
     public func prepare(_ path: String) {
-        start(["datasets", "prepare", path], doing: "Preparing")
+        start(Self.prepareArguments(path), doing: "Preparing")
+    }
+
+    /// A prepare's line, which its tooltip shows as typed.
+    public static func prepareArguments(_ path: String) -> [String] {
+        Argv.line(["datasets", "prepare"], names: [path])
     }
 
     /// `datasets create --from <template|sessions|empty> -- <name>`, the
@@ -1314,14 +1338,14 @@ public final class TrainingViewModel {
         case .runPipeline(let name):
             selectedPipelineRun = nil
             openedSpec = nil
-            start(pending.arguments + Self.stream, doing: "Running \(name)", act: .pipeline(name))
+            start(Argv.adding(Self.stream, to: pending.arguments), doing: "Running \(name)", act: .pipeline(name))
         case .resumePipeline(let id, _):
             selectedPipelineRun = id
             openedSpec = nil
-            start(pending.arguments + Self.stream, doing: "Resuming \(id)", act: .pipeline(id))
+            start(Argv.adding(Self.stream, to: pending.arguments), doing: "Resuming \(id)", act: .pipeline(id))
         case .runCycle:
             haltNotice = nil
-            start(pending.arguments + Self.stream, doing: "Running one pass of the cycle", act: .cycle)
+            start(Argv.adding(Self.stream, to: pending.arguments), doing: "Running one pass of the cycle", act: .cycle)
         case .resumeCycle:
             if await change(pending.arguments) { haltNotice = nil }
         case .rollback, .deleteDataset, .haltCycle:

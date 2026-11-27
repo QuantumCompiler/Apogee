@@ -87,7 +87,7 @@ public struct ReviewScreen: View {
                 ? "No target this sweep reaches grants posting, so it posts nothing: its documents are kept."
                 : "It posts on \(posting.joined(separator: ", ")) -- \(allowPost ? "--allow-post grants every target it sweeps" : "each grants it with post: true") -- and keeps a document for the rest."
         case .deleteTarget(let name):
-            return "apogee review targets delete \(name)"
+            return "apogee " + Argv.shown(ReviewViewModel.deleteArguments(name))
         case nil:
             return ""
         }
@@ -155,7 +155,7 @@ struct RunsView: View {
             }
             .font(.apogeeSmall)
             if let arguments = model.form.arguments(posting: false) {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             }
         }
     }
@@ -398,7 +398,7 @@ struct SkillsView: View {
                             .padding(Spacing.m)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Palette.code, in: RoundedRectangle(cornerRadius: Radius.control))
-                        Text("apogee review skills show \(skill.name)").font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+                        Text("apogee " + Argv.shown(ReviewViewModel.showArguments(skill.name))).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
                     }
                     .padding(Spacing.xl)
                 } else {
@@ -450,7 +450,7 @@ struct TargetSheet: View {
                 TextField("Model", text: $model.targetForm.model, prompt: Text("the chat role"))
             }
             if let arguments = model.targetForm.arguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             }
             HStack {
                 Spacer()
@@ -505,7 +505,7 @@ struct SweepSheet: View {
                 TextField("Model", text: $model.sweepForm.model, prompt: Text("each target's, else the chat role"))
                 Toggle("When posting, grant every target it sweeps (--allow-post)", isOn: $allowPost)
             }
-            Text((["apogee"] + model.sweepForm.arguments(posting: false, allowPost: false)).joined(separator: " "))
+            Text("apogee " + Argv.shown(model.sweepForm.arguments(posting: false, allowPost: false)))
                 .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             HStack {
                 Spacer()

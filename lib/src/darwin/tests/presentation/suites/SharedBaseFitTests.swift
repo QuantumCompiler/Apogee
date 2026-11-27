@@ -39,7 +39,7 @@ struct SharedBaseFitTests {
         runner.reading(["models", "list"], recorded("suites-models-list.json"))
         runner.reading(["system"], recorded("suites-system.json"))
         for backend in ["root", "helper", "scribe", "vast"] {
-            runner.reading(["models", "info", backend], recorded("suites-models-info-\(backend).json"))
+            runner.reading(["models", "info", "--", backend], recorded("suites-models-info-\(backend).json"))
         }
         return runner
     }

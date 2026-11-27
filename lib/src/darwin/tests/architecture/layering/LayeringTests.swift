@@ -131,6 +131,7 @@ private struct Planted {
         "source/data/CLAUDE.md": "# Data\n\n**Modules:** `protocol`.\n",
         "source/business/CLAUDE.md": "# Business\n\n**Modules:** `session`.\n",
         "source/presentation/CLAUDE.md": "# Presentation\n\n**Modules:** `styles`, `app`.\n",
+        "tests/presentation/shell/Fixtures/command-words.txt": "config\nembed\nmodels\nvideo\n",
     ]
 
     /// A framework that links -- and so depends on -- `links`.
@@ -500,6 +501,109 @@ struct LayeringPlantedTests {
             #endif
             """
         #expect(planted.violations() == [])
+    }
+
+    @Test("a command line holding a name, or a name added to one -- a list, a variable or an expression, in any file -- fails by file and line; so does a word added to a line Argv built (GUI M23)")
+    func argvNamesOutsideTheBuilder() {
+        var planted = Planted()
+        let file = "source/business/session/Lines.swift"
+        planted.files[file] = """
+            import Foundation
+            public struct RoleAssignment {
+                public let role: String
+                public var verb: [String] {
+                    role == "chat" ? ["config", "set-default"] : ["config", "set-default-\\(role)"]
+                }
+                public func arguments(pointingAt backend: String) -> [String] {
+                    verb + [backend]
+                }
+            }
+            func ingest(_ collection: String, _ path: String) -> [String] {
+                ["embed", "ingest", collection, path]
+            }
+            func clip(record: String, model: String, markdown: Bool, key: String) -> [[String]] {
+                var arguments = ["video", "generate"]
+                arguments += ["--from", record]
+                arguments.append(model)
+                arguments.append(contentsOf: [model])
+                let line = Argv.line(["embed", "info"], names: [record])
+                return [
+                    arguments, line + ["--json"],
+                    Argv.line(["embed", "info"], names: [record]) + ["--json"],
+                    ["embed", "export",
+                     "--format", markdown ? "markdown" : "json"],
+                    ["config", "get", "\\(key)"],
+                ]
+            }
+            """
+        let holds = { (line: Int, held: String) in
+            "\(file):\(line): a command line holds \(held), not string literals alone -- the CLI's parser reads a dash-led word before -- as an option, so a name, path or id goes through Argv.line (its options, then -- and the names)"
+        }
+        let added = { (line: Int, held: String) in
+            "\(file):\(line): \(held) is added to a command line -- the CLI's parser reads a dash-led word before -- as an option, so a name, path or id goes through Argv.line (its options, then -- and the names)"
+        }
+        let afterBuilt = { (line: Int, words: String) in
+            "\(file):\(line): \(words) is added to a line Argv built -- it holds its end of options already, so a word added at its end lands after -- and is read as a name; add an option with Argv.adding"
+        }
+        let other = "source/presentation/app/ViewModels/Roles.swift"
+        planted.files[other] = """
+            import BusinessSession
+            func lines(_ role: RoleAssignment, backend: String, names: [String], name: String?) -> [[String]] {
+                [role.verb + names, ["models", "info"] + (name.map { [$0] } ?? []), role.verb + ["<backend>"]]
+            }
+            """
+        #expect(planted.violations() == [
+            added(8, "backend"),
+            holds(12, "collection, path"),
+            added(16, "record"),
+            added(17, "model"),
+            added(18, "model"),
+            afterBuilt(21, "[\"--json\"]"),
+            afterBuilt(22, "[\"--json\"]"),
+            holds(24, "markdown ? \"markdown\" : \"json\""),
+            holds(25, "\"\\(key)\""),
+            "\(other):3: names is added to a command line -- the CLI's parser reads a dash-led word before -- as an option, so a name, path or id goes through Argv.line (its options, then -- and the names)",
+            "\(other):3: (name.map { [$0] } ?? []) is added to a command line -- the CLI's parser reads a dash-led word before -- as an option, so a name, path or id goes through Argv.line (its options, then -- and the names)",
+        ])
+    }
+
+    @Test("the builder's shapes hold, and so do literal lines, a key path opening with its own text, __complete asks, dictionaries, subscripts, strings and comments (GUI M23)")
+    func argvBuilderShapesHold() {
+        var planted = Planted()
+        planted.files["source/business/session/Lines.swift"] = """
+            import Foundation
+            func lines(collection: String, path: String, name: String, word: String, output: String, rows: [String]) -> [[String]] {
+                var options: [Argv.Option] = [.value("-o", output)]
+                options.append(.flag("--draft"))
+                let table = ["models": 1, "embed": 2]
+                _ = table["models"]
+                // ["embed", "info", name] is a comment
+                _ = "[\\"embed\\", \\(name)]"
+                var listing = ["models", "list"]
+                listing.append("--all")
+                return [
+                    Argv.line(["embed", "ingest"], options: [.value("--retriever", word), .flag("--graph")], names: [collection, path]),
+                    Argv.adding(["--output-format", "json"], to: Argv.line(["embed", "info"], names: [name])),
+                    Argv.line(["video", "generate"], options: options, names: [word]),
+                    ["models", "list", "--all"],
+                    ["models", "list"] + ["--all"],
+                    listing,
+                    ["config", "get", "suites.\\(name)"],
+                    ["__complete", "embed", "info", "--", word],
+                    rows + [name],
+                ]
+            }
+            """
+        #expect(planted.violations() == [])
+    }
+
+    @Test("the argv rule reads the binary's command words, and a missing list fails rather than passing everything (GUI M23)")
+    func argvCommandWords() {
+        var planted = Planted()
+        planted.files.removeValue(forKey: "tests/presentation/shell/Fixtures/command-words.txt")
+        #expect(planted.violations() == [
+            "tests/presentation/shell/Fixtures/command-words.txt is missing: the argv rule reads the binary's command words from it"
+        ])
     }
 
     @Test("a layer card that misses a module, or is missing, fails")

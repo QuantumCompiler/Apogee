@@ -158,18 +158,18 @@ public final class StoreViewModel {
         public var arguments: [String]? {
             let name = name.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return nil }
-            var arguments = ["config", "add-backend", name, "--type", type, "--model-path", path]
-            if let projector { arguments += ["--mmproj-path", projector] }
+            var options: [Argv.Option] = [.value("--type", type), .value("--model-path", path)]
+            if let projector { options.append(.value("--mmproj-path", projector)) }
             let window = window.trimmingCharacters(in: .whitespaces)
-            if !window.isEmpty { arguments += ["--context-size", window] }
-            if let cache, type == "llamacpp" { arguments += ["--cache-type", cache] }
-            return arguments
+            if !window.isEmpty { options.append(.value("--context-size", window)) }
+            if let cache, type == "llamacpp" { options.append(.value("--cache-type", cache)) }
+            return Argv.line(["config", "add-backend"], options: options, names: [name])
         }
 
         public static let caches = ["f16", "q8_0", "q4_0"]
     }
 
-    /// `config set-backend <base> --draft <drafter>`, as the pair sheet
+    /// `config set-backend --draft <drafter> -- <base>`, as the pair sheet
     /// builds it (the CLI's 53i): a drafter paired with the base of an `mlx`
     /// backend, chosen among those the binary's own completion offers it --
     /// the base's family and width, the one its record names. The app never
@@ -204,9 +204,10 @@ public final class StoreViewModel {
             base = bases.first?.backend
         }
 
-        /// The command, as typed; `nil` while no base is offered.
+        /// The command, as typed, the base after `--` (`Argv`, GUI M23);
+        /// `nil` while no base is offered.
         public var arguments: [String]? {
-            base.map { ["config", "set-backend", $0, "--draft", draft] }
+            base.map { Argv.line(["config", "set-backend"], options: [.value("--draft", draft)], names: [$0]) }
         }
     }
 
@@ -307,11 +308,11 @@ public final class StoreViewModel {
     /// the store.
     private func handle(of backend: String) async -> String? {
         guard let binary,
-            let info = await runner.read(binary: binary, ["models", "info", backend]).document.map(ModelInfo.init)
+            let info = await runner.read(binary: binary, Argv.line(["models", "info"], names: [backend])).document.map(ModelInfo.init)
         else { return nil }
         if let draft = BackendDraft(info) { drafts[backend] = draft.path }
         guard let path = info.field("model_path") else { return nil }
-        guard let document = await runner.read(binary: binary, ["models", "info", path]).document else { return nil }
+        guard let document = await runner.read(binary: binary, Argv.line(["models", "info"], names: [path])).document else { return nil }
         let set = ModelInfo(document: document)
         if let handle = set.data?.handle {
             infos[handle] = set
@@ -321,7 +322,7 @@ public final class StoreViewModel {
     }
 
     private func readInfo(_ handle: String) async {
-        guard let binary, let document = await runner.read(binary: binary, ["models", "info", handle]).document else { return }
+        guard let binary, let document = await runner.read(binary: binary, Argv.line(["models", "info"], names: [handle])).document else { return }
         infos[handle] = ModelInfo(document: document)
     }
 
@@ -472,7 +473,7 @@ public final class StoreViewModel {
     public func registerIt() async {
         guard let arguments = register?.arguments else { return }
         register = nil
-        await run(arguments, doing: "Registering", done: "Registered \(arguments[2])")
+        await run(arguments, doing: "Registering", done: "Registered \(Argv.positionals(of: arguments).first ?? "")")
     }
 
     /// Asks before `config scan --register`, showing the scan's own report.
@@ -646,15 +647,22 @@ public final class StoreViewModel {
         await run(arguments, doing: "Pairing", done: "\(base) drafts with \(form.drafter)")
     }
 
-    /// `config set-backend <backend> --draft ""`: the pairing undone, read back.
+    /// `config set-backend --draft "" -- <backend>`: the pairing undone, read
+    /// back.
     public func unpair(_ backend: String) async {
-        await run(["config", "set-backend", backend, "--draft", ""], doing: "Unpairing", done: "\(backend) drafts with nothing now")
+        await run(ModelsViewModel.unpairArguments(backend), doing: "Unpairing", done: "\(backend) drafts with nothing now")
     }
 
-    /// `config set-default-embedding <backend>`: the embedding role pointed
-    /// at an `mlx` entry over an embedding model, read back (the CLI's 53h).
+    /// `config set-default-embedding -- <backend>`: the embedding role
+    /// pointed at an `mlx` entry over an embedding model, read back (the
+    /// CLI's 53h).
     public func useForEmbeddings(_ backend: String) async {
-        await run(["config", "set-default-embedding", backend], doing: "Setting", done: "Embeddings use \(backend)")
+        await run(Self.embeddingArguments(backend), doing: "Setting", done: "Embeddings use \(backend)")
+    }
+
+    /// The embedding role's line, which its tooltip shows as typed.
+    public static func embeddingArguments(_ backend: String) -> [String] {
+        Argv.line(["config", "set-default-embedding"], names: [backend])
     }
 
     // MARK: - Removing
@@ -720,14 +728,14 @@ public final class StoreViewModel {
         switch answer {
         case .deleteSet(let set, _):
             await run(
-                ["models", "delete", set.handle, "--yes"] + (withBackends ? ["--and-backends"] : []), doing: "Deleting",
+                ModelsViewModel.deleteArguments(set.handle, andBackends: withBackends), doing: "Deleting",
                 done: "Deleted \(set.handle)", narrated: true)
         case .deleteModel(let model, _):
             await run(
-                ["models", "delete", model, "--yes"] + (withBackends ? ["--and-backends"] : []), doing: "Deleting",
+                ModelsViewModel.deleteArguments(model, andBackends: withBackends), doing: "Deleting",
                 done: "Deleted \(model)", narrated: true)
         case .removeBackend(let name):
-            await run(["config", "delete-backend", name], doing: "Removing", done: "Removed the backend \(name)")
+            await run(ModelsViewModel.removeArguments(name), doing: "Removing", done: "Removed the backend \(name)")
         case .registerAll:
             await run(
                 ["config", "scan", "--register"], doing: "Registering", done: nil, titled: "Registered what the scan found",
@@ -739,17 +747,29 @@ public final class StoreViewModel {
         pending = nil
     }
 
-    /// `models rename <model> <new>`: its backends follow, as the CLI does it.
+    /// `models rename -- <model> <new>`: its backends follow, as the CLI does
+    /// it.
     public func rename(_ model: String, to name: String) async {
         let name = name.trimmingCharacters(in: .whitespaces)
         renaming = nil
         guard !name.isEmpty, name != model else { return }
-        await run(["models", "rename", model, name], doing: "Renaming", done: "Renamed to \(name)")
+        await run(Self.renameArguments(model, to: name), doing: "Renaming", done: "Renamed to \(name)")
     }
 
-    /// `config set-default-video <handle>`: the pipeline `video generate` runs.
+    /// A model's rename, which its sheet shows as typed.
+    public static func renameArguments(_ model: String, to name: String) -> [String] {
+        Argv.line(["models", "rename"], names: [model, name])
+    }
+
+    /// `config set-default-video -- <handle>`: the pipeline `video generate`
+    /// runs.
     public func makeDefaultVideo(_ set: StoredSet) async {
-        await run(["config", "set-default-video", set.handle], doing: "Setting", done: "Video generates with \(set.handle)")
+        await run(Self.defaultVideoArguments(set.handle), doing: "Setting", done: "Video generates with \(set.handle)")
+    }
+
+    /// The video default's line, which its tooltip shows as typed.
+    public static func defaultVideoArguments(_ handle: String) -> [String] {
+        Argv.line(["config", "set-default-video"], names: [handle])
     }
 
     /// What `config scan --register` printed after its report -- the

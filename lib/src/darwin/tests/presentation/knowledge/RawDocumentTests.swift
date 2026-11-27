@@ -35,7 +35,7 @@ struct RawDocumentTests {
         let (model, record) = try await records(runner, vocabulary: "2026-10-26")
         #expect(record.id == Self.id && record.rawRef != nil)
         await model.showRaw(record)
-        #expect(runner.calls.last == "read knowledge|info|\(Self.id)|--raw")
+        #expect(runner.calls.last == "read knowledge|info|--raw|--|\(Self.id)")
         #expect(!runner.calls.contains { $0.hasPrefix("run knowledge|info") }, "the document answered: never both")
         #expect(model.raw == .init(record: Self.id, state: .shown(.text(
             "Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it."))))
@@ -59,7 +59,7 @@ struct RawDocumentTests {
         runner.answering(["knowledge", "info"], .done(stdout: fixture("knowledge-info-raw-text", "txt")))
         let (model, record) = try await records(runner, vocabulary: "2026-10-26")
         await model.showRaw(record)
-        #expect(runner.calls.suffix(2) == ["read knowledge|info|\(Self.id)|--raw", "run knowledge|info|\(Self.id)|--raw"])
+        #expect(runner.calls.suffix(2) == ["read knowledge|info|--raw|--|\(Self.id)", "run knowledge|info|--raw|--|\(Self.id)"])
         #expect(model.raw?.state == .shown(RawConversation(printed: fixture("knowledge-info-raw-text", "txt"))!))
     }
 
@@ -69,7 +69,7 @@ struct RawDocumentTests {
         runner.answering(["knowledge", "info"], .done(stdout: fixture("knowledge-info-raw-text", "txt")))
         let (model, record) = try await records(runner, vocabulary: "2026-10-25")
         await model.showRaw(record)
-        #expect(runner.calls.last == "run knowledge|info|\(Self.id)|--raw")
+        #expect(runner.calls.last == "run knowledge|info|--raw|--|\(Self.id)")
         #expect(!runner.calls.contains { $0.hasPrefix("read knowledge|info") })
         if case .shown(.text(let text))? = model.raw?.state {
             #expect(text.hasPrefix("Ada: testers keep hitting cancel"))

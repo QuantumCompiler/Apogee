@@ -31,7 +31,8 @@ public final class ReviewViewModel {
         }
     }
 
-    /// `review mr <ref>`, as a person types it.
+    /// `review mr <ref>`, as a person types it: the ref after `--` (`Argv`,
+    /// GUI M23).
     public struct RunForm: Equatable, Sendable {
         public var ref = ""
         /// `--skills a,b`; empty lets the plan decide by the change's files.
@@ -45,16 +46,18 @@ public final class ReviewViewModel {
         public func arguments(posting: Bool) -> [String]? {
             let ref = ref.trimmingCharacters(in: .whitespaces)
             guard !ref.isEmpty else { return nil }
-            var arguments = ["review", "mr", ref]
-            if !skills.isEmpty { arguments += ["--skills", skills.sorted().joined(separator: ",")] }
+            var options: [Argv.Option] = []
+            if !skills.isEmpty { options.append(.value("--skills", skills.sorted().joined(separator: ","))) }
             let model = model.trimmingCharacters(in: .whitespaces)
-            if !model.isEmpty { arguments += ["-m", model] }
-            arguments.append(posting ? "--yes" : "--dry-run")
-            return arguments + ["--output-format", "json"]
+            if !model.isEmpty { options.append(.value("-m", model)) }
+            options.append(.flag(posting ? "--yes" : "--dry-run"))
+            return Argv.adding(["--output-format", "json"], to: Argv.line(["review", "mr"], options: options, names: [ref]))
         }
     }
 
-    /// `review targets add <name> --repo|--owner …`.
+    /// `review targets add … --repo|--owner <place> -- <name>`: the name
+    /// after `--`, and `--repo`/`--owner` last, after `--skills`, which takes
+    /// a `--` directly after it as its own end (`Argv`, GUI M23).
     public struct TargetForm: Equatable, Sendable {
         public var name = ""
         /// `true` for `--owner`, `false` for `--repo`.
@@ -75,16 +78,17 @@ public final class ReviewViewModel {
             let name = name.trimmingCharacters(in: .whitespaces)
             let place = place.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, !place.isEmpty else { return nil }
-            var arguments = ["review", "targets", "add", name, isOwner ? "--owner" : "--repo", place]
-            if forge != "github" { arguments += ["--forge", forge] }
+            var options: [Argv.Option] = []
+            if forge != "github" { options.append(.value("--forge", forge)) }
             let host = host.trimmingCharacters(in: .whitespaces)
-            if !host.isEmpty { arguments += ["--host", host] }
-            if !skills.isEmpty { arguments += ["--skills", skills.sorted().joined(separator: ",")] }
-            if post { arguments.append("--post") }
-            if drafts { arguments.append("--drafts") }
+            if !host.isEmpty { options.append(.value("--host", host)) }
+            if !skills.isEmpty { options.append(.value("--skills", skills.sorted().joined(separator: ","))) }
+            if post { options.append(.flag("--post")) }
+            if drafts { options.append(.flag("--drafts")) }
             let model = model.trimmingCharacters(in: .whitespaces)
-            if !model.isEmpty { arguments += ["-m", model] }
-            return arguments
+            if !model.isEmpty { options.append(.value("-m", model)) }
+            options.append(.value(isOwner ? "--owner" : "--repo", place))
+            return Argv.line(["review", "targets", "add"], options: options, names: [name])
         }
     }
 
@@ -101,14 +105,13 @@ public final class ReviewViewModel {
         /// `--dry-run`, or -- consented -- a sweep that posts where granted,
         /// and with `allowPost` on every target it sweeps.
         public func arguments(posting: Bool, allowPost: Bool) -> [String] {
-            var arguments = ["review", "sweep"]
-            for target in targets.sorted() { arguments += ["--target", target] }
+            var options: [Argv.Option] = targets.sorted().map { .value("--target", $0) }
             let since = since.trimmingCharacters(in: .whitespaces)
-            if !since.isEmpty { arguments += ["--since", since] }
+            if !since.isEmpty { options.append(.value("--since", since)) }
             let model = model.trimmingCharacters(in: .whitespaces)
-            if !model.isEmpty { arguments += ["-m", model] }
-            if !posting { arguments.append("--dry-run") } else if allowPost { arguments.append("--allow-post") }
-            return arguments + ["--output-format", "json"]
+            if !model.isEmpty { options.append(.value("-m", model)) }
+            if !posting { options.append(.flag("--dry-run")) } else if allowPost { options.append(.flag("--allow-post")) }
+            return Argv.adding(["--output-format", "json"], to: Argv.line(["review", "sweep"], options: options))
         }
     }
 
@@ -252,7 +255,7 @@ public final class ReviewViewModel {
         selectedSkill = name
         if shownSkill?.name != name { shownSkill = nil }
         guard let binary else { return }
-        let outcome = await runner.read(binary: binary, ["review", "skills", "show", name])
+        let outcome = await runner.read(binary: binary, Self.showArguments(name))
         guard selectedSkill == name else { return }
         if let document = outcome.document, let skill = ReviewSkill(document: document) {
             shownSkill = skill
@@ -364,8 +367,19 @@ public final class ReviewViewModel {
         case .sweep(let allowPost):
             startSweep(sweepForm.arguments(posting: true, allowPost: allowPost))
         case .deleteTarget(let name):
-            await change(["review", "targets", "delete", name])
+            await change(Self.deleteArguments(name))
         }
+    }
+
+    /// `review skills show -- <name>`: the skill after `--` (GUI M23).
+    public static func showArguments(_ name: String) -> [String] {
+        Argv.line(["review", "skills", "show"], names: [name])
+    }
+
+    /// `review targets delete -- <name>`: the target after `--`, so one a
+    /// config names `-x` reaches the verb (GUI M23).
+    public static func deleteArguments(_ name: String) -> [String] {
+        Argv.line(["review", "targets", "delete"], names: [name])
     }
 
     public func dismissPending() {

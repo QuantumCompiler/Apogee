@@ -42,7 +42,7 @@ struct OneInstallTests {
         let session = registry.register(kind: .session, label: "Session: actor", processIdentifier: 1) { _ in }
         #expect(AppViewModel.installing(in: registry) == nil && AppViewModel.usingEnvironment(in: registry) == nil, "a pull and a session are neither")
         let clip = running(["video", "generate", "-o", "/Users/someone/Movies/Apogee/a.mp4", "--output-format", "stream-json", "--", "a heron"], in: registry)
-        #expect(AppViewModel.usingEnvironment(in: registry) == "apogee video generate a heron", "the label as the monitor shows it")
+        #expect(AppViewModel.usingEnvironment(in: registry) == "apogee video generate 'a heron'", "the label as the monitor shows it")
         #expect(AppViewModel.installing(in: registry) == nil, "a clip installs nothing")
         clip.leave()
         for arguments in [["video", "compose", "-o", "/x.mp4", "--", "a brief"], ["voice", "say", "-o", "/x.wav", "--", "hi"], ["train", "run", "--dataset", "d"]] {

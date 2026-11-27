@@ -56,7 +56,7 @@ struct SessionLibraryTests {
         #expect(await eventually { starter.openedCount == 2 })
         second.emit(String(resumed.prefix { $0 != "\n" }))
         #expect(await eventually { library.current.transcript.status == .ready })
-        #expect(runner.calls.filter { $0.hasPrefix("read chats show") } == ["read chats show c2"])
+        #expect(runner.calls.filter { $0.hasPrefix("read chats show") } == ["read chats show -- c2"])
         #expect(library.current.transcript.items.last?.content == .divider("earlier in this conversation"))
         #expect(!library.current.transcript.items.contains { item in
             if case .notice(let text) = item.content { text.hasPrefix("resumed:") } else { false }
@@ -212,7 +212,7 @@ struct SessionLibraryTests {
         library.say = { said.append($0) }
         await library.start(inView: false)
         await library.rename(library.chats[1], to: "  Weeknight recipes ")
-        #expect(runner.calls.suffix(2) == ["run chats title c1 -- Weeknight recipes", "read chats list"])
+        #expect(runner.calls.suffix(2) == ["run chats title -- c1 Weeknight recipes", "read chats list"])
         #expect(said == ["Renamed to Weeknight recipes"])
         await library.rename(library.chats[1], to: "   ")
         #expect(runner.calls.last == "read chats list", "an empty name runs nothing")
@@ -241,7 +241,7 @@ struct SessionLibraryTests {
         runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"c1","name":"Recipes","turns":1,"updated":"2026-10-12T09:00:00Z"}]}"#)
         try await library.confirm(#require(library.pending))
         #expect(first.calls == ["stop"])
-        #expect(runner.calls.contains("run chats delete c2"))
+        #expect(runner.calls.contains("run chats delete -- c2"))
         #expect(library.chats.map(\.id) == ["c1"])
         #expect(await eventually { starter.openedCount == 2 })
         #expect(starter.launches.last?.resume == nil)
@@ -356,7 +356,7 @@ struct SessionLibraryPrivateTests {
         let first = ScriptedSession()
         let second = ScriptedSession()
         let third = ScriptedSession()
-        runner.reading(["models", "info", "local"], #"{"name":"local","fields":[{"field":"backend","value":"local"},{"field":"window","value":"8192 tokens (the default; trained for 32768)"}]}"#)
+        runner.reading(["models", "info", "--", "local"], #"{"name":"local","fields":[{"field":"backend","value":"local"},{"field":"window","value":"8192 tokens (the default; trained for 32768)"}]}"#)
         let (library, starter) = library(runner, [first, second, third])
         await library.start(inView: true)
         first.emit(Self.new)
@@ -394,7 +394,7 @@ struct SessionLibraryPrivateTests {
         #expect(await eventually { library.current.chatID == "p9" })
         #expect(library.groups.flatMap(\.chats).map(\.id) == ["c1"], "the private one is never listed")
         await library.newSession()
-        #expect(runner.calls.contains("run chats delete p9"), "deleted when it closed, as it promised")
+        #expect(runner.calls.contains("run chats delete -- p9"), "deleted when it closed, as it promised")
     }
 
     @Test("a model's window: 52e's typed data first, else the window field's count; none is unknown")

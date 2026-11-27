@@ -144,7 +144,7 @@ enum TrainingPreview {
     static let pipelines = PreviewRunner(
         reads: runner.reads + [
             (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusList),
-            (["train", "pipeline", "status", completeID], TrainingDocuments.pipelineStatusComplete),
+            (Argv.line(["train", "pipeline", "status"], names: [completeID]), TrainingDocuments.pipelineStatusComplete),
         ],
         commands: [(complete, TrainingDocuments.pipelineComplete)])
 
@@ -168,7 +168,7 @@ enum TrainingPreview {
     static let aborted = PreviewRunner(
         reads: runner.reads + [
             (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusAbortedList),
-            (["train", "pipeline", "status", abortedID], TrainingDocuments.pipelineStatusAborted),
+            (Argv.line(["train", "pipeline", "status"], names: [abortedID]), TrainingDocuments.pipelineStatusAborted),
         ],
         commands: [(complete, TrainingDocuments.pipelineComplete)])
 
@@ -234,8 +234,8 @@ enum TrainingPreview {
     static let specsListed = PreviewRunner(
         reads: pipelines.reads + [
             (["train", "pipeline", "list"], TrainingDocuments.pipelineList),
-            (["train", "pipeline", "show", "skills"], TrainingDocuments.pipelineShowSkills),
-            (["train", "pipeline", "show", "nightly"], TrainingDocuments.pipelineShowNightly),
+            (Argv.line(["train", "pipeline", "show"], names: ["skills"]), TrainingDocuments.pipelineShowSkills),
+            (Argv.line(["train", "pipeline", "show"], names: ["nightly"]), TrainingDocuments.pipelineShowNightly),
         ],
         commands: pipelines.commands)
 
@@ -278,17 +278,17 @@ enum TrainingPreview {
         reads: runner.reads + [
             (["train", "pipeline", "list"], TrainingDocuments.pipelineListSweep),
             (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusResumesList),
-            (["train", "pipeline", "status", namedID], TrainingDocuments.pipelineStatusNamed),
-            (["train", "pipeline", "status", specFileID], TrainingDocuments.pipelineStatusSpecFileGone),
-            (["train", "pipeline", "status", keptFailedID], TrainingDocuments.pipelineStatusKeptFailed),
-            (["train", "pipeline", "status", cyclePassID], TrainingDocuments.pipelineStatusCyclePass),
+            (Argv.line(["train", "pipeline", "status"], names: [namedID]), TrainingDocuments.pipelineStatusNamed),
+            (Argv.line(["train", "pipeline", "status"], names: [specFileID]), TrainingDocuments.pipelineStatusSpecFileGone),
+            (Argv.line(["train", "pipeline", "status"], names: [keptFailedID]), TrainingDocuments.pipelineStatusKeptFailed),
+            (Argv.line(["train", "pipeline", "status"], names: [cyclePassID]), TrainingDocuments.pipelineStatusCyclePass),
         ])
 
     /// The same, the `Nightly SFT` run held by a live process (57g's
     /// `holder`).
     static let resumesHeld = PreviewRunner(
-        reads: resumes.reads.filter { $0.0 != ["train", "pipeline", "status", namedID] } + [
-            (["train", "pipeline", "status", namedID], TrainingDocuments.pipelineStatusNamedHeld)
+        reads: resumes.reads.filter { $0.0 != Argv.line(["train", "pipeline", "status"], names: [namedID]) } + [
+            (Argv.line(["train", "pipeline", "status"], names: [namedID]), TrainingDocuments.pipelineStatusNamedHeld)
         ])
 
     /// An older binary's aborted run (no `resume` in its document) whose spec

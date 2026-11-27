@@ -8,8 +8,12 @@ exit 1: apogee config: backend '-x' is not one both config formats can edit -- a
 exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --mcp-serve complete --temperature 0.5 -- -x
 exit 106: model is required	models convert --register-with Q4_K_M -- -x
 exit 1: apogee models: no model '-x' in /Users/someone/.apogee/models	models convert --register-with Q4_K_M --base-name b -- -x
+exit 106: ref is required	models pull --safetensors --register-with Q4_K_M -- -x
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '-x' is not one	models pull --register-with Q4_K_M --safetensors -- -x
 exit 106: name is required	review targets add --repo o/r --skills security -- -x
 exit 1: apogee review: review target name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --skills security --repo o/r -- -x
+exit 106: ref is required	review mr --skills security -- -x
+exit 1: apogee review: '-x' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --skills security --dry-run -- -x
 exit 106: name is required	mcp create --command /bin/echo --args a -- -x
 exit 1: apogee mcp: updating config: MCP server name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp create --args a --command /bin/echo -- -x
 exit 109: The following argument was not expected: -dash	video generate -o /Users/someone/a.mp4 --lora /Users/someone/l.safetensors -- -dash

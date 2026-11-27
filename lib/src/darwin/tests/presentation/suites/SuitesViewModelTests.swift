@@ -18,9 +18,9 @@ struct SuitesViewModelTests {
         runner.reading(["models", "status"], #"{"fields":[{"field":"suite","value":"coding"},{"field":"chat","value":"qwen   (via suite coding)"}]}"#)
         runner.reading(["models", "list"], #"{"object":"list","data":[{"backend":"qwen","backend_type":"llamacpp"},{"backend":"small","backend_type":"llamacpp"},{"backend":"claude","backend_type":"anthropic"},{"backend":"mlx-embed","backend_type":"mlx"}]}"#)
         runner.reading(["system"], #"{"gpu":{"model_budget_bytes":8589934592}}"#)
-        runner.reading(["models", "info", "qwen"], #"{"name":"qwen","fields":[{"field":"size","value":"4800 MiB"},{"field":"cache","value":"4608 MiB at f16 (the default)"}]}"#)
-        runner.reading(["models", "info", "small"], #"{"name":"small","fields":[{"field":"size","value":"600 MiB"},{"field":"cache","value":"none -- no attention layers"}]}"#)
-        runner.reading(["models", "info", "mlx-embed"], #"{"name":"mlx-embed","fields":[{"field":"format","value":"MLX"}]}"#)
+        runner.reading(["models", "info", "--", "qwen"], #"{"name":"qwen","fields":[{"field":"size","value":"4800 MiB"},{"field":"cache","value":"4608 MiB at f16 (the default)"}]}"#)
+        runner.reading(["models", "info", "--", "small"], #"{"name":"small","fields":[{"field":"size","value":"600 MiB"},{"field":"cache","value":"none -- no attention layers"}]}"#)
+        runner.reading(["models", "info", "--", "mlx-embed"], #"{"name":"mlx-embed","fields":[{"field":"format","value":"MLX"}]}"#)
         return runner
     }
 
@@ -76,10 +76,10 @@ struct SuitesViewModelTests {
         let suites = SuitesViewModel(runner: runner)
         await suites.connect(binary: Self.binary)
         await suites.makeDefault(suites.suites[1])
-        #expect(runner.calls.contains("run config set-default-suite research"))
+        #expect(runner.calls.contains("run config set-default-suite -- research"))
         await suites.makeDefault(nil)
-        #expect(runner.calls.contains("run config set-default-suite off"))
-        let after = runner.calls.drop { $0 != "run config set-default-suite off" }
+        #expect(runner.calls.contains("run config set-default-suite -- off"))
+        let after = runner.calls.drop { $0 != "run config set-default-suite -- off" }
         #expect(after.contains("run config get suites") && after.contains("read models status"), "read back")
     }
 
@@ -127,7 +127,7 @@ struct SuitesViewModelTests {
         // The CLI's state after `config set-default-suite duo`, as recorded.
         Self.status("suites-models-status-described-typed.json", on: runner)
         await suites.makeDefault(duo)
-        #expect(runner.calls.contains("run config set-default-suite duo"))
+        #expect(runner.calls.contains("run config set-default-suite -- duo"))
         #expect(suites.defaultSuite == duo.name, "the badge and Stop using it by default follow")
     }
 

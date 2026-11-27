@@ -1,0 +1,1 @@
+apogee mcp: updating config: MCP server name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null

@@ -276,7 +276,7 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 ## Out of scope
 
 - **Rendering a printed command**: `--`, quoting, option order, the five quoters and `a;b` naming another target. That is [CLI-M48](a-suggested-command-runs-as-printed.md).
-- **The editors' own refusal** keeps 57e's words, `rename it with 'apogee config rename-backend'`. It already names the way out. It is also what a person sees when the TUI's row actions ([CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md)) or the Mac app ([APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md)'s default) reach the verb with such a name.
+- **The editors' own refusal** keeps 57e's words, `rename it with 'apogee config rename-backend'`. It already names the way out. It is also what a person sees when the TUI's row actions ([CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md)) or the Mac app ([APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name)'s default) reach the verb with such a name.
 - **The program word and root** a door names: [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Dead ends for other config kinds** (graph entries, suites, agents, MCP servers) and **a rename verb for them**. Recorded as a gap (Open questions).
 - **Symphony names.** A dash-led symphony can be created once a `symphonies:` section exists, which is the made-thing-names seam ([CLI-M53](a-symphony-the-cli-writes-is-one-it-can-delete.md)).
@@ -293,6 +293,6 @@ Each case runs in a `CliHome` under a temporary `APOGEE_HOME`. Each fails once C
 - **Relates to:**
   - [CLI-M54](rename-and-get-find-an-entry-by-its-folded-name.md), which makes `rename-backend` find a key in any case;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose aside (`models delete` suggests `config delete-backend -x`) and Evidence 7 (the app's rename row) this item answers on the CLI's side;
-  - [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), whose default relies on the CLI's refusal naming `rename-backend`;
+  - [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name), whose default relies on the CLI's refusal naming `rename-backend`;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), which relays `check --output-format json` to a paired device byte for byte, the rename door included.
 - **Follows from:** M14 (00635d8a, MILESTONES 2026-10-19, "The doctor's doors run as printed"), 55f (8d5aec51, MILESTONES 2026-10-25, the add rule and "existing odd names reached by `rename-backend`") and 57e (MILESTONES 2026-11-01, the odd-name refusal); [ADR 0002](../../../adrs/cli/mode-parity.md) and [ADR 0006](../../../adrs/cli/backwards-compatibility.md).

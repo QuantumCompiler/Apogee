@@ -215,7 +215,9 @@ func dataDirectory(_ runner: any CommandRunning, _ binary: URL) async -> URL? {
 @MainActor
 @Observable
 public final class AgentsViewModel {
-    /// `agents create <name>`, as a person types it.
+    /// `agents create <name>`, as a person types it: the name after `--`,
+    /// so a typed `-h` is the CLI's to make or refuse, never its help
+    /// (`Argv`, GUI M23).
     public struct CreateForm: Equatable, Sendable {
         public var name = ""
         public var description = ""
@@ -229,14 +231,14 @@ public final class AgentsViewModel {
         public var arguments: [String]? {
             let name = name.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return nil }
-            var arguments = ["agents", "create", name]
+            var options: [Argv.Option] = []
             let description = description.trimmingCharacters(in: .whitespaces)
-            if !description.isEmpty { arguments += ["--description", description] }
+            if !description.isEmpty { options.append(.value("--description", description)) }
             let model = model.trimmingCharacters(in: .whitespaces)
-            if !model.isEmpty { arguments += ["--model", model] }
-            if let tools { arguments += ["--tools", tools] }
-            if noSchema { arguments.append("--no-schema") }
-            return arguments
+            if !model.isEmpty { options.append(.value("--model", model)) }
+            if let tools { options.append(.value("--tools", tools)) }
+            if noSchema { options.append(.flag("--no-schema")) }
+            return Argv.line(["agents", "create"], options: options, names: [name])
         }
     }
 
@@ -299,7 +301,13 @@ public final class AgentsViewModel {
     /// `pendingDelete` is cleared only while it is still `agent`.
     public func confirmDelete(_ agent: AgentEntry, purge: Bool) async {
         if pendingDelete == agent { pendingDelete = nil }
-        _ = await change(["agents", "delete", agent.name, purge ? "--purge" : "--keep-files"])
+        _ = await change(Self.deleteArguments(agent.name, purge: purge))
+    }
+
+    /// `agents delete --purge | --keep-files -- <name>`: the agent after
+    /// `--`, so one a config names `-x` reaches the verb (GUI M23).
+    static func deleteArguments(_ name: String, purge: Bool) -> [String] {
+        Argv.line(["agents", "delete"], options: [.flag(purge ? "--purge" : "--keep-files")], names: [name])
     }
 
     /// Opens one of the person's own agent files -- a prompt or a schema --
@@ -480,15 +488,17 @@ public final class SymphoniesViewModel {
         return !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// `symphonies play <name> --input <text> [--image <path>] --output-format
-    /// json`, supervised: the stage lines as it goes, the stages' answers at
-    /// the end. `--image` goes only to a symphony whose input takes one.
+    /// `symphonies play --input <text> [--image <path>] --output-format json
+    /// -- <name>`, supervised: the stage lines as it goes, the stages'
+    /// answers at the end. `--image` goes only to a symphony whose input
+    /// takes one. The name after `--`, the JSON flag added before it
+    /// (`Argv`, GUI M23).
     public func playIt() {
         guard canPlay, let binary, let symphony = current else { return }
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        var arguments = ["symphonies", "play", symphony.name, "--input", input]
-        if symphony.takesImage, let image { arguments += ["--image", image] }
-        arguments += ["--output-format", "json"]
+        var options: [Argv.Option] = [.value("--input", input)]
+        if symphony.takesImage, let image { options.append(.value("--image", image)) }
+        let arguments = Argv.adding(["--output-format", "json"], to: Argv.line(["symphonies", "play"], options: options, names: [symphony.name]))
         play = nil
         playedName = nil
         playing = JobProgress()
@@ -547,7 +557,7 @@ public final class SymphoniesViewModel {
         editor.wrote(saved)
         editor.saving = true
         self.editor = editor
-        let outcome = await runner.read(binary: binary, ["symphonies", "show", name])
+        let outcome = await runner.read(binary: binary, Argv.line(["symphonies", "show"], names: [name]))
         if self.editor?.path == editor.path {
             if let document = outcome.document, let symphony = Symphony(document.value) {
                 self.editor?.endSave(
@@ -572,11 +582,11 @@ public final class SymphoniesViewModel {
     /// Put it back as it was is offered once apogee refused a save (2e).
     public var offersRestore: Bool { editor?.refused == true }
 
-    /// `symphonies create <name> --from <this>`: a config entry to change.
+    /// `symphonies create --from <this> -- <name>`: a config entry to change.
     public func copy() async {
         let name = copyName.trimmingCharacters(in: .whitespaces)
         guard let binary, let source = current, !name.isEmpty else { return }
-        let outcome = await runner.command(binary: binary, ["symphonies", "create", name, "--from", source.name])
+        let outcome = await runner.command(binary: binary, Argv.line(["symphonies", "create"], options: [.value("--from", source.name)], names: [name]))
         copyName = ""
         await refresh()
         if let failure = outcome.failure {
@@ -595,7 +605,7 @@ public final class SymphoniesViewModel {
     public func confirmDelete(_ symphony: Symphony) async {
         guard let binary else { return }
         if pendingDelete == symphony { pendingDelete = nil }
-        let outcome = await runner.command(binary: binary, ["symphonies", "delete", symphony.name])
+        let outcome = await runner.command(binary: binary, Argv.line(["symphonies", "delete"], names: [symphony.name]))
         await refresh()
         if let failure = outcome.failure { self.failure = failure }
     }
@@ -676,20 +686,21 @@ public final class MCPViewModel {
 
     public var current: MCPServer? { selected.flatMap { n in servers.first { $0.name == n } } }
 
-    /// `mcp create <name> --from <preset>`, byte for byte the hand-typed one;
-    /// the new server is selected only once the binary made it -- a refusal
-    /// keeps the selection and is said (GUI 4h). Whether it was made.
+    /// `mcp create --from <preset> -- <name>`, byte for byte the preset's
+    /// `registration`; the new server is selected only once the binary made
+    /// it -- a refusal keeps the selection and is said (GUI 4h). Whether it
+    /// was made.
     @discardableResult
     public func register(_ preset: MCPPreset, as name: String) async -> Bool {
         let name = name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, await change(["mcp", "create", name, "--from", preset.name]) else { return false }
+        guard !name.isEmpty, await change(Argv.line(["mcp", "create"], options: [.value("--from", preset.name)], names: [name])) else { return false }
         selected = name
         return true
     }
 
-    /// `mcp enable | disable <name>`, read back.
+    /// `mcp enable | disable -- <name>`, read back.
     public func setEnabled(_ server: MCPServer, _ enabled: Bool) async {
-        _ = await change(["mcp", enabled ? "enable" : "disable", server.name])
+        _ = await change(Argv.line(enabled ? ["mcp", "enable"] : ["mcp", "disable"], names: [server.name]))
     }
 
     /// Asks before removing a server (GUI 4k).
@@ -706,7 +717,7 @@ public final class MCPViewModel {
     /// `server`.
     public func confirmRemove(_ server: MCPServer) async {
         if pendingRemove == server { pendingRemove = nil }
-        let removed = await change(["config", "delete-mcp-server", server.name])
+        let removed = await change(Self.removeArguments(server.name))
         if removed, selected == server.name, !servers.contains(where: { $0.name == server.name }) {
             selected = nil
             tool = ""
@@ -714,10 +725,16 @@ public final class MCPViewModel {
         }
     }
 
-    /// `mcp test <server> <tool> <arguments>`: its answer as printed.
+    /// `config delete-mcp-server -- <name>`: the server after `--`, so one a
+    /// config names `-x` reaches the verb (GUI M23).
+    public static func removeArguments(_ name: String) -> [String] {
+        Argv.line(["config", "delete-mcp-server"], names: [name])
+    }
+
+    /// `mcp test -- <server> <tool> <arguments>`: its answer as printed.
     public func tryTool() async {
         guard let binary, let server = current, !tool.isEmpty else { return }
-        switch await runner.command(binary: binary, ["mcp", "test", server.name, tool, arguments]) {
+        switch await runner.command(binary: binary, Argv.line(["mcp", "test"], names: [server.name, tool, arguments])) {
         case .done(let stdout):
             tried = stdout.trimmingCharacters(in: .newlines)
             failure = nil

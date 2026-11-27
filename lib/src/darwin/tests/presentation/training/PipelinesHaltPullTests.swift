@@ -45,8 +45,8 @@ struct PipelinesHaltPullTests {
         runner.reading(["train", "pipeline", "status"], fixture("train-pipeline-status-none"))
         if lists {
             runner.reading(["train", "pipeline", "list"], fixture("train-pipeline-list"))
-            runner.reading(["train", "pipeline", "show", "skills"], fixture("train-pipeline-show-skills"))
-            runner.reading(["train", "pipeline", "show", "nightly"], fixture("train-pipeline-show-nightly"))
+            runner.reading(["train", "pipeline", "show", "--", "skills"], fixture("train-pipeline-show-skills"))
+            runner.reading(["train", "pipeline", "show", "--", "nightly"], fixture("train-pipeline-show-nightly"))
         } else {
             runner.failing(["train", "pipeline", "list"], .failed(exit: ChildExit(reason: .exited, status: 106), stderrTail: words("train-pipeline-list-older")))
         }
@@ -95,7 +95,7 @@ struct PipelinesHaltPullTests {
         let job = ScriptedJob()
         let (model, runner, starter) = await training(vocabulary: Self.m30, jobs: [job])
         await model.openSpec("skills")
-        #expect(runner.calls.contains("read train|pipeline|show|skills"))
+        #expect(runner.calls.contains("read train|pipeline|show|--|skills"))
         let spec = try #require(model.openSpecPlan)
         #expect(spec.name == "skills" && spec.student == "tiny" && spec.path == nil)
         #expect(TrainingViewModel.source(spec) == "a training.pipelines entry")
@@ -117,7 +117,7 @@ struct PipelinesHaltPullTests {
     @Test("a spec the binary has no answer for is said in its words")
     func specRefused() async {
         let (model, runner, _) = await training(vocabulary: Self.m30)
-        runner.failing(["train", "pipeline", "show", "nosuch"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: words("train-pipeline-show-unknown")))
+        runner.failing(["train", "pipeline", "show", "--", "nosuch"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: words("train-pipeline-show-unknown")))
         await model.openSpec("nosuch")
         #expect(model.openSpecPlan == nil)
         #expect(model.specFailure?.hasPrefix("apogee train: no pipeline 'nosuch': not a spec file, and not an entry under training.pipelines") == true)
@@ -220,9 +220,9 @@ struct PipelinesHaltPullTests {
         model.say = { said.append($0) }
         model.newPull()
         model.pullRef = "someone/heat-notes"
-        #expect(model.pullArguments == ["datasets", "pull", "someone/heat-notes"], "the sheet shows the command as typed")
+        #expect(model.pullArguments == ["datasets", "pull", "--", "someone/heat-notes"], "the sheet shows the command as typed")
         model.pull()
-        #expect(starter.starts == [["datasets", "pull", "someone/heat-notes", "--output-format", "stream-json"]])
+        #expect(starter.starts == [["datasets", "pull", "--output-format", "stream-json", "--", "someone/heat-notes"]])
         #expect(starter.streamed == [true] && model.running == "Pulling")
         let lines = jobStream("datasets-pull-handmade")
         say(lines.prefix { !$0.contains(#""done":65536"#) }, on: pull)
@@ -237,7 +237,7 @@ struct PipelinesHaltPullTests {
         #expect(pulled.path == Self.landed && pulled.summary == "2 file(s), 136 KiB")
         #expect(said == ["Pulled: 2 file(s), 136 KiB"])
         model.prepare(pulled.path)
-        #expect(starter.starts.last == ["datasets", "prepare", Self.landed])
+        #expect(starter.starts.last == ["datasets", "prepare", "--", Self.landed])
         prepare.end()
         #expect(await eventually { !model.isRunning })
     }
@@ -294,7 +294,7 @@ struct PipelinesHaltPullTests {
             model.newPull()
             model.pullRef = "someone/heat-notes"
             model.pull()
-            #expect(starter.starts == [["datasets", "pull", "someone/heat-notes"]] && starter.streamed == [false])
+            #expect(starter.starts == [["datasets", "pull", "--", "someone/heat-notes"]] && starter.streamed == [false])
             for line in fixture("datasets-pull-handmade", "txt").split(separator: "\n", omittingEmptySubsequences: false) {
                 job.say(.said(String(line)))
             }

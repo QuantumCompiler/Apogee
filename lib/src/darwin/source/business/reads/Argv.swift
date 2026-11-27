@@ -57,6 +57,8 @@ public enum Argv {
     public static let endOfOptionsEaters: [String: Set<String>] = [
         "graph build": ["--source", "--lang"],
         "models convert": ["--register-with"],
+        "models pull": ["--register-with"],
+        "review mr": ["--skills"],
         "review targets add": ["--skills"],
         "mcp create": ["--args"],
         "video generate": ["--lora"],

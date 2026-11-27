@@ -1,0 +1,22 @@
+Scaffold an agent: a starter prompt, an output schema, and a config entry
+Usage: apogee agents create [OPTIONS] name
+
+Positionals:
+  name TEXT REQUIRED          The agent's name (letters, digits, _ and -)
+
+Options:
+  -h,--help                   Print this help message and exit
+  --description TEXT          Short description of the agent
+  --model BACKEND             Backend override (blank = models.default)
+  --tools TEXT:{read-only,all,none}
+                              Tool policy: read-only (default) | all | none
+  --no-schema                 A prose-only agent (no output schema)
+  --force                     Replace an existing agent and its files
+  --output-format TEXT:{auto,json,markdown}
+                              How the schema shapes the answer: auto | json | markdown
+  --collection COLLECTION     Collection retrieved from on every run (the agent's auto_rag)
+  --save-dir PATH             Directory reports are saved in
+  --save-name TEXT            Base filename for saved reports
+  --save-subdir TEXT          Subdirectory under the save directory (default: the agent's name)
+  --questions                 Let the agent ask the user questions mid-turn (ask_user) on a terminal
+  --mcp SERVER ...            MCP server to connect for this agent (repeatable)

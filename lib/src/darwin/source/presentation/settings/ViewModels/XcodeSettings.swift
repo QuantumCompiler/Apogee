@@ -60,7 +60,8 @@ public final class XcodeSettings {
     public private(set) var said: SettingsViewModel.Said?
     /// Why the last change failed, in the CLI's words.
     public private(set) var failure: String?
-    /// The change running now.
+    /// The change running now, its line as a person types it (`Argv.shown`,
+    /// GUI M23).
     public private(set) var working: String?
     /// Remove waits on the person's word.
     public var removing = false
@@ -129,7 +130,7 @@ public final class XcodeSettings {
             entry = nil
             return
         }
-        entry = MCPServerEntry(await runner.command(binary: binary, ["config", "get", MCPServerEntry.key(of: server)]))
+        entry = MCPServerEntry(await runner.command(binary: binary, Argv.line(["config", "get"], names: [MCPServerEntry.key(of: server)])))
     }
 
     // MARK: - What the binary said
@@ -211,11 +212,12 @@ public final class XcodeSettings {
         return preset.registration
     }
 
-    /// The command Remove runs -- `config delete-mcp-server <server>` --
-    /// where the server is in the config; `nil` otherwise.
+    /// The command Remove runs -- `config delete-mcp-server -- <server>`,
+    /// the server after `--` (`Argv`, GUI M23) -- where the server is in the
+    /// config; `nil` otherwise.
     public var removes: [String]? {
         guard registered, let server = xcodePreset?.serverName else { return nil }
-        return ["config", "delete-mcp-server", server]
+        return Argv.line(["config", "delete-mcp-server"], names: [server])
     }
 
     /// Why the preset can't run here, in the CLI's words -- its `missing`,
@@ -266,7 +268,7 @@ public final class XcodeSettings {
     /// the CLI said: every line it printed, or why it refused.
     private func change(_ arguments: [String], title: String) async {
         guard let binary, working == nil else { return }
-        working = arguments.prefix(3).joined(separator: " ")
+        working = Argv.shown(arguments)
         said = nil
         let outcome = await runner.command(binary: binary, arguments)
         working = nil

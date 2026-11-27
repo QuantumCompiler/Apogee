@@ -264,7 +264,7 @@ struct RenameSheet: View {
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(save)
-            Text("apogee chats title \(chat.id) …")
+            Text("apogee " + Argv.shown(SessionLibraryViewModel.titleArguments(chat.id, "…")))
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
             HStack {

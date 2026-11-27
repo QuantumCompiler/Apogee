@@ -1,5 +1,6 @@
 #if DEBUG
 import BusinessJobs
+import BusinessReads
 import Foundation
 import InfrastructureProcess
 
@@ -26,7 +27,7 @@ enum TasksPreview {
             (["task", "list"], list),
             (["task", "status"], TasksDocuments.taskStatus),
             (["task", "recipes"], TasksDocuments.recipes),
-            (["task", "recipes", "show", "digest-folder"], TasksDocuments.recipeShow),
+            (Argv.line(["task", "recipes", "show"], names: ["digest-folder"]), TasksDocuments.recipeShow),
         ])
     }
 
@@ -47,8 +48,8 @@ enum TasksPreview {
     static func stopped(listing list: String = TasksDocuments.listInterrupted) -> TasksViewModel {
         let runner = PreviewRunner(reads: [
             (["task", "list"], list),
-            (["task", "status", interrupted], TasksDocuments.statusInterrupted),
-            (["task", "status", exhausted], TasksDocuments.statusExhausted),
+            (Argv.line(["task", "status"], names: [interrupted]), TasksDocuments.statusInterrupted),
+            (Argv.line(["task", "status"], names: [exhausted]), TasksDocuments.statusExhausted),
         ])
         return TasksViewModel(runner: runner, starter: PreviewJobs(), now: { recorded })
     }
@@ -63,7 +64,7 @@ enum TasksPreview {
     static func killedRows() -> TasksViewModel {
         let runner = PreviewRunner(reads: [
             (["task", "list"], TasksDocuments.listKilled),
-            (["task", "status", killed], TasksDocuments.statusKilled),
+            (Argv.line(["task", "status"], names: [killed]), TasksDocuments.statusKilled),
         ])
         return TasksViewModel(runner: runner, starter: PreviewJobs(), now: { recorded })
     }
@@ -93,10 +94,10 @@ enum TasksPreview {
         let runner = PreviewRunner(reads: [
             (["task", "list"], TasksDocuments.listNewest50),
             (["task", "list", "--all"], TasksDocuments.listAll),
-            (["task", "status", uses], TasksDocuments.statusUses),
-            (["task", "status", stalled], TasksDocuments.statusStalled),
-            (["task", "status", stalledGranted], TasksDocuments.statusStalledGranted),
-            (["task", "status", halted], TasksDocuments.statusHaltedDone),
+            (Argv.line(["task", "status"], names: [uses]), TasksDocuments.statusUses),
+            (Argv.line(["task", "status"], names: [stalled]), TasksDocuments.statusStalled),
+            (Argv.line(["task", "status"], names: [stalledGranted]), TasksDocuments.statusStalledGranted),
+            (Argv.line(["task", "status"], names: [halted]), TasksDocuments.statusHaltedDone),
         ])
         return TasksViewModel(runner: runner, starter: PreviewJobs(said: said), now: { swept })
     }

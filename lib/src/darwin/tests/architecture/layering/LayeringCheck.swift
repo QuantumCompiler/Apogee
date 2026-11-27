@@ -37,6 +37,11 @@ import Foundation
 ///   `Task` (`if let answer = …`, a `case … (let …)`, or the actions'
 ///   parameter), and no `Task` there reads the dialog's question back -- the
 ///   dialog's closing clears it before the `Task` runs (GUI M20);
+/// - every argv line under `source/` is the builder's: an array whose first
+///   word is a command word holds string literals alone, nothing but such
+///   literals is added to it or to a name declared from it, and nothing is
+///   added to a line `Argv` built -- so a name, path or id reaches the verb
+///   after `--` (GUI M23);
 /// - each layer's card, `source/<layer>/CLAUDE.md`, names exactly its modules.
 struct LayeringCheck {
     /// Lowest first: a module may depend on its own layer or any before it.
@@ -96,6 +101,7 @@ struct LayeringCheck {
         found += tests(for: modules)
         found += scheme()
         found += cards(for: modules)
+        found += argvLines()
         return found
     }
 
@@ -618,6 +624,10 @@ struct LayeringCheck {
         let characters: [Character]
         var out: [Character]
         var at = 0
+        /// Every string literal it blanked, by the characters it spans --
+        /// quotes and pounds included -- and whether an interpolation opens
+        /// it, so the literal's first characters are not the author's.
+        var literals: [(range: Range<Int>, opensWithInterpolation: Bool)] = []
 
         init(_ source: String) {
             characters = Array(source)
@@ -662,8 +672,9 @@ struct LayeringCheck {
                     }
                     blank(start..<at)
                 } else if let hashes = stringOpening() {
-                    string(hashes: hashes)
+                    let opens = string(hashes: hashes)
                     blank(start..<at)
+                    literals.append((start..<at, opens))
                 } else {
                     if inInterpolation {
                         if characters[at] == "(" {
@@ -688,32 +699,447 @@ struct LayeringCheck {
 
         /// A string literal, from its opening at `at` to just past its close:
         /// single-line or multi-line, raw by `hashes`, its interpolations
-        /// scanned as code so a string inside one does not end it.
-        mutating func string(hashes: Int) {
+        /// scanned as code so a string inside one does not end it. Whether
+        /// an interpolation opens its text.
+        @discardableResult
+        mutating func string(hashes: Int) -> Bool {
             let pounds = String(repeating: "#", count: hashes)
             at += hashes
             let multiline = starts("\"\"\"", at: at)
             let quote = multiline ? "\"\"\"" : "\""
             at += quote.count
+            let text = at
+            var opens = false
             let close = quote + pounds
             let escape = "\\" + pounds
             while at < characters.count {
                 if starts(close, at: at) {
                     at += close.count
-                    return
+                    return opens
                 }
                 if starts(escape, at: at) {
+                    let escaped = at
                     at += escape.count
                     if at < characters.count, characters[at] == "(" {
+                        opens = opens || escaped == text
                         at += 1
                         code(inInterpolation: true)
                     }
                     if at < characters.count { at += 1 }
                     continue
                 }
-                if !multiline, characters[at].isNewline { return }
+                if !multiline, characters[at].isNewline { return opens }
                 at += 1
             }
+            return opens
+        }
+    }
+
+    // MARK: - Argv lines
+
+    /// The binary's command words, one a line, as `scripts/refresh-parity-fixture.sh`
+    /// records them: an array whose first word is one is a line the app runs.
+    static let commandWordsFile = "tests/presentation/shell/Fixtures/command-words.txt"
+
+    /// Every argv line under `source/` held to the builder (GUI M23).
+    private func argvLines() -> [String] {
+        guard let text = tree.contents(of: Self.commandWordsFile) else {
+            return ["\(Self.commandWordsFile) is missing: the argv rule reads the binary's command words from it"]
+        }
+        let words = Set(text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        guard !words.isEmpty else {
+            return ["\(Self.commandWordsFile) names no command word: an empty list proves nothing"]
+        }
+        let files = tree.swiftFiles(under: "source").map { ($0, tree.contents(of: $0) ?? "") }
+        // A line's name may be declared in one file and added to in another
+        // (`RoleAssignment.verb`, read from Presentation): a public one is
+        // the whole tree's. A local is its file's alone.
+        var names: (literal: Set<String>, built: Set<String>) = ([], [])
+        for (_, source) in files {
+            let found = Self.argvLineNames(in: source, commandWords: words, publicOnly: true)
+            names.literal.formUnion(found.literal)
+            names.built.formUnion(found.built)
+        }
+        let lineNames = (literal: names.literal.subtracting(names.built), built: names.built)
+        return files.flatMap { Self.argvViolations(in: $0.1, file: $0.0, commandWords: words, lineNames: lineNames) }
+    }
+
+    /// The names `source` declares from a line (`ArgvScan.lineNames`); with
+    /// `publicOnly`, those declared `public` alone.
+    static func argvLineNames(in source: String, commandWords: Set<String>, publicOnly: Bool = false) -> (literal: Set<String>, built: Set<String>) {
+        var masker = Masker(source)
+        masker.code(inInterpolation: false)
+        return ArgvScan(text: masker.characters, code: masker.out, literals: masker.literals, words: commandWords).lineNames(publicOnly: publicOnly)
+    }
+
+    /// What breaks the argv rule in `source`, each named by `file` and line
+    /// (GUI M23). The CLI's parser reads a dash-led word before `--` as an
+    /// option -- `embed delete --yes -x` exits 106 -- so a name, path or id
+    /// reaches the verb only through `Argv.line`, after its `--`:
+    /// - a line literal -- an array whose first element is a string literal
+    ///   naming a command word -- holds only string literals, each opening
+    ///   with the author's own text: read from the source at the positions
+    ///   `code(_:)` blanks, so "the word after a dash literal" is never taken
+    ///   for an option's value;
+    /// - nothing but a list of such literals is added to a line literal, or
+    ///   to a name declared from one, in any file of the tree (`+`, `+=`,
+    ///   `append`, `insert`): today's `role.verb + [backend]`, and as much
+    ///   `line + names` or `line + (name.map { [$0] } ?? [])`;
+    /// - nothing is added to a line `Argv` built, or to a name declared from
+    ///   one: such a line holds its end of options, and a later option goes
+    ///   through `Argv.adding`.
+    ///
+    /// A `__complete` ask opens with no command word, so it is exempt, as its
+    /// protocol takes its words verbatim. `lineNames` are the tree's
+    /// (`argvLineNames`), this file's added.
+    static func argvViolations(
+        in source: String, file: String, commandWords: Set<String>, lineNames: (literal: Set<String>, built: Set<String>) = ([], [])
+    ) -> [String] {
+        var masker = Masker(source)
+        masker.code(inInterpolation: false)
+        let scan = ArgvScan(text: masker.characters, code: masker.out, literals: masker.literals, words: commandWords)
+        var found: [(Int, String)] = []
+        let builder = "the CLI's parser reads a dash-led word before -- as an option, so a name, path or id goes through Argv.line (its options, then -- and the names)"
+        for open in scan.code.indices where scan.code[open] == "[" && scan.isLineLiteral(open) {
+            let held = scan.elements(of: open).filter { !scan.isPlainLiteral($0) }
+            if let first = held.first {
+                found.append((open,
+                    "\(file):\(scan.line(of: first.lowerBound)): a command line holds \(held.map(scan.words).joined(separator: ", ")), not string literals alone -- \(builder)"))
+            }
+        }
+        let own = scan.lineNames()
+        let local = (literal: own.literal.subtracting(own.built), built: own.built)
+        let builtMembers = lineNames.built.union(own.built)
+        let members = (literal: lineNames.literal.union(own.literal).subtracting(builtMembers), built: builtMembers)
+        for site in scan.additions() {
+            switch scan.line(before: site.operand, local: local, members: members) {
+            case .built:
+                found.append((site.start,
+                    "\(file):\(scan.line(of: site.start)): \(scan.words(site.added)) is added to a line Argv built -- it holds its end of options already, so a word added at its end lands after -- and is read as a name; add an option with Argv.adding"))
+            case .literal:
+                let held = site.elements.filter { !scan.isPlainLiteral($0) }
+                if let first = held.first {
+                    found.append((site.start,
+                        "\(file):\(scan.line(of: first.lowerBound)): \(held.map(scan.words).joined(separator: ", ")) is added to a command line -- \(builder)"))
+                }
+            case nil:
+                continue
+            }
+        }
+        return found.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+
+    /// The argv rule's reading of one file: its characters, the same with
+    /// comments and strings blank, and where each string literal lies.
+    private struct ArgvScan {
+        let text: [Character]
+        let code: [Character]
+        let literals: [Int: (range: Range<Int>, opensWithInterpolation: Bool)]
+        let words: Set<String>
+
+        init(text: [Character], code: [Character], literals: [(range: Range<Int>, opensWithInterpolation: Bool)], words: Set<String>) {
+            self.text = text
+            self.code = code
+            self.literals = Dictionary(literals.map { ($0.range.lowerBound, $0) }, uniquingKeysWith: { first, _ in first })
+            self.words = words
+        }
+
+        /// What a line is added to: one an `Argv` call built, or a line literal.
+        enum Kind { case built, literal }
+
+        /// One addition to something: `x + [...]`, `x += [...]`,
+        /// `x.append(...)`, `x.insert(...)`. `operand` is just past what it
+        /// adds to, `added` what it adds and `elements` its words.
+        struct Addition {
+            let start: Int
+            let operand: Int
+            let added: Range<Int>
+            let elements: [Range<Int>]
+        }
+
+        static func isSpace(_ character: Character) -> Bool { character == " " || character == "\t" || character.isNewline }
+        static func isName(_ character: Character) -> Bool { character == "_" || character.isLetter || character.isNumber }
+
+        func skipSpace(from index: Int) -> Int {
+            var index = index
+            while index < text.count, Self.isSpace(text[index]) { index += 1 }
+            return index
+        }
+
+        func skipSpace(backFrom index: Int) -> Int {
+            var index = index
+            while index >= 0, Self.isSpace(text[index]) { index -= 1 }
+            return index
+        }
+
+        /// The 1-based line `index` is on.
+        func line(of index: Int) -> Int {
+            text[..<index].reduce(1) { $1.isNewline ? $0 + 1 : $0 }
+        }
+
+        /// The source of `range`, on one line.
+        func words(_ range: Range<Int>) -> String {
+            String(text[range]).split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+        }
+
+        /// The bracket closing the one at `open`, in the code.
+        func closing(_ open: Int) -> Int? {
+            let opener = code[open]
+            let closer: Character = opener == "(" ? ")" : opener == "[" ? "]" : "}"
+            var depth = 0
+            for index in open..<code.count {
+                if code[index] == opener {
+                    depth += 1
+                } else if code[index] == closer {
+                    depth -= 1
+                    if depth == 0 { return index }
+                }
+            }
+            return nil
+        }
+
+        /// The bracket opening the one at `close`, in the code.
+        func opening(_ close: Int) -> Int? {
+            let closer = code[close]
+            let opener: Character = closer == ")" ? "(" : closer == "]" ? "[" : "{"
+            var depth = 0
+            for index in stride(from: close, through: 0, by: -1) {
+                if code[index] == closer {
+                    depth += 1
+                } else if code[index] == opener {
+                    depth -= 1
+                    if depth == 0 { return index }
+                }
+            }
+            return nil
+        }
+
+        /// Whether the `[` at `open` subscripts what is before it.
+        func subscripts(_ open: Int) -> Bool {
+            open > 0 && (Self.isName(code[open - 1]) || ")]?!".contains(code[open - 1]))
+        }
+
+        /// A string literal's own text, its quotes and pounds dropped; `nil`
+        /// for a multi-line one or none at `index`.
+        func literalText(at index: Int) -> String? {
+            guard let literal = literals[index] else { return nil }
+            var body = text[literal.range]
+            while body.first == "#" { body = body.dropFirst() }
+            while body.last == "#" { body = body.dropLast() }
+            guard body.count >= 2, body.first == "\"", body.last == "\"", !body.starts(with: "\"\"\"") else { return nil }
+            return String(body.dropFirst().dropLast())
+        }
+
+        /// Whether the `[` at `open` opens a line literal: an array whose
+        /// first element is a string literal naming a command word.
+        func isLineLiteral(_ open: Int) -> Bool {
+            guard code[open] == "[", !subscripts(open) else { return false }
+            let first = skipSpace(from: open + 1)
+            guard let word = literalText(at: first), words.contains(word), let literal = literals[first] else { return false }
+            let next = skipSpace(from: literal.range.upperBound)
+            return next < text.count && text[next] != ":"
+        }
+
+        /// The elements of the bracketed list at `open`, each trimmed.
+        func elements(of open: Int) -> [Range<Int>] {
+            guard let close = closing(open) else { return [] }
+            var found: [Range<Int>] = []
+            var depth = 0
+            var start = open + 1
+            for index in (open + 1)..<close {
+                if "([{".contains(code[index]) {
+                    depth += 1
+                } else if ")]}".contains(code[index]) {
+                    depth -= 1
+                } else if code[index] == ",", depth == 0 {
+                    found.append(start..<index)
+                    start = index + 1
+                }
+            }
+            found.append(start..<close)
+            return found.compactMap { range in
+                let lower = skipSpace(from: range.lowerBound)
+                var upper = range.upperBound
+                while upper > lower, Self.isSpace(text[upper - 1]) { upper -= 1 }
+                return lower < upper ? lower..<upper : nil
+            }
+        }
+
+        /// Whether `range` is one string literal opening with its author's text.
+        func isPlainLiteral(_ range: Range<Int>) -> Bool {
+            guard let literal = literals[range.lowerBound] else { return false }
+            return literal.range == range && !literal.opensWithInterpolation
+        }
+
+        /// The names the file declares (`let`, `var`, `func`) from a line --
+        /// their initializer or body holding, outside any bracket, brace or
+        /// closure of its own, a line literal (`literal`) or an `Argv.line`,
+        /// `Argv.adding` or `Argv.text` call (`built`).
+        func lineNames(publicOnly: Bool = false) -> (literal: Set<String>, built: Set<String>) {
+            var literal: Set<String> = []
+            var built: Set<String> = []
+            let source = String(code)
+            let regex = try! NSRegularExpression(pattern: #"\b(?:let|var|func)\s+([A-Za-z_][A-Za-z0-9_]*)"#)
+            // The matches come in order: each one's end found from the last's.
+            var cursor = (index: source.startIndex, offset: 0)
+            for match in regex.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
+                guard let range = Range(match.range(at: 1), in: source), let whole = Range(match.range, in: source) else { continue }
+                let name = String(source[range])
+                if publicOnly {
+                    let lineStart = source[..<whole.lowerBound].lastIndex(where: \.isNewline).map { source.index(after: $0) } ?? source.startIndex
+                    let modifiers = source[lineStart..<whole.lowerBound].split(separator: " ")
+                    guard modifiers.contains("public") || modifiers.contains("open") else { continue }
+                }
+                cursor = (whole.upperBound, cursor.offset + source.distance(from: cursor.index, to: whole.upperBound))
+                guard let extent = extent(after: cursor.offset) else { continue }
+                var depth = 0
+                for index in extent {
+                    let character = code[index]
+                    if "([{".contains(character) {
+                        if depth == 0, character == "[", isLineLiteral(index) { literal.insert(name) }
+                        depth += 1
+                    } else if ")]}".contains(character) {
+                        depth -= 1
+                    } else if depth == 0, character == "A", index == 0 || !Self.isName(code[index - 1]),
+                        ["line", "adding", "text"].contains(where: { starts("Argv.\($0)(", at: index) })
+                    {
+                        built.insert(name)
+                    }
+                }
+            }
+            return (literal.subtracting(built), built)
+        }
+
+        /// Whether the code at `index` reads `word`.
+        func starts(_ word: String, at index: Int) -> Bool {
+            var index = index
+            for character in word {
+                guard index < code.count, code[index] == character else { return false }
+                index += 1
+            }
+            return true
+        }
+
+        /// A declaration's initializer (after its `=`, to the end of its line
+        /// or a `{`) or body (its braces), from just past its name.
+        func extent(after name: Int) -> Range<Int>? {
+            var depth = 0
+            var index = name
+            while index < code.count {
+                let character = code[index]
+                if "([".contains(character) {
+                    depth += 1
+                } else if ")]".contains(character) {
+                    depth -= 1
+                    // A bracket the name sits inside closes (`case .x(let y)`): no declaration of a line.
+                    if depth < 0 { return nil }
+                } else if depth == 0, character == "{" {
+                    return closing(index).map { (index + 1)..<$0 }
+                } else if depth == 0, character.isNewline {
+                    return nil
+                } else if depth == 0, character == "=", index + 1 < code.count, code[index + 1] != "=",
+                    index > 0, !"=!<>".contains(code[index - 1])
+                {
+                    var end = index + 1
+                    var inner = 0
+                    while end < code.count {
+                        let next = code[end]
+                        if "([".contains(next) {
+                            inner += 1
+                        } else if ")]".contains(next) {
+                            inner -= 1
+                        } else if inner == 0, next.isNewline || next == "{" {
+                            break
+                        }
+                        end += 1
+                    }
+                    return (index + 1)..<end
+                }
+                index += 1
+            }
+            return nil
+        }
+
+        /// Every addition in the code: `+ [...]` and `+= [...]`, and a
+        /// name's `.append(...)` or `.insert(...)`.
+        func additions() -> [Addition] {
+            var found: [Addition] = []
+            for index in code.indices where code[index] == "+" {
+                let isCompound = index + 1 < code.count && code[index + 1] == "="
+                let open = skipSpace(from: index + (isCompound ? 2 : 1))
+                guard open < code.count else { continue }
+                if code[open] == "[", let close = closing(open) {
+                    found.append(Addition(start: open, operand: index, added: open..<(close + 1), elements: elements(of: open)))
+                } else if let operand = operand(from: open) {
+                    // Anything but a list -- a name, a call, `(...)` -- is no
+                    // list of literals.
+                    found.append(Addition(start: open, operand: index, added: operand, elements: [operand]))
+                }
+            }
+            for index in code.indices where code[index] == "." {
+                for verb in ["append", "insert"] where starts(verb, at: index + 1) {
+                    let paren = skipSpace(from: index + 1 + verb.count)
+                    guard paren < code.count, code[paren] == "(", let close = closing(paren) else { continue }
+                    let arguments = elements(of: paren)
+                    guard let first = arguments.first else { continue }
+                    var added = [first]
+                    if String(text[first]).hasPrefix("contentsOf:") {
+                        let value = skipSpace(from: first.lowerBound + "contentsOf:".count)
+                        added = code[value] == "[" ? elements(of: value) : [value..<first.upperBound]
+                    }
+                    found.append(Addition(start: first.lowerBound, operand: index, added: paren..<(close + 1), elements: added))
+                }
+            }
+            return found
+        }
+
+        /// The operand that opens at `start`: up to the end of its line, or the
+        /// first `,`, `+` or closing bracket outside any bracket of its own.
+        func operand(from start: Int) -> Range<Int>? {
+            var depth = 0
+            var end = start
+            while end < code.count {
+                let character = code[end]
+                if "([{".contains(character) {
+                    depth += 1
+                } else if ")]}".contains(character) {
+                    if depth == 0 { break }
+                    depth -= 1
+                } else if depth == 0, character.isNewline || character == "," || character == "+" {
+                    break
+                }
+                end += 1
+            }
+            while end > start, Self.isSpace(text[end - 1]) { end -= 1 }
+            return start < end ? start..<end : nil
+        }
+
+        /// What the operand just before `position` (an addition's `+` or
+        /// `.`) is: a line `Argv` built, a line literal, or neither.
+        /// A bare name is read by the file's own declarations (`local`); a
+        /// member -- `role.verb` -- by the tree's public ones too (`members`).
+        func line(
+            before position: Int, local: (literal: Set<String>, built: Set<String>), members: (literal: Set<String>, built: Set<String>)
+        ) -> Kind? {
+            let last = skipSpace(backFrom: position - 1)
+            guard last >= 0 else { return nil }
+            if code[last] == "]" {
+                guard let open = opening(last) else { return nil }
+                return isLineLiteral(open) ? .literal : nil
+            }
+            var end = last
+            if code[last] == ")" {
+                guard let open = opening(last) else { return nil }
+                end = skipSpace(backFrom: open - 1)
+            }
+            var start = end
+            while start >= 0, Self.isName(code[start]) { start -= 1 }
+            guard start < end else { return nil }
+            let name = String(code[(start + 1)...end])
+            if ["line", "adding", "text"].contains(name), start >= 4, String(code[(start - 4)...start]) == "Argv." { return .built }
+            let names = start >= 0 && code[start] == "." ? members : local
+            if names.built.contains(name) { return .built }
+            return names.literal.contains(name) ? .literal : nil
         }
     }
 

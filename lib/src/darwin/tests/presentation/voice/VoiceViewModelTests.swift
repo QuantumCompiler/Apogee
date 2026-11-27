@@ -32,7 +32,7 @@ struct VoiceViewModelTests {
     func runner() -> ScriptedRunner {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], Self.recorded("list"))
-        runner.reading(["models", "info", "Kokoro-82M/voice/5f3a2c91d0e4"], Self.recorded("info-voice"))
+        runner.reading(["models", "info", "--", "Kokoro-82M/voice/5f3a2c91d0e4"], Self.recorded("info-voice"))
         return runner
     }
 

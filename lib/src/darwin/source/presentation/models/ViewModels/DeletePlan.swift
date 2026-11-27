@@ -45,10 +45,11 @@ public struct DeletePlan: Equatable, Sendable {
     /// What a screen says while the plan is read.
     public static let reading = "Reading what the delete removes"
 
-    /// `models delete <name>` without `--yes`, as typed: its plan, or why
-    /// there is none.
+    /// `models delete -- <name>` without `--yes`, as typed: its plan, or why
+    /// there is none. The name after `--`, so a backend or set a config names
+    /// `-x` has its plan read (`Argv`, GUI M23).
     public static func read(_ name: String, runner: any CommandRunning, binary: URL) async -> Reading {
-        let outcome = await runner.command(binary: binary, ["models", "delete", name])
+        let outcome = await runner.command(binary: binary, Argv.line(["models", "delete"], names: [name]))
         guard case .done(let said) = outcome else { return .refused(outcome.failure ?? "apogee said nothing") }
         return .plan(DeletePlan(said: said))
     }

@@ -25,6 +25,15 @@ public final class GraphViewModel {
 
         public var id: String { rawValue }
 
+        /// The verb that exports it: `graph export <format>`.
+        public var command: [String] {
+            switch self {
+            case .html: ["graph", "export", "html"]
+            case .graphml: ["graph", "export", "graphml"]
+            case .mermaid: ["graph", "export", "mermaid"]
+            }
+        }
+
         /// The extension the CLI's own default file takes (`<graph>.html`,
         /// `.graphml`, `.mmd`).
         public var fileExtension: String {
@@ -290,7 +299,7 @@ public final class GraphViewModel {
     public func rebuild() {
         guard let graph else { return }
         let sourced = !(stats?.sources.isEmpty ?? true)
-        run(Argv.line(["graph", sourced ? "update" : "build"], names: [graph]), saying: "What the rebuild said")
+        run(Argv.line(sourced ? ["graph", "update"] : ["graph", "build"], names: [graph]), saying: "What the rebuild said")
     }
 
     /// A collection graph's communities, detected and summarised by the
@@ -357,7 +366,7 @@ public final class GraphViewModel {
     public func export(_ format: ExportFormat, to file: URL) async {
         guard let graph else { return }
         await change(
-            Argv.line(["graph", "export", format.rawValue], options: [.value("--graph", graph), .value("-o", file.path)]), doing: "Exporting")
+            Argv.line(format.command, options: [.value("--graph", graph), .value("-o", file.path)]), doing: "Exporting")
     }
 
     /// `graph report --graph <graph> --out <file>`: the Markdown summary the

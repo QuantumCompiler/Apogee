@@ -42,7 +42,7 @@ struct StoreKindsTests {
     func kinds(_ runner: ScriptedRunner = ScriptedRunner()) async -> (StoreViewModel, ScriptedRunner) {
         runner.reading(["models", "list"], recorded("store-list-kinds"))
         for (kind, handle) in Self.byKind {
-            runner.reading(["models", "info", handle], recorded("store-info-kind-\(kind)"))
+            runner.reading(["models", "info", "--", handle], recorded("store-info-kind-\(kind)"))
         }
         runner.commanding(["config", "scan"], .done(stdout: recorded("config-scan-kinds", "txt")))
         let store = StoreViewModel(runner: runner)
@@ -57,13 +57,13 @@ struct StoreKindsTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("store-list-kinds-registered"))
         for (kind, handle) in Self.byKind {
-            runner.reading(["models", "info", handle], recorded("store-info-kind-\(kind)"))
+            runner.reading(["models", "info", "--", handle], recorded("store-info-kind-\(kind)"))
         }
         for (kind, backend) in Self.backends {
             let handle = Self.byKind.first { $0.0 == kind }!.1
-            runner.reading(["models", "info", backend], recorded("store-info-kinds-backend-\(kind)"))
-            runner.reading(["models", "info", Self.path(handle)], recorded("store-info-kinds-path-\(kind)"))
-            runner.reading(["models", "info", handle], recorded("store-info-kinds-path-\(kind)"))
+            runner.reading(["models", "info", "--", backend], recorded("store-info-kinds-backend-\(kind)"))
+            runner.reading(["models", "info", "--", Self.path(handle)], recorded("store-info-kinds-path-\(kind)"))
+            runner.reading(["models", "info", "--", handle], recorded("store-info-kinds-path-\(kind)"))
         }
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: Self.binary)
@@ -120,10 +120,10 @@ struct StoreKindsTests {
         let form = try #require(store.register)
         #expect(form.name == "EmbeddingGemma-300M-bf16", "the name config scan lists it under")
         #expect(form.kind == .embedding && form.vectorWidth == 768)
-        #expect(form.arguments == ["config", "add-backend", "EmbeddingGemma-300M-bf16", "--type", "mlx", "--model-path", Self.path(Self.embedding)])
+        #expect(form.arguments == ["config", "add-backend", "--type", "mlx", "--model-path", Self.path(Self.embedding), "--", "EmbeddingGemma-300M-bf16"])
         #expect(form.about == "An entry the embedding role can name, embedding with these weights on MLX. It answers no chat, so no session uses it. Its vectors are 768 wide.")
         await store.registerIt()
-        #expect(runner.calls.contains("run config add-backend EmbeddingGemma-300M-bf16 --type mlx --model-path \(Self.path(Self.embedding))"))
+        #expect(runner.calls.contains("run config add-backend --type mlx --model-path \(Self.path(Self.embedding)) -- EmbeddingGemma-300M-bf16"))
 
         let (registered, calls) = await registered()
         let entry = try self.set(registered, Self.embedding)
@@ -132,7 +132,7 @@ struct StoreKindsTests {
             .useForEmbeddings(backend: "EmbeddingGemma-300M-bf16"), .removeBackend("EmbeddingGemma-300M-bf16"), .checkFiles, .showInFinder, .delete,
         ])
         await registered.useForEmbeddings("EmbeddingGemma-300M-bf16")
-        #expect(calls.calls.contains("run config set-default-embedding EmbeddingGemma-300M-bf16"))
+        #expect(calls.calls.contains("run config set-default-embedding -- EmbeddingGemma-300M-bf16"))
         #expect(calls.calls.filter { $0 == "read models list --all" }.count == 2, "read back")
     }
 
@@ -172,7 +172,7 @@ struct StoreKindsTests {
     func videoAndVoice() async throws {
         let (store, runner) = await kinds()
         await store.makeDefaultVideo(try set(store, Self.video))
-        #expect(runner.calls.contains("run config set-default-video \(Self.video)"), "the CLI's 53l takes an MLX video model")
+        #expect(runner.calls.contains("run config set-default-video -- \(Self.video)"), "the CLI's 53l takes an MLX video model")
         #expect(store.infos[Self.voice]?.field("voices")?.contains("af_heart") == true, "its voices, as the CLI lists them")
     }
 
@@ -181,10 +181,10 @@ struct StoreKindsTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("store-list"))
         runner.reading(["models", "list", "--all"], recorded("store-list-all"))
-        runner.reading(["models", "info", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
-        runner.reading(["models", "info", StoreViewModelTests.q4Path], recorded("store-info-q4"))
-        runner.reading(["models", "info", "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"], recorded("store-info-f16"))
-        runner.reading(["models", "info", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
+        runner.reading(["models", "info", "--", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
+        runner.reading(["models", "info", "--", StoreViewModelTests.q4Path], recorded("store-info-q4"))
+        runner.reading(["models", "info", "--", "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"], recorded("store-info-f16"))
+        runner.reading(["models", "info", "--", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
         runner.commanding(["config", "scan"], .done(stdout: recorded("config-scan", "txt")))
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: Self.binary)
@@ -225,7 +225,7 @@ struct ConvertRoutesTests {
         // Nothing folded: the binary's --all was byte for byte this document.
         runner.reading(["models", "list"], recorded("store-list-routes"))
         for (route, handle) in Self.routes {
-            runner.reading(["models", "info", handle], recorded("store-info-route-\(route)"))
+            runner.reading(["models", "info", "--", handle], recorded("store-info-route-\(route)"))
         }
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: StoreKindsTests.binary)
@@ -249,14 +249,14 @@ struct ConvertRoutesTests {
         #expect(form.converterNote.contains("with its towers kept (vision_config, audio_config)"))
         #expect(form.towersSaid == "vision_config, audio_config -- --mlx builds it through mlx-vlm, its towers kept; --mlx --text-only builds its language model alone with mlx-lm",
                 "the CLI's own towers line")
-        #expect(form.arguments == ["models", "convert", Self.vlm, "--mlx", "--register"])
+        #expect(form.arguments == ["models", "convert", "--mlx", "--register", "--", Self.vlm])
         form.textOnly = true
         #expect(form.converter == "mlx-lm" && form.registers)
-        #expect(form.arguments == ["models", "convert", Self.vlm, "--mlx", "--text-only", "--register"])
+        #expect(form.arguments == ["models", "convert", "--mlx", "--text-only", "--register", "--", Self.vlm])
         #expect(form.converterNote.contains("Its towers (vision_config, audio_config) are left out"))
         #expect(form.steps.first?.label == "Convert to MLX 4bit, its language model alone")
         form.textOnly = false
-        #expect(form.arguments == ["models", "convert", Self.vlm, "--mlx", "--register"], "towers kept again")
+        #expect(form.arguments == ["models", "convert", "--mlx", "--register", "--", Self.vlm], "towers kept again")
     }
 
     @Test("where only mlx-lm's text-only build is offered, the sheet passes --text-only and it cannot be turned off")
@@ -266,7 +266,7 @@ struct ConvertRoutesTests {
         #expect(form.textOnlyOnly && form.textOnly)
         form.textOnly = false
         #expect(form.textOnly, "a plain --mlx is refused here, naming --text-only")
-        #expect(form.arguments == ["models", "convert", Self.textOnly, "--mlx", "--text-only", "--register"])
+        #expect(form.arguments == ["models", "convert", "--mlx", "--text-only", "--register", "--", Self.textOnly])
         #expect(form.towersSaid?.contains("builds no qwen3_vl model, so --mlx --text-only builds its language model alone") == true)
     }
 
@@ -277,11 +277,11 @@ struct ConvertRoutesTests {
         #expect(lm.converter == "mlx-lm" && !lm.textOnlyOffered && lm.registers)
         lm.textOnly = true
         #expect(!lm.textOnly, "a language model has no tower to leave out")
-        #expect(lm.arguments == ["models", "convert", Self.lm, "--mlx", "--register"])
+        #expect(lm.arguments == ["models", "convert", "--mlx", "--register", "--", Self.lm])
         let embedding = try form(store, Self.embeddings)
         #expect(embedding.converter == "mlx-embeddings" && embedding.registers && !embedding.textOnlyOffered)
         #expect(embedding.converterNote.contains("an entry the embedding role can name"))
-        #expect(embedding.arguments == ["models", "convert", Self.embeddings, "--mlx", "--register"])
+        #expect(embedding.arguments == ["models", "convert", "--mlx", "--register", "--", Self.embeddings])
     }
 
     @Test("a draft head, Wan's original layout and a voice model convert with none of --register, --register-with, --text-only or --model-type, whatever is chosen")
@@ -293,7 +293,7 @@ struct ConvertRoutesTests {
             #expect(opened.converter == converter && !opened.registers && !opened.register, "\(handle)")
             #expect(opened.defaultPrecision == precision && opened.written == precision)
             #expect(opened.levelChoices.isEmpty, "no further levels: --register-with is a registration")
-            #expect(opened.arguments == ["models", "convert", handle, "--mlx"])
+            #expect(opened.arguments == ["models", "convert", "--mlx", "--", handle])
             #expect(opened.steps.map(\.label) == ["Convert to MLX \(precision)"])
             #expect(opened.converterNote.contains("nothing is registered"))
             for precision in [nil] + opened.precisions.dropFirst().map(Optional.some) {

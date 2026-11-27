@@ -84,11 +84,11 @@ struct StoreView: View {
     private var pendingMessage: String {
         switch store.pending {
         case .deleteSet(let set, let plan):
-            return plan.question(running: "apogee models delete \(set.handle) --yes")
+            return plan.question(running: "apogee " + Argv.shown(ModelsViewModel.deleteArguments(set.handle)))
         case .deleteModel(let model, let plan):
-            return plan.question(running: "apogee models delete \(model) --yes")
+            return plan.question(running: "apogee " + Argv.shown(ModelsViewModel.deleteArguments(model)))
         case .removeBackend(let name):
-            return "apogee config delete-backend \(name) -- its config entry goes; the weights stay under Stored weights, ready to register again."
+            return "apogee " + Argv.shown(ModelsViewModel.removeArguments(name)) + " -- its config entry goes; the weights stay under Stored weights, ready to register again."
         case .registerAll(let report):
             return report + "\nRuns apogee config scan --register."
         case nil:
@@ -260,7 +260,7 @@ struct StoreDetails: View {
                         }
                     }
                     section("ON THE COMMAND LINE") {
-                        Text("apogee models info \(set.handle)")
+                        Text("apogee " + Argv.shown(Argv.line(["models", "info"], names: [set.handle])))
                             .font(.apogeeCode).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
                             .padding(Spacing.s).frame(maxWidth: .infinity, alignment: .leading)
                             .background(Palette.code, in: RoundedRectangle(cornerRadius: Radius.control))
@@ -325,25 +325,25 @@ struct StoreDetails: View {
             Button("Use in a new session") { useInSession(backend) }
         case .useForEmbeddings(let backend):
             Button("Use for embeddings") { Task { await store.useForEmbeddings(backend) } }
-                .help("apogee config set-default-embedding \(backend)")
+                .help("apogee " + Argv.shown(StoreViewModel.embeddingArguments(backend)))
         case .removeBackend(let backend):
             Button("Remove the backend…") { store.askToRemoveBackend(backend) }
         case .newClip:
             Button("New clip with it") { shell.go(.video) }
         case .makeDefaultVideo:
             Button("Make it the default") { Task { await store.makeDefaultVideo(set) } }
-                .help("apogee config set-default-video \(set.handle)")
+                .help("apogee " + Argv.shown(StoreViewModel.defaultVideoArguments(set.handle)))
         case .openVoice:
             Button("Open Voice") { shell.go(.voice) }
         case .pairWithBase:
             Button("Pair with its base…") { Task { await store.askToPair(set) } }
-                .help("apogee config set-backend <its base's backend> --draft \(store.path ?? set.handle)")
+                .help("apogee config set-backend " + Argv.shown(["--draft", store.path ?? set.handle]) + " <its base's backend>")
         case .unpair(let backend):
             Button("Unpair from \(backend)") { Task { await store.unpair(backend) } }
-                .help("apogee config set-backend \(backend) --draft \"\"")
+                .help("apogee " + Argv.shown(ModelsViewModel.unpairArguments(backend)))
         case .checkFiles:
             Button("Check the files") { store.check(set) }
-                .help("apogee models repair \(set.handle)")
+                .help("apogee " + Argv.shown(DownloadsViewModel.repairArguments(set.handle)))
         case .showInFinder:
             if let path = store.path {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
@@ -412,7 +412,7 @@ struct RegisterSheet: View {
                     }
                 }
                 if let arguments = store.register?.arguments {
-                    Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                    Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                 }
                 HStack {
                     Spacer()
@@ -456,7 +456,7 @@ struct PairSheet: View {
                     .pickerStyle(.radioGroup)
                 }
                 if let arguments = store.pairing?.arguments {
-                    Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                    Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                 }
                 HStack {
                     Spacer()
@@ -489,7 +489,7 @@ struct RenameStoredSheet: View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text("Rename \(model)").font(.apogeeHeading)
             TextField("Name", text: $name).textFieldStyle(.roundedBorder)
-            Text("apogee models rename \(model) \(name) -- its backends follow.").font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+            Text("apogee " + Argv.shown(StoreViewModel.renameArguments(model, to: name.trimmingCharacters(in: .whitespaces).isEmpty ? "…" : name.trimmingCharacters(in: .whitespaces))) + " -- its backends follow.").font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -557,7 +557,7 @@ struct ConvertSheet: View {
                 StepsList(steps: form.steps)
                 Text("Sizes are estimated from bits per weight. Whether the converter takes this architecture is learned by converting: if it can't, the job stops with the converter's own reason.")
                     .font(.apogeeSmall).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
-                Text((["apogee"] + form.arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                Text("apogee " + Argv.shown(form.arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                 HStack {
                     Spacer()
                     Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -597,7 +597,7 @@ struct QuantizeSheet: View {
                 StepsList(steps: form.steps)
                 Text("Sizes are estimated from bits per weight against the unquantized GGUF's 16.")
                     .font(.apogeeSmall).foregroundStyle(Palette.textTertiary)
-                Text((["apogee"] + form.arguments).joined(separator: " ") + (form.register ? "\nthen  apogee config add-backend \(form.name) --type llamacpp --model-path <the new file>" : ""))
+                Text("apogee " + Argv.shown(form.arguments) + (form.register ? "\nthen  apogee config add-backend --type llamacpp --model-path <the new file> " + Argv.shown(Argv.line([], names: [form.name.trimmingCharacters(in: .whitespaces)])) : ""))
                     .font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
                 HStack {
                     Spacer()

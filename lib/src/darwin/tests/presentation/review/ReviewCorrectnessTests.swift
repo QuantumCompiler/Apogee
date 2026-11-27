@@ -66,15 +66,15 @@ struct ReviewCorrectnessTests {
     @Test("a slow skill reply is dropped: the detail is the highlighted skill's, or nothing while it is read")
     func slowSkillReplyDropped() async throws {
         let (model, runner) = await model()
-        runner.reading(["review", "skills", "show", "security"], fixture("review-skill-show"))
-        runner.reading(["review", "skills", "show", "ai-ml"], fixture("review-skill-show-ai-ml"))
+        runner.reading(["review", "skills", "show", "--", "security"], fixture("review-skill-show"))
+        runner.reading(["review", "skills", "show", "--", "ai-ml"], fixture("review-skill-show-ai-ml"))
         await model.show(skill: "ai-ml")
         #expect(model.shownSkill?.name == "ai-ml")
-        let slow = runner.holding(["review", "skills", "show", "security"])
+        let slow = runner.holding(["review", "skills", "show", "--", "security"])
         let security = Task { await model.show(skill: "security") }
         #expect(await eventually { slow.arrived == 1 })
         #expect(model.selectedSkill == "security" && model.shownSkill == nil, "ai-ml's detail goes at the click on security")
-        let answered = runner.holding(["review", "skills", "show", "ai-ml"])
+        let answered = runner.holding(["review", "skills", "show", "--", "ai-ml"])
         let aiML = Task { await model.show(skill: "ai-ml") }
         #expect(await eventually { answered.arrived == 1 })
         #expect(model.selectedSkill == "ai-ml")
@@ -93,9 +93,9 @@ struct ReviewCorrectnessTests {
     @Test("a slow skill read's failure is dropped once another skill is chosen; its own still says it")
     func slowSkillFailureDropped() async throws {
         let (model, runner) = await model()
-        runner.reading(["review", "skills", "show", "ai-ml"], fixture("review-skill-show-ai-ml"))
-        runner.failing(["review", "skills", "show", "security"], .timedOut(after: .seconds(60), stderrTail: BoundedTail()))
-        let slow = runner.holding(["review", "skills", "show", "security"])
+        runner.reading(["review", "skills", "show", "--", "ai-ml"], fixture("review-skill-show-ai-ml"))
+        runner.failing(["review", "skills", "show", "--", "security"], .timedOut(after: .seconds(60), stderrTail: BoundedTail()))
+        let slow = runner.holding(["review", "skills", "show", "--", "security"])
         let security = Task { await model.show(skill: "security") }
         #expect(await eventually { slow.arrived == 1 })
         await model.show(skill: "ai-ml")
@@ -119,7 +119,7 @@ struct ReviewCorrectnessTests {
         model.targetForm.skills.insert("security")
         model.targetForm.skills.insert("concurrency")
         #expect(ReviewViewModel.lensesLabel(model.targetForm.skills, none: "each change's files") == "Lenses: concurrency, security")
-        #expect(model.targetForm.arguments == ["review", "targets", "add", "gadget", "--repo", "acme/gadget", "--skills", "concurrency,security"])
+        #expect(model.targetForm.arguments == ["review", "targets", "add", "--skills", "concurrency,security", "--repo", "acme/gadget", "--", "gadget"])
         #expect(ReviewViewModel.lensesLabel(model.form.skills, none: "the change's files") == "Lenses: as the change's files say", "the review's own menu, the same words")
     }
 }

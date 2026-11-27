@@ -1,0 +1,240 @@
+exit 1: apogee agents: updating config: agent name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null (the prompt was written to /Users/someone/.apogee/prompts/--graph.txt)	agents create --description d -- --graph
+exit 1: apogee agents: updating config: agent name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null (the prompt was written to /Users/someone/.apogee/prompts/-h.txt)	agents create --description d -- -h
+exit 1: apogee agents: updating config: agent name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null (the prompt was written to /Users/someone/.apogee/prompts/-x.txt)	agents create --description d -- -x
+exit 1: apogee agents: agent '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --keep-files -- --graph
+exit 1: apogee agents: agent '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --keep-files -- -h
+exit 1: apogee agents: agent '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --keep-files -- -x
+exit 1: apogee agents: agent '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --purge -- --graph
+exit 1: apogee agents: agent '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --purge -- -h
+exit 1: apogee agents: agent '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	agents delete --purge -- -x
+exit 1: apogee auth: unknown provider '--graph' (keys are kept for anthropic, openai, google)	auth add --stdin -- --graph
+exit 1: apogee auth: unknown provider '-h' (keys are kept for anthropic, openai, google)	auth add --stdin -- -h
+exit 1: apogee auth: unknown provider '-x' (keys are kept for anthropic, openai, google)	auth add --stdin -- -x
+exit 1: apogee auth: unknown provider '--graph' (keys are kept for anthropic, openai, google)	auth clear -- --graph
+exit 1: apogee auth: unknown provider '-h' (keys are kept for anthropic, openai, google)	auth clear -- -h
+exit 1: apogee auth: unknown provider '-x' (keys are kept for anthropic, openai, google)	auth clear -- -x
+exit 1: apogee chats: no chat named '--graph'	chats compact --yes -- --graph
+exit 1: apogee chats: no chat named '-h'	chats compact --yes -- -h
+exit 1: apogee chats: no chat named '-x'	chats compact --yes -- -x
+exit 1: apogee chats: no chat named '--graph'	chats delete -- --graph
+exit 1: apogee chats: no chat named '-h'	chats delete -- -h
+exit 1: apogee chats: no chat named '-x'	chats delete -- -x
+exit 1: apogee chats: no chat named '--graph'	chats info -- --graph
+exit 1: apogee chats: no chat named '-h'	chats info -- -h
+exit 1: apogee chats: no chat named '-x'	chats info -- -x
+exit 1: apogee chats: no chat named '--graph'	chats info --output-format json -- --graph
+exit 1: apogee chats: no chat named '-h'	chats info --output-format json -- -h
+exit 1: apogee chats: no chat named '-x'	chats info --output-format json -- -x
+exit 1: apogee chats: no chat named '--graph'	chats show --output-format json -- --graph
+exit 1: apogee chats: no chat named '-h'	chats show --output-format json -- -h
+exit 1: apogee chats: no chat named '-x'	chats show --output-format json -- -x
+exit 1: apogee chats: no chat named '--graph'	chats title -- --graph Ports
+exit 1: apogee chats: no chat named '-h'	chats title -- -h Ports
+exit 1: apogee chats: no chat named '-x'	chats title -- -x Ports
+exit 1: apogee chats: no chat named '20261022-182803-f9f6'	chats title -- 20261022-182803-f9f6 --graph
+exit 1: apogee chats: no chat named '20261022-182803-f9f6'	chats title -- 20261022-182803-f9f6 -h
+exit 1: apogee chats: no chat named '20261022-182803-f9f6'	chats title -- 20261022-182803-f9f6 -x
+exit 0: tools.allowed_hosts includes --graph	config add-allowed-host -- --graph
+exit 0: tools.allowed_hosts includes -h	config add-allowed-host -- -h
+exit 0: tools.allowed_hosts includes -x	config add-allowed-host -- -x
+exit 1: apogee config: backend name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp -- --graph
+exit 1: apogee config: backend name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp -- -h
+exit 1: apogee config: backend name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp -- -x
+exit 1: apogee config: backend name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp --model-path /Users/someone/a.gguf -- --graph
+exit 1: apogee config: backend name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp --model-path /Users/someone/a.gguf -- -h
+exit 1: apogee config: backend name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; a backend already named otherwise is reached by 'apogee config rename-backend'	config add-backend --type llamacpp --model-path /Users/someone/a.gguf -- -x
+exit 1: apogee config: '--graph' is not in tools.allowed_hosts	config delete-allowed-host -- --graph
+exit 1: apogee config: '-h' is not in tools.allowed_hosts	config delete-allowed-host -- -h
+exit 1: apogee config: '-x' is not in tools.allowed_hosts	config delete-allowed-host -- -x
+exit 1: apogee config: MCP server '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	config delete-mcp-server -- --graph
+exit 1: apogee config: MCP server '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	config delete-mcp-server -- -h
+exit 1: apogee config: MCP server '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	config delete-mcp-server -- -x
+exit 1: apogee config: '--graph' is not a key 'config set' moves -- it moves: memory.recall, knowledge.auto_capture, ui.markdown, ui.thinking_display, attachments.graph, tools.search.provider, tools.search.url, tools.search.results, training.python	config set -- --graph 1
+exit 1: apogee config: '-h' is not a key 'config set' moves -- it moves: memory.recall, knowledge.auto_capture, ui.markdown, ui.thinking_display, attachments.graph, tools.search.provider, tools.search.url, tools.search.results, training.python	config set -- -h 1
+exit 1: apogee config: '-x' is not a key 'config set' moves -- it moves: memory.recall, knowledge.auto_capture, ui.markdown, ui.thinking_display, attachments.graph, tools.search.provider, tools.search.url, tools.search.results, training.python	config set -- -x 1
+exit 1: apogee config: backend '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft "" -- --graph
+exit 1: apogee config: backend '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft "" -- -h
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft "" -- -x
+exit 1: apogee config: backend '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft /Users/someone/drafter -- --graph
+exit 1: apogee config: backend '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft /Users/someone/drafter -- -h
+exit 1: apogee config: backend '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null; rename it with 'apogee config rename-backend'	config set-backend --draft /Users/someone/drafter -- -x
+exit 0: models.default_embedding = --graph	config set-default-embedding -- --graph
+exit 0: models.default_embedding = -h	config set-default-embedding -- -h
+exit 0: models.default_embedding = -x	config set-default-embedding -- -x
+exit 0: models.default_suite = --graph	config set-default-suite -- --graph
+exit 0: models.default_suite = -h	config set-default-suite -- -h
+exit 0: models.default_suite = -x	config set-default-suite -- -x
+exit 1: apogee config: no model '--graph' in /Users/someone/.apogee/models	config set-default-video -- --graph
+exit 1: apogee config: no model '-h' in /Users/someone/.apogee/models	config set-default-video -- -h
+exit 1: apogee config: no model '-x' in /Users/someone/.apogee/models	config set-default-video -- -x
+exit 1: apogee config: '--graph' is not a tool name (letters, digits and underscores)	config set-permission -- --graph ask
+exit 1: apogee config: '-h' is not a tool name (letters, digits and underscores)	config set-permission -- -h ask
+exit 1: apogee config: '-x' is not a tool name (letters, digits and underscores)	config set-permission -- -x ask
+exit 1: apogee datasets: no such file or directory: --graph	datasets prepare -- --graph
+exit 1: apogee datasets: no such file or directory: -h	datasets prepare -- -h
+exit 1: apogee datasets: no such file or directory: -x	datasets prepare -- -x
+exit 1: apogee datasets: '--graph' is not a Hugging Face dataset ref (expected owner/name)	datasets pull -- --graph
+exit 1: apogee datasets: '-h' is not a Hugging Face dataset ref (expected owner/name)	datasets pull -- -h
+exit 1: apogee datasets: '-x' is not a Hugging Face dataset ref (expected owner/name)	datasets pull -- -x
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"datasets pull"}	datasets pull --output-format stream-json -- --graph
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"datasets pull"}	datasets pull --output-format stream-json -- -h
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"datasets pull"}	datasets pull --output-format stream-json -- -x
+exit 2: apogee knowledge: the clerk did not return a record; /: the answer is not a JSON object (after 2 attempts)	knowledge capture --link PROJ-7 -- --graph
+exit 2: apogee knowledge: the clerk did not return a record; /: the answer is not a JSON object (after 2 attempts)	knowledge capture --link PROJ-7 -- -h
+exit 2: apogee knowledge: the clerk did not return a record; /: the answer is not a JSON object (after 2 attempts)	knowledge capture --link PROJ-7 -- -x
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge delete -- --graph
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge delete -- -h
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge delete -- -x
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge info --raw -- --graph
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge info --raw -- -h
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge info --raw -- -x
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge link -- --graph --graph
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge link -- -h -h
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge link -- -x -x
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge query --status "" --json -- --graph
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge query --status "" --json -- -h
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge query --status "" --json -- -x
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge status -- --graph superseded
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge status -- -h superseded
+exit 1: apogee knowledge: no knowledge collection named 'knowledge' -- capture a record first with 'apogee knowledge capture'	knowledge status -- -x superseded
+exit 1: apogee mcp: updating config: MCP server name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp create --from code-exec -- --graph
+exit 1: apogee mcp: updating config: MCP server name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp create --from code-exec -- -h
+exit 1: apogee mcp: updating config: MCP server name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp create --from code-exec -- -x
+exit 1: apogee mcp: MCP server '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp disable -- --graph
+exit 1: apogee mcp: MCP server '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp disable -- -h
+exit 1: apogee mcp: MCP server '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp disable -- -x
+exit 1: apogee mcp: MCP server '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp enable -- --graph
+exit 1: apogee mcp: MCP server '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp enable -- -h
+exit 1: apogee mcp: MCP server '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	mcp enable -- -x
+exit 1: [mcp] connecting: --graph...	mcp test -- --graph tool {}
+exit 1: [mcp] connecting: -h...	mcp test -- -h tool {}
+exit 1: [mcp] connecting: -x...	mcp test -- -x tool {}
+exit 1: apogee models: no model '--graph' in /Users/someone/.apogee/models	models convert --register-with Q4_K_M --register -- --graph
+exit 1: apogee models: no model '-h' in /Users/someone/.apogee/models	models convert --register-with Q4_K_M --register -- -h
+exit 1: apogee models: no model '-x' in /Users/someone/.apogee/models	models convert --register-with Q4_K_M --register -- -x
+exit 1: apogee models: backend '--graph' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend --graph'	models delete -- --graph
+exit 1: apogee models: backend '-h' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -h'	models delete -- -h
+exit 1: apogee models: backend '-x' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -x'	models delete -- -x
+exit 1: apogee models: backend '--graph' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend --graph'	models delete --yes -- --graph
+exit 1: apogee models: backend '-h' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -h'	models delete --yes -- -h
+exit 1: apogee models: backend '-x' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -x'	models delete --yes -- -x
+exit 1: apogee models: backend '--graph' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend --graph'	models delete --yes --and-backends -- --graph
+exit 1: apogee models: backend '-h' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -h'	models delete --yes --and-backends -- -h
+exit 1: apogee models: backend '-x' (mock) has no model file to delete -- remove the backend itself with 'apogee config delete-backend -x'	models delete --yes --and-backends -- -x
+exit 0: {"fields":[{"field":"backend","value":"--graph"},{"field":"type","value":"mock"},{"field":"roles","value":"-"},{"field":"source","value":"remote (no local file to inspect)"},{"field":"thinking","value":"on (default), no budget -- no control here: this backend thinks as it decides"}],"name":"--graph"}	models info --output-format json -- --graph
+exit 0: {"fields":[{"field":"backend","value":"-h"},{"field":"type","value":"mock"},{"field":"roles","value":"-"},{"field":"source","value":"remote (no local file to inspect)"},{"field":"thinking","value":"on (default), no budget -- no control here: this backend thinks as it decides"}],"name":"-h"}	models info --output-format json -- -h
+exit 0: {"fields":[{"field":"backend","value":"-x"},{"field":"type","value":"mock"},{"field":"roles","value":"-"},{"field":"source","value":"remote (no local file to inspect)"},{"field":"thinking","value":"on (default), no budget -- no control here: this backend thinks as it decides"}],"name":"-x"}	models info --output-format json -- -x
+exit 1: apogee models: '--graph' is not in your Ollama store and is not a Hugging Face ref. Pull it with 'ollama pull --graph' first, or name a Hugging Face repository as owner/repo	models pull -- --graph
+exit 1: apogee models: '-h' is not in your Ollama store and is not a Hugging Face ref. Pull it with 'ollama pull -h' first, or name a Hugging Face repository as owner/repo	models pull -- -h
+exit 1: apogee models: '-x' is not in your Ollama store and is not a Hugging Face ref. Pull it with 'ollama pull -x' first, or name a Hugging Face repository as owner/repo	models pull -- -x
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '--graph' is not one	models pull --register-with Q4_K_M --safetensors -- --graph
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '-h' is not one	models pull --register-with Q4_K_M --safetensors -- -h
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '-x' is not one	models pull --register-with Q4_K_M --safetensors -- -x
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '--graph' is not one	models pull --safetensors --register -- --graph
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '-h' is not one	models pull --safetensors --register -- -h
+exit 1: apogee models: --safetensors takes a Hugging Face repository (owner/repo); '-x' is not one	models pull --safetensors --register -- -x
+exit 1: apogee models: no model '--graph' in /Users/someone/.apogee/models	models quantize -t Q8_0 -- --graph
+exit 1: apogee models: no model '-h' in /Users/someone/.apogee/models	models quantize -t Q8_0 -- -h
+exit 1: apogee models: no model '-x' in /Users/someone/.apogee/models	models quantize -t Q8_0 -- -x
+exit 1: apogee models: no model named '--graph' -- name it as its backends share it (the backend without its level: -F16, -Q4KM, -4bit), or by its stored directory	models rename -- --graph renamed
+exit 1: apogee models: no model named '-h' -- name it as its backends share it (the backend without its level: -F16, -Q4KM, -4bit), or by its stored directory	models rename -- -h renamed
+exit 1: apogee models: no model named '-x' -- name it as its backends share it (the backend without its level: -F16, -Q4KM, -4bit), or by its stored directory	models rename -- -x renamed
+exit 1: apogee models: no model '--graph' in /Users/someone/.apogee/models	models repair -- --graph
+exit 1: apogee models: no model '-h' in /Users/someone/.apogee/models	models repair -- -h
+exit 1: apogee models: no model '-x' in /Users/someone/.apogee/models	models repair -- -x
+exit 0: {"fields":[{"field":"suite","value":"--graph   (dash)"},{"field":"chat","value":"mock   (via suite --graph)"},{"field":"embedding","value":"mock   (via models.default)"},{"field":"extraction","value":"mock   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite --graph\nmock (chat): nothing held here\ntotal: suite --graph: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"mock","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""}],"suite":"--graph","total_bytes":0,"verdict":"no member holds memory"}}	models status --suite --graph --output-format json
+exit 0: {"fields":[{"field":"suite","value":"-h   (dash)"},{"field":"chat","value":"mock   (via suite -h)"},{"field":"embedding","value":"mock   (via models.default)"},{"field":"extraction","value":"mock   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite -h\nmock (chat): nothing held here\ntotal: suite -h: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"mock","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""}],"suite":"-h","total_bytes":0,"verdict":"no member holds memory"}}	models status --suite -h --output-format json
+exit 0: {"fields":[{"field":"suite","value":"-x   (dash)"},{"field":"chat","value":"mock   (via suite -x)"},{"field":"embedding","value":"mock   (via models.default)"},{"field":"extraction","value":"mock   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite -x\nmock (chat): nothing held here\ntotal: suite -x: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"mock","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""}],"suite":"-x","total_bytes":0,"verdict":"no member holds memory"}}	models status --suite -x --output-format json
+exit 1: apogee providers: no provider named '--graph' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register -- --graph
+exit 1: apogee providers: no provider named '-h' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register -- -h
+exit 1: apogee providers: no provider named '-x' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register -- -x
+exit 1: apogee providers: no provider named '--graph' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register --output-format json -- --graph
+exit 1: apogee providers: no provider named '-h' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register --output-format json -- -h
+exit 1: apogee providers: no provider named '-x' -- the ones apogee knows: claude, codex, gemini, ollama, anthropic, openai, google	providers register --output-format json -- -x
+exit 1: apogee review: '--graph' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --dry-run --output-format json -- --graph
+exit 1: apogee review: '-h' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --dry-run --output-format json -- -h
+exit 1: apogee review: '-x' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --dry-run --output-format json -- -x
+exit 1: apogee review: '--graph' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --skills security -m mock --dry-run --output-format json -- --graph
+exit 1: apogee review: '-h' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --skills security -m mock --dry-run --output-format json -- -h
+exit 1: apogee review: '-x' is not a merge request (no #number or !iid): give a merge request's URL, owner/repo#12 (GitHub), group/project!4 (GitLab), or either prefixed github: or gitlab:	review mr --skills security -m mock --dry-run --output-format json -- -x
+exit 1: apogee review: no review skill named '--graph' (there are: ai-ml, back-end, concurrency, embedded, front-end, general-correctness, security)	review skills show --output-format json -- --graph
+exit 1: apogee review: no review skill named '-h' (there are: ai-ml, back-end, concurrency, embedded, front-end, general-correctness, security)	review skills show --output-format json -- -h
+exit 1: apogee review: no review skill named '-x' (there are: ai-ml, back-end, concurrency, embedded, front-end, general-correctness, security)	review skills show --output-format json -- -x
+exit 0: [review] github.com/o/r: first sweep -- a posting sweep starts at now (--since reviews earlier ones); a dry run saves no watermark	review sweep --target --graph --dry-run --output-format json
+exit 0: [review] github.com/o/r: first sweep -- a posting sweep starts at now (--since reviews earlier ones); a dry run saves no watermark	review sweep --target -h --dry-run --output-format json
+exit 0: [review] github.com/o/r: first sweep -- a posting sweep starts at now (--since reviews earlier ones); a dry run saves no watermark	review sweep --target -x --dry-run --output-format json
+exit 1: apogee review: review target name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --repo o/r -- --graph
+exit 1: apogee review: review target name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --repo o/r -- -h
+exit 1: apogee review: review target name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --repo o/r -- -x
+exit 1: apogee review: review target name '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --skills security --forge gitlab --host h --post --drafts -m mock --owner o -- --graph
+exit 1: apogee review: review target name '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --skills security --forge gitlab --host h --post --drafts -m mock --owner o -- -h
+exit 1: apogee review: review target name '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets add --skills security --forge gitlab --host h --post --drafts -m mock --owner o -- -x
+exit 1: apogee review: review target '--graph' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets delete -- --graph
+exit 1: apogee review: review target '-h' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets delete -- -h
+exit 1: apogee review: review target '-x' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null	review targets delete -- -x
+exit 0: created symphony 'copy' (chat)	symphonies create --from --graph -- copy
+exit 0: created symphony 'copy' (chat)	symphonies create --from -h -- copy
+exit 0: created symphony 'copy' (chat)	symphonies create --from -x -- copy
+exit 0: replaced symphony '--graph' (utility → chat)	symphonies create --from critique-revise -- --graph
+exit 0: replaced symphony '-h' (utility → chat)	symphonies create --from critique-revise -- -h
+exit 0: replaced symphony '-x' (utility → chat)	symphonies create --from critique-revise -- -x
+exit 1: apogee symphonies: symphony '--graph' not found in config	symphonies delete -- --graph
+exit 1: apogee symphonies: symphony '-h' not found in config	symphonies delete -- -h
+exit 1: apogee symphonies: symphony '-x' not found in config	symphonies delete -- -x
+exit 0: {"object":"symphony.play","output":"mock response","stages":[{"answer":"mock response","backend":"mock","cut":false,"name":"one","role":"chat","seconds":0.0}],"suite":null,"symphony":"--graph"}	symphonies play --input hi --output-format json -- --graph
+exit 0: {"object":"symphony.play","output":"mock response","stages":[{"answer":"mock response","backend":"mock","cut":false,"name":"one","role":"chat","seconds":0.0}],"suite":null,"symphony":"-h"}	symphonies play --input hi --output-format json -- -h
+exit 0: {"object":"symphony.play","output":"mock response","stages":[{"answer":"mock response","backend":"mock","cut":false,"name":"one","role":"chat","seconds":0.0}],"suite":null,"symphony":"-x"}	symphonies play --input hi --output-format json -- -x
+exit 0: {"description":"dash","input":{"description":"","image":false},"name":"--graph","object":"symphony","overrides":false,"problems":[],"source":"config","stages":[{"image":false,"name":"one","prompt":"Say {{input}}","role":"chat"}]}	symphonies show --output-format json -- --graph
+exit 0: {"description":"dash","input":{"description":"","image":false},"name":"-h","object":"symphony","overrides":false,"problems":[],"source":"config","stages":[{"image":false,"name":"one","prompt":"Say {{input}}","role":"chat"}]}	symphonies show --output-format json -- -h
+exit 0: {"description":"dash","input":{"description":"","image":false},"name":"-x","object":"symphony","overrides":false,"problems":[],"source":"config","stages":[{"image":false,"name":"one","prompt":"Say {{input}}","role":"chat"}]}	symphonies show --output-format json -- -x
+exit 1: apogee task: no task '--graph'	task cancel -- --graph
+exit 1: apogee task: no task '-h'	task cancel -- -h
+exit 1: apogee task: no task '-x'	task cancel -- -x
+exit 1: apogee task: no task '--graph'	task halt -- --graph
+exit 1: apogee task: no task '-h'	task halt -- -h
+exit 1: apogee task: no task '-x'	task halt -- -x
+exit 1: apogee task: no recipe named '--graph' (there are: capture-decisions, changelog-draft, digest-folder)	task recipes show --output-format json -- --graph
+exit 1: apogee task: no recipe named '-h' (there are: capture-decisions, changelog-draft, digest-folder)	task recipes show --output-format json -- -h
+exit 1: apogee task: no recipe named '-x' (there are: capture-decisions, changelog-draft, digest-folder)	task recipes show --output-format json -- -x
+exit 1: apogee task: no task '--graph'	task resume --output-format stream-json -- --graph
+exit 1: apogee task: no task '-h'	task resume --output-format stream-json -- -h
+exit 1: apogee task: no task '-x'	task resume --output-format stream-json -- -x
+exit 1: [mcp] warning: --graph: connect failed (skipped): initialize: connection closed	task run --rounds 1 --tools -m mock --output-format stream-json -- --graph
+exit 1: [mcp] warning: --graph: connect failed (skipped): initialize: connection closed	task run --rounds 1 --tools -m mock --output-format stream-json -- -h
+exit 1: [mcp] warning: --graph: connect failed (skipped): initialize: connection closed	task run --rounds 1 --tools -m mock --output-format stream-json -- -x
+exit 1: apogee task: no task '--graph'	task status --output-format json -- --graph
+exit 1: apogee task: no task '-h'	task status --output-format json -- -h
+exit 1: apogee task: no task '-x'	task status --output-format json -- -x
+exit 1: apogee train: no run '--graph': no manifest at /Users/someone/.apogee/training/runs/--graph/manifest.json ('apogee train status' lists the runs)	train eval -- --graph
+exit 1: apogee train: no run '-h': no manifest at /Users/someone/.apogee/training/runs/-h/manifest.json ('apogee train status' lists the runs)	train eval -- -h
+exit 1: apogee train: no run '-x': no manifest at /Users/someone/.apogee/training/runs/-x/manifest.json ('apogee train status' lists the runs)	train eval -- -x
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --output-format stream-json -- --graph
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --output-format stream-json -- -h
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --output-format stream-json -- -x
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --pipeline nightly --output-format stream-json -- --graph
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --pipeline nightly --output-format stream-json -- -h
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline resume"}	train pipeline resume --pipeline nightly --output-format stream-json -- -x
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline run"}	train pipeline run --pipeline --graph --output-format stream-json
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline run"}	train pipeline run --pipeline -h --output-format stream-json
+exit 1: {"protocol_version":1,"schema":"2026-11-01","type":"job","verb":"train pipeline run"}	train pipeline run --pipeline -x --output-format stream-json
+exit 1: apogee train: no pipeline '--graph': not a spec file, and not an entry under training.pipelines	train pipeline show --output-format json -- --graph
+exit 1: apogee train: no pipeline '-h': not a spec file, and not an entry under training.pipelines	train pipeline show --output-format json -- -h
+exit 1: apogee train: no pipeline '-x': not a spec file, and not an entry under training.pipelines	train pipeline show --output-format json -- -x
+exit 1: apogee train: no pipeline run '--graph'	train pipeline status --output-format json -- --graph
+exit 1: apogee train: no pipeline run '-h'	train pipeline status --output-format json -- -h
+exit 1: apogee train: no pipeline run '-x'	train pipeline status --output-format json -- -x
+exit 1: apogee train: no run '--graph': no manifest at /Users/someone/.apogee/training/runs/--graph/manifest.json ('apogee train status' lists the runs)	train promote --as mock -- --graph
+exit 1: apogee train: no run '-h': no manifest at /Users/someone/.apogee/training/runs/-h/manifest.json ('apogee train status' lists the runs)	train promote --as mock -- -h
+exit 1: apogee train: no run '-x': no manifest at /Users/someone/.apogee/training/runs/-x/manifest.json ('apogee train status' lists the runs)	train promote --as mock -- -x
+exit 1: apogee train: no regime '--graph': not an entry under training.regimes, a spec under /Users/someone/.apogee/training/regimes, a shipped regime or a spec file (there are: foundation, harness-helpers, knowledge)	train regime run -- --graph
+exit 1: apogee train: no regime '-h': not an entry under training.regimes, a spec under /Users/someone/.apogee/training/regimes, a shipped regime or a spec file (there are: foundation, harness-helpers, knowledge)	train regime run -- -h
+exit 1: apogee train: no regime '-x': not an entry under training.regimes, a spec under /Users/someone/.apogee/training/regimes, a shipped regime or a spec file (there are: foundation, harness-helpers, knowledge)	train regime run -- -x
+exit 1: apogee train: no version history for backend '--graph' -- 'apogee train promote <run> --as --graph' creates the first version	train rollback -- --graph
+exit 1: apogee train: no version history for backend '-h' -- 'apogee train promote <run> --as -h' creates the first version	train rollback -- -h
+exit 1: apogee train: no version history for backend '-x' -- 'apogee train promote <run> --as -x' creates the first version	train rollback -- -x
+exit 1: apogee train: '--graph' is a backend entry (mock), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> --safetensors' and name it	train run --dataset heat-notes -- --graph
+exit 1: apogee train: '-h' is a backend entry (mock), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> --safetensors' and name it	train run --dataset heat-notes -- -h
+exit 1: apogee train: '-x' is a backend entry (mock), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> --safetensors' and name it	train run --dataset heat-notes -- -x
+exit 1: apogee voice: no directory /Users/someone/Music/Apogee for the file	voice say -o /Users/someone/Music/Apogee/graph.wav -- --graph
+exit 1: apogee voice: no directory /Users/someone/Music/Apogee for the file	voice say -o /Users/someone/Music/Apogee/h.wav -- -h
+exit 1: apogee voice: no directory /Users/someone/Music/Apogee for the file	voice say -o /Users/someone/Music/Apogee/x.wav -- -x

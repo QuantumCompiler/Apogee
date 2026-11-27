@@ -127,22 +127,24 @@ struct ChildrenSeenTests {
         // A store job (Stored weights' Check files, on Jobs) starts once its
         // read of the store has answered: last.
         app.models.checkFiles?("org--model/gguf/9f8e")
+        // Each the command's words, then its names and text as a person
+        // types them (`Argv.shown`, GUI M23): never its options.
         return [
             "apogee models pull org/model",
-            "apogee task run say hello",
+            "apogee task run 'say hello'",
             "apogee models list",
             // New graph names its graph as --graph's value (GUI M21): the
             // label is the words before the first option.
             "apogee graph build",
-            "apogee knowledge capture Ada: drop it? Bob: yes",
+            "apogee knowledge capture 'Ada: drop it? Bob: yes'",
             "apogee embed ingest notes notes",
             "apogee datasets prepare heat-notes.jsonl",
             "apogee symphonies play critique-revise",
-            "apogee review mr acme/widget#12",
+            "apogee review mr 'acme/widget#12'",
             "apogee check",
-            "apogee video generate A lighthouse at dusk",
-            "apogee video compose Tides, explained",
-            "apogee voice say Hello there.",
+            "apogee video generate 'A lighthouse at dusk'",
+            "apogee video compose 'Tides, explained'",
+            "apogee voice say 'Hello there.'",
             "apogee models repair org--model/gguf/9f8e",
         ]
     }

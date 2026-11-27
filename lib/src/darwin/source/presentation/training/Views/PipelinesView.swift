@@ -33,7 +33,7 @@ struct PipelinesView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .help("apogee train pipeline show \(name): its stages, each a dataset and a gate")
+                                .help("apogee " + Argv.shown(TrainingViewModel.specArguments(name)) + ": its stages, each a dataset and a gate")
                             } else {
                                 Text(name).font(.apogeeBody)
                                 Spacer()
@@ -41,7 +41,7 @@ struct PipelinesView: View {
                             Button("Run…") { model.pending = .runPipeline(name) }
                                 .buttonStyle(.borderless)
                                 .disabled(model.isRunning)
-                                .help("apogee train pipeline run --pipeline \(name): each stage a training run, held to the cumulative gate")
+                                .help("apogee " + Argv.shown(TrainingViewModel.Pending.runPipeline(name).arguments) + ": each stage a training run, held to the cumulative gate")
                         }
                         .padding(.horizontal, Spacing.m)
                         .padding(.vertical, Spacing.s)
@@ -160,7 +160,7 @@ private struct PipelinePage: View {
             Spacer()
             Button("Run…") { model.pending = .runPipeline(spec.name) }
                 .disabled(model.isRunning)
-                .help("apogee train pipeline run --pipeline \(spec.name): each stage a training run, held to the cumulative gate")
+                .help("apogee " + Argv.shown(TrainingViewModel.Pending.runPipeline(spec.name).arguments) + ": each stage a training run, held to the cumulative gate")
         }
         Text(((spec.student.isEmpty ? [] : ["student \(spec.student)"]) + [TrainingViewModel.source(spec)]).joined(separator: " · "))
             .font(.apogeeSmall)

@@ -21,7 +21,7 @@ struct VoiceTextTests {
         defer { try? FileManager.default.removeItem(at: home) }
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], VoiceViewModelTests.recorded("list"))
-        runner.reading(["models", "info", "Kokoro-82M/voice/5f3a2c91d0e4"], VoiceViewModelTests.recorded("info-voice"))
+        runner.reading(["models", "info", "--", "Kokoro-82M/voice/5f3a2c91d0e4"], VoiceViewModelTests.recorded("info-voice"))
         let job = ScriptedJob()
         let jobs = ScriptedJobs([job])
         let model = VoiceViewModel(runner: runner, starter: jobs, preferences: Preferences(store: MemoryStore()), home: home)

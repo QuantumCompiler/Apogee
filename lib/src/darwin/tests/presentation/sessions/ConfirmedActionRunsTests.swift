@@ -49,7 +49,7 @@ struct ConfirmedActionRunsTests {
         #expect(library.pending == nil, "the dialog's closing cleared it")
         runner.reading(["chats", "list"], Self.plansAlone)
         await library.confirm(answer)
-        #expect(runner.calls.contains("run chats delete c1"))
+        #expect(runner.calls.contains("run chats delete -- c1"))
         #expect(library.chats.map(\.id) == ["c2"], "read back without it")
         #expect(said.last == "Deleted Recipes")
         #expect(!first.calls.contains("stop"), "another chat's delete leaves the open session alone")
@@ -73,7 +73,7 @@ struct ConfirmedActionRunsTests {
         runner.reading(["chats", "list"], Self.recipesAlone)
         runner.hold(["chats", "delete"])
         let confirmed = Task { await library.confirm(answer) }
-        #expect(await eventually { runner.calls.contains("run chats delete c2") })
+        #expect(await eventually { runner.calls.contains("run chats delete -- c2") })
         #expect(first.calls == ["stop"], "the open session ended first")
         #expect(library.current !== open && library.current.chatID != "c2", "a new session in its place before the delete")
         runner.release()
@@ -97,13 +97,13 @@ struct ConfirmedActionRunsTests {
         // Another row's Delete… chosen while the dialog was up.
         library.askToDelete(plans)
         await library.confirm(shown)
-        #expect(runner.calls.contains("run chats delete c1"), "the answer the dialog showed")
-        #expect(!runner.calls.contains("run chats delete c2"), "never a question the person did not see")
+        #expect(runner.calls.contains("run chats delete -- c1"), "the answer the dialog showed")
+        #expect(!runner.calls.contains("run chats delete -- c2"), "never a question the person did not see")
         #expect(library.pending == .delete(plans), "the newer question stays")
         let newer = try #require(library.pending)
         library.dismissPending()
         await library.confirm(newer)
-        #expect(runner.calls.contains("run chats delete c2"))
+        #expect(runner.calls.contains("run chats delete -- c2"))
     }
 
     @Test("Keep it, or Esc, stays a no: the question cleared and nothing run")

@@ -1,6 +1,7 @@
 #if DEBUG
 import BusinessJobs
 import BusinessMedia
+import BusinessReads
 import DataPreferences
 import Foundation
 
@@ -15,7 +16,7 @@ enum VoicePreview {
     /// handle, and that model's voices.
     static let runner = PreviewRunner(reads: [
         (["models", "list"], VoiceDocuments.modelsList),
-        (["models", "info", "Kokoro-82M/voice/5f3a2c91d0e4"], VoiceDocuments.voiceInfo),
+        (Argv.line(["models", "info"], names: ["Kokoro-82M/voice/5f3a2c91d0e4"]), VoiceDocuments.voiceInfo),
     ])
 
     /// A store with no voice model: models-stored-list.json, its voice row
@@ -130,8 +131,8 @@ enum VoicePreview {
     /// it beside its MLX build, in one model folder, each with its voices.
     static let engines = PreviewRunner(reads: [
         (["models", "list"], VoiceDocuments.mediaList),
-        (["models", "info", voiceTorch], VoiceDocuments.voiceInfoTorch),
-        (["models", "info", voiceMLX], VoiceDocuments.voiceInfoMLX),
+        (Argv.line(["models", "info"], names: [voiceTorch]), VoiceDocuments.voiceInfoTorch),
+        (Argv.line(["models", "info"], names: [voiceMLX]), VoiceDocuments.voiceInfoMLX),
     ])
 
     /// The records the binary wrote on each engine (tests/business/media/

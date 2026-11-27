@@ -24,7 +24,7 @@ struct ReviewViewModelTests {
         let runner = ScriptedRunner()
         runner.reading(["review", "targets"], fixture("review-targets"))
         runner.reading(["review", "skills", "list"], fixture("review-skills"))
-        runner.reading(["review", "skills", "show", "security"], fixture("review-skill-show"))
+        runner.reading(["review", "skills", "show", "--", "security"], fixture("review-skill-show"))
         let starter = ScriptedJobs(jobs)
         let model = ReviewViewModel(runner: runner, starter: starter)
         await model.connect(binary: Self.binary)
@@ -45,7 +45,7 @@ struct ReviewViewModelTests {
         model.form.ref = "acme/widget#12"
         model.form.skills = ["security"]
         model.review()
-        #expect(starter.starts == [["review", "mr", "acme/widget#12", "--skills", "security", "--dry-run", "--output-format", "json"]])
+        #expect(starter.starts == [["review", "mr", "--skills", "security", "--dry-run", "--output-format", "json", "--", "acme/widget#12"]])
         #expect(model.running == "Reviewing acme/widget#12")
         finish(job, fixture("review-run-dry"))
         #expect(await eventually { !model.isRunning })
@@ -78,7 +78,7 @@ struct ReviewViewModelTests {
         #expect(starter.starts.count == 1, "cancelled: nothing ran")
         model.askToPost()
         try await model.confirm(#require(model.pending))
-        #expect(starter.starts.last == ["review", "mr", "acme/widget#12", "--yes", "--output-format", "json"])
+        #expect(starter.starts.last == ["review", "mr", "--yes", "--output-format", "json", "--", "acme/widget#12"])
         finish(post, fixture("review-run-posted"))
         #expect(await eventually { !model.isRunning })
         #expect(model.run?.posted == .posted(comments: 1, summary: true, batched: true))
@@ -99,7 +99,7 @@ struct ReviewViewModelTests {
         let shown = try #require(model.pending, "the dialog is built from the question")
         model.dismissPending()
         await model.confirm(shown)
-        #expect(starter.starts.last == ["review", "mr", "acme/widget#12", "--yes", "--output-format", "json"])
+        #expect(starter.starts.last == ["review", "mr", "--yes", "--output-format", "json", "--", "acme/widget#12"])
         finish(post, fixture("review-run-posted"))
         #expect(await eventually { !model.isRunning })
         model.newSweep()
@@ -116,7 +116,7 @@ struct ReviewViewModelTests {
         let removal = try #require(model.pending)
         model.dismissPending()
         await model.confirm(removal)
-        #expect(runner.calls.contains("run review|targets|delete|widget"))
+        #expect(runner.calls.contains("run review|targets|delete|--|widget"))
     }
 
     @Test("silence is a complete review: shown as one, and nothing to post is offered")
@@ -165,7 +165,7 @@ struct ReviewViewModelTests {
         model.targetForm.name = "gadget"
         model.targetForm.place = "acme/gadget"
         model.targetForm.skills = ["security", "concurrency"]
-        #expect(model.targetForm.arguments == ["review", "targets", "add", "gadget", "--repo", "acme/gadget", "--skills", "concurrency,security"])
+        #expect(model.targetForm.arguments == ["review", "targets", "add", "--skills", "concurrency,security", "--repo", "acme/gadget", "--", "gadget"])
         model.targetForm.isOwner = true
         model.targetForm.place = "acme"
         model.targetForm.forge = "gitlab"
@@ -174,11 +174,11 @@ struct ReviewViewModelTests {
         model.targetForm.drafts = true
         model.targetForm.skills = []
         await model.addTarget()
-        #expect(runner.calls.contains("run review|targets|add|gadget|--owner|acme|--forge|gitlab|--host|git.example.com|--post|--drafts"))
+        #expect(runner.calls.contains("run review|targets|add|--forge|gitlab|--host|git.example.com|--post|--drafts|--owner|acme|--|gadget"))
         model.askToDelete(target: "widget")
         #expect(!runner.calls.contains { $0.hasPrefix("run review|targets|delete") }, "asked first")
         try await model.confirm(#require(model.pending))
-        #expect(runner.calls.contains("run review|targets|delete|widget"))
+        #expect(runner.calls.contains("run review|targets|delete|--|widget"))
         #expect(runner.calls.filter { $0 == "read review|targets" }.count >= 3, "read back after each change")
     }
 

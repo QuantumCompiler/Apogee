@@ -1,3 +1,4 @@
+import BusinessReads
 import DataProtocol
 import Foundation
 
@@ -261,7 +262,7 @@ public enum MediaLibrary {
         if rebuild { words = words.dropFirst() }
         guard words.count >= 2, words.first == "--with" else { return nil }
         let with = words[words.startIndex + 1].trimmingCharacters(in: CharacterSet(charactersIn: "'\"`.,;)"))
-        return rebuild ? ["train", "setup", "--rebuild", "--yes", "--with", with] : ["train", "setup", "--with", with]
+        return Argv.line(["train", "setup"], options: (rebuild ? [.flag("--rebuild"), .flag("--yes")] : []) + [.value("--with", with)])
     }
 
     /// Whether `command` replaces the environment rather than adding to it.

@@ -51,14 +51,14 @@ struct RegisterAndHostsTests {
     @Test("on M33's binary Register is providers register <id>: no config add-backend, its lines -- the registration, the default set, the roster fetched -- said")
     func registerThroughProvidersRegister() async throws {
         let runner = scanned()
-        runner.reading(["providers", "register", "codex"], recordedText("providers-register-codex.json"))
+        runner.reading(["providers", "register", "--", "codex"], recordedText("providers-register-codex.json"))
         let (model, said) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         let codex = try provider("codex", in: model)
-        #expect(model.registration(for: codex) == ["providers", "register", "codex"], "the command the sheet shows")
+        #expect(model.registration(for: codex) == ["providers", "register", "--", "codex"], "the command the sheet shows")
         runner.reading(["providers", "scan"], recordedText("providers-scan-after-codex.json"))
         await model.register(codex)
-        #expect(runner.calls.contains("read providers register codex"))
+        #expect(runner.calls.contains("read providers register -- codex"))
         #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend") })
         #expect(model.registered == SettingsViewModel.Said(title: "Registered codex", lines: [
             "registered codex (codex-cli)", "models.default set to 'codex' (none was set)", "fetched codex-cli's models: 2 on the roster",
@@ -73,7 +73,7 @@ struct RegisterAndHostsTests {
     @Test("a registration that says one line -- claude-cli has no roster, the default already set -- is its toast alone")
     func oneLineIsAToast() async throws {
         let runner = scanned()
-        runner.reading(["providers", "register", "claude"], recordedText("providers-register-claude.json"))
+        runner.reading(["providers", "register", "--", "claude"], recordedText("providers-register-claude.json"))
         let (model, said) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         await model.register(try provider("claude", in: model))
@@ -98,21 +98,21 @@ struct RegisterAndHostsTests {
     @Test("Ollama on M33's binary: no model named, providers register -- the CLI picks its one, or says it needs one; a model named, the add-backend the CLI names, its default said")
     func ollamaOnTheNewBinary() async throws {
         let runner = scanned()
-        runner.reading(["providers", "register", "ollama"], recordedText("providers-register-ollama-none.json"))
-        runner.whenStarting(["config", "add-backend", "ollama"], .done(stdout: recordedText("providers-add-backend-ollama.txt")))
+        runner.reading(["providers", "register", "--", "ollama"], recordedText("providers-register-ollama-none.json"))
+        runner.whenStarting(["config", "add-backend", "--type", "ollama-cli", "--model", "llama3.2:3b", "--", "ollama"], .done(stdout: recordedText("providers-add-backend-ollama.txt")))
         let (model, _) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         let ollama = try provider("ollama", in: model)
-        #expect(model.registration(for: ollama) == ["providers", "register", "ollama"])
+        #expect(model.registration(for: ollama) == ["providers", "register", "--", "ollama"])
         await model.register(ollama)
-        #expect(runner.calls.contains("read providers register ollama"))
+        #expect(runner.calls.contains("read providers register -- ollama"))
         #expect(model.registered?.lines == [
             "ollama: not registered -- an ollama-cli backend needs a model; add one with: apogee config add-backend ollama --type ollama-cli --model <model>",
             "nothing written",
         ])
-        #expect(model.registration(for: ollama, model: " llama3.2:3b ") == ["config", "add-backend", "ollama", "--type", "ollama-cli", "--model", "llama3.2:3b"])
+        #expect(model.registration(for: ollama, model: " llama3.2:3b ") == ["config", "add-backend", "--type", "ollama-cli", "--model", "llama3.2:3b", "--", "ollama"])
         await model.register(ollama, model: " llama3.2:3b ")
-        #expect(runner.calls.contains("run config add-backend ollama --type ollama-cli --model llama3.2:3b"))
+        #expect(runner.calls.contains("run config add-backend --type ollama-cli --model llama3.2:3b -- ollama"))
         #expect(model.registered == SettingsViewModel.Said(title: "Registered ollama", lines: [
             "added backend 'ollama' to /Users/someone/.apogee/config/config.json", "models.default set to 'ollama' (none was set)",
         ]))
@@ -130,9 +130,9 @@ struct RegisterAndHostsTests {
             let (model, said) = model(runner, vocabulary: vocabulary)
             await model.connect(binary: Self.binary, version: "0.2.0")
             let codex = try provider("codex", in: model)
-            #expect(model.registration(for: codex) == ["config", "add-backend", "codex", "--type", "codex-cli"])
+            #expect(model.registration(for: codex) == ["config", "add-backend", "--type", "codex-cli", "--", "codex"])
             await model.register(codex)
-            #expect(runner.calls.contains("run config add-backend codex --type codex-cli"))
+            #expect(runner.calls.contains("run config add-backend --type codex-cli -- codex"))
             #expect(!runner.calls.contains { $0.hasPrefix("read providers register") })
             #expect(model.registered == nil)
             #expect(said.lines.last == "added backend 'codex' to /Users/someone/.apogee/config/config.json")
@@ -144,13 +144,13 @@ struct RegisterAndHostsTests {
     @Test("on M33's binary Permissions reads the allowed hosts through config get, and reads them back after each change")
     func hostsReadThroughTheCLI() async throws {
         let runner = RuleRunner()
-        runner.when(["config", "get", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts.txt")))
-        runner.when(["config", "delete-allowed-host", "docs.python.org"], .done(stdout: recordedText("allowed-host-delete.txt")))
+        runner.when(["config", "get", "--", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts.txt")))
+        runner.when(["config", "delete-allowed-host", "--", "docs.python.org"], .done(stdout: recordedText("allowed-host-delete.txt")))
         let (model, said) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         #expect(model.allowedHosts == ["docs.python.org", "developer.apple.com"])
         #expect(model.allowedHostsUnread == nil)
-        runner.when(["config", "get", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts-after-delete.txt")))
+        runner.when(["config", "get", "--", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts-after-delete.txt")))
         await model.forbidHost("docs.python.org")
         #expect(model.allowedHosts == ["developer.apple.com"], "read back")
         #expect(said.lines.last == "removed docs.python.org from tools.allowed_hosts")
@@ -159,15 +159,15 @@ struct RegisterAndHostsTests {
     @Test("an empty list reads as none, never as unread; allowing a host says the CLI's words and reads the list again")
     func hostsEmpty() async {
         let runner = RuleRunner()
-        runner.when(["config", "get", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts-empty.txt")))
-        runner.when(["config", "add-allowed-host", "docs.python.org"], .done(stdout: recordedText("allowed-host-add.txt")))
+        runner.when(["config", "get", "--", "tools.allowed_hosts"], .done(stdout: recordedText("allowed-hosts-empty.txt")))
+        runner.when(["config", "add-allowed-host", "--", "docs.python.org"], .done(stdout: recordedText("allowed-host-add.txt")))
         let (model, said) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         #expect(model.allowedHosts == [])
         await model.allowHost(" docs.python.org ")
-        #expect(runner.calls.contains("run config add-allowed-host docs.python.org"))
+        #expect(runner.calls.contains("run config add-allowed-host -- docs.python.org"))
         #expect(said.lines.last == "tools.allowed_hosts includes docs.python.org")
-        #expect(runner.calls.filter { $0 == "run config get tools.allowed_hosts" }.count == 2, "read back")
+        #expect(runner.calls.filter { $0 == "run config get -- tools.allowed_hosts" }.count == 2, "read back")
     }
 
     @Test("a binary before M33 keeps today's form: the hosts never read, each change's words its confirmation")
@@ -176,7 +176,7 @@ struct RegisterAndHostsTests {
             let runner = RuleRunner()
             let (model, _) = model(runner, vocabulary: vocabulary)
             await model.connect(binary: Self.binary, version: "0.2.0")
-            #expect(!runner.calls.contains("run config get tools.allowed_hosts"))
+            #expect(!runner.calls.contains("run config get -- tools.allowed_hosts"))
             #expect(model.allowedHosts == nil && model.allowedHostsUnread == nil)
         }
     }
@@ -184,7 +184,7 @@ struct RegisterAndHostsTests {
     @Test("a dated binary that refuses the key falls back to today's form, its words kept")
     func hostsRefusedFallsBack() async {
         let runner = RuleRunner()
-        runner.when(["config", "get", "tools.allowed_hosts"], refused("allowed-hosts-older.err"))
+        runner.when(["config", "get", "--", "tools.allowed_hosts"], refused("allowed-hosts-older.err"))
         let (model, _) = model(runner, vocabulary: "2026-10-26")
         await model.connect(binary: Self.binary, version: "0.2.0")
         #expect(model.allowedHosts == nil)

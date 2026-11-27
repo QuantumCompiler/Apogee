@@ -18,11 +18,11 @@ enum ModelsPreview {
     /// holds them (`list`, `status`, and its `details` test's document): two
     /// local backends, a stored pipeline, a cloud API and a subscription.
     static let backendsRunner = PreviewRunner(
-        reads: afterEnd([
+        reads: [
             (["models", "list"], list),
             (["models", "status"], status),
-            (["models", "info", "qwen3-8b-Q4KM"], ggufInfo),
-        ]),
+            (Argv.line(["models", "info"], names: ["qwen3-8b-Q4KM"]), ggufInfo),
+        ],
         // The names `models rename` takes, as the binary completed them over
         // a GGUF family and an MLX model (M2's recording).
         commands: [(["__complete", "models", "rename"], ModelsDocuments.renameNames)])
@@ -47,15 +47,6 @@ enum ModelsPreview {
       "lineage":[{"kind":"quantized","from":"qwen3-8b/gguf/F16","detail":"Q4_K_M","inferred":false,"missing":false},{"kind":"pulled","from":"Qwen/Qwen3-8B","detail":null,"inferred":true,"missing":false}]}}
     """#
 
-    /// `rules`, each `models info <name>` read answered too where the name
-    /// comes after `--`, as the Backends tab reads it (GUI M21); Stored
-    /// weights reads it before `--` still.
-    static func afterEnd(_ rules: [([String], String)]) -> [([String], String)] {
-        rules + rules.compactMap { rule in
-            rule.0.count == 3 && rule.0.starts(with: ["models", "info"]) ? (["models", "info", Argv.endOfOptions, rule.0[2]], rule.1) : nil
-        }
-    }
-
     /// The backends' rows, as `models list` lists them.
     static var rows: [ModelRow] { ModelRow.list(from: ReadDocument(text: list)!) }
 
@@ -79,12 +70,12 @@ enum ModelsPreview {
     /// both pinned; `q4` one whose base was rewritten under it, so the doctor
     /// fails its row and names the promote that mends it; `tuned` none.
     static let adaptersRunner = PreviewRunner(
-        reads: afterEnd([
+        reads: [
             (["models", "list"], ModelsDocuments.adaptersList),
-            (["models", "info", "based"], ModelsDocuments.adaptersInfoBased),
-            (["models", "info", "q4"], ModelsDocuments.adaptersInfoQ4),
+            (Argv.line(["models", "info"], names: ["based"]), ModelsDocuments.adaptersInfoBased),
+            (Argv.line(["models", "info"], names: ["q4"]), ModelsDocuments.adaptersInfoQ4),
             (["check"], ModelsDocuments.adaptersCheck),
-        ]),
+        ],
         commands: [
             (["config", "get", "backends.based.adapters"], ModelsDocuments.adaptersGet),
             (["config", "get", "backends.q4.adapters"], ModelsDocuments.adaptersGetQ4),
@@ -123,17 +114,17 @@ enum ModelsPreview {
     /// registered); a voice model, its `models info` M1's recording of the same
     /// set. `config scan` answers with its recorded report.
     static let storeRunner = PreviewRunner(
-        reads: afterEnd([
+        reads: [
             (["models", "list"], ModelsDocuments.storeList),
             (["models", "list", "--all"], ModelsDocuments.storeListAll),
-            (["models", "info", "llama3.2-1b-Q4KM"], ModelsDocuments.storeInfoBackend),
-            (["models", "info", q4Path], ModelsDocuments.storeInfoQ4),
-            (["models", "info", q4], ModelsDocuments.storeInfoQ4),
-            (["models", "info", f16], ModelsDocuments.storeInfoF16),
-            (["models", "info", snapshot], ModelsDocuments.storeInfoSnapshot),
-            (["models", "info", mlx], ModelsDocuments.storeInfoMLX),
-            (["models", "info", voice], ModelsDocuments.storedInfoVoice),
-        ]),
+            (Argv.line(["models", "info"], names: ["llama3.2-1b-Q4KM"]), ModelsDocuments.storeInfoBackend),
+            (Argv.line(["models", "info"], names: [q4Path]), ModelsDocuments.storeInfoQ4),
+            (Argv.line(["models", "info"], names: [q4]), ModelsDocuments.storeInfoQ4),
+            (Argv.line(["models", "info"], names: [f16]), ModelsDocuments.storeInfoF16),
+            (Argv.line(["models", "info"], names: [snapshot]), ModelsDocuments.storeInfoSnapshot),
+            (Argv.line(["models", "info"], names: [mlx]), ModelsDocuments.storeInfoMLX),
+            (Argv.line(["models", "info"], names: [voice]), ModelsDocuments.storedInfoVoice),
+        ],
         commands: [(["config", "scan"], ModelsDocuments.configScan)])
 
     /// Stored weights over the store, with the snapshots conversions consumed
@@ -156,9 +147,9 @@ enum ModelsPreview {
     static let conversionsRunner = PreviewRunner(reads: [
         (["models", "list", "--all"], ModelsDocuments.conversionsListAll),
         (["models", "list"], ModelsDocuments.conversionsList),
-        (["models", "info", wan], ModelsDocuments.infoDiffusion),
-        (["models", "info", draftHead], ModelsDocuments.infoDraftHead),
-        (["models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"], ModelsDocuments.infoSnapshotConverts),
+        (Argv.line(["models", "info"], names: [wan]), ModelsDocuments.infoDiffusion),
+        (Argv.line(["models", "info"], names: [draftHead]), ModelsDocuments.infoDraftHead),
+        (Argv.line(["models", "info"], names: ["Llama3.2-1B-Instruct/safetensors/edaba290ce7f"]), ModelsDocuments.infoSnapshotConverts),
     ])
 
     /// Stored weights over that store; not connected.
@@ -191,13 +182,13 @@ enum ModelsPreview {
 
     /// Each kind's `models info`, by handle.
     static let kindInfos: [([String], String)] = [
-        (["models", "info", kindChat], ModelsDocuments.kindInfoChat),
-        (["models", "info", kindVision], ModelsDocuments.kindInfoVision),
-        (["models", "info", kindEmbedding], ModelsDocuments.kindInfoEmbedding),
-        (["models", "info", kindDrafter], ModelsDocuments.kindInfoDrafter),
-        (["models", "info", kindVideo], ModelsDocuments.kindInfoVideo),
-        (["models", "info", kindVoice], ModelsDocuments.kindInfoVoice),
-        (["models", "info", kindUnknown], ModelsDocuments.kindInfoUnknown),
+        (Argv.line(["models", "info"], names: [kindChat]), ModelsDocuments.kindInfoChat),
+        (Argv.line(["models", "info"], names: [kindVision]), ModelsDocuments.kindInfoVision),
+        (Argv.line(["models", "info"], names: [kindEmbedding]), ModelsDocuments.kindInfoEmbedding),
+        (Argv.line(["models", "info"], names: [kindDrafter]), ModelsDocuments.kindInfoDrafter),
+        (Argv.line(["models", "info"], names: [kindVideo]), ModelsDocuments.kindInfoVideo),
+        (Argv.line(["models", "info"], names: [kindVoice]), ModelsDocuments.kindInfoVoice),
+        (Argv.line(["models", "info"], names: [kindUnknown]), ModelsDocuments.kindInfoUnknown),
     ]
 
     /// A store recorded from the binary built with the CLI's 53e-53m: one MLX
@@ -220,20 +211,20 @@ enum ModelsPreview {
     /// registers -- the chat, vision and embedding sets, each an `mlx` entry
     /// -- each found through its backend's `models info` and its path's.
     static let kindsRegisteredRunner = PreviewRunner(
-        reads: afterEnd([
+        reads: [
             (["models", "list"], ModelsDocuments.kindsRegisteredList),
             (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
-            (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.kindsBackendChat),
-            (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.kindsBackendVision),
-            (["models", "info", "EmbeddingGemma-300M-bf16"], ModelsDocuments.kindsBackendEmbedding),
-            (["models", "info", kindPath(kindChat)], ModelsDocuments.kindsPathChat),
-            (["models", "info", kindPath(kindVision)], ModelsDocuments.kindsPathVision),
-            (["models", "info", kindPath(kindEmbedding)], ModelsDocuments.kindsPathEmbedding),
-        ] + kindInfos.filter { ![kindChat, kindVision, kindEmbedding].contains($0.0[2]) } + [
-            (["models", "info", kindChat], ModelsDocuments.kindsPathChat),
-            (["models", "info", kindVision], ModelsDocuments.kindsPathVision),
-            (["models", "info", kindEmbedding], ModelsDocuments.kindsPathEmbedding),
-        ]))
+            (Argv.line(["models", "info"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.kindsBackendChat),
+            (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), ModelsDocuments.kindsBackendVision),
+            (Argv.line(["models", "info"], names: ["EmbeddingGemma-300M-bf16"]), ModelsDocuments.kindsBackendEmbedding),
+            (Argv.line(["models", "info"], names: [kindPath(kindChat)]), ModelsDocuments.kindsPathChat),
+            (Argv.line(["models", "info"], names: [kindPath(kindVision)]), ModelsDocuments.kindsPathVision),
+            (Argv.line(["models", "info"], names: [kindPath(kindEmbedding)]), ModelsDocuments.kindsPathEmbedding),
+        ] + kindInfos.filter { ![kindChat, kindVision, kindEmbedding].contains(Argv.positionals(of: $0.0).first ?? "") } + [
+            (Argv.line(["models", "info"], names: [kindChat]), ModelsDocuments.kindsPathChat),
+            (Argv.line(["models", "info"], names: [kindVision]), ModelsDocuments.kindsPathVision),
+            (Argv.line(["models", "info"], names: [kindEmbedding]), ModelsDocuments.kindsPathEmbedding),
+        ])
 
     /// Stored weights over the registered kinds; not connected.
     static func kindsRegisteredStore() -> StoreViewModel {
@@ -273,19 +264,19 @@ enum ModelsPreview {
     /// documents read back after `config set-backend Gemma4-E4B-4bit --draft`.
     static func draftsRunner(paired: Bool) -> PreviewRunner {
         PreviewRunner(
-            reads: afterEnd([
+            reads: [
                 (["models", "list"], ModelsDocuments.draftsList),
-                (["models", "info", drafter], paired ? ModelsDocuments.draftsInfoDrafterPaired : ModelsDocuments.draftsInfoDrafter),
-                (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.draftsBackendBasePaired : ModelsDocuments.draftsBackendBase),
-                (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.draftsBackendWider),
-                (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.draftsBackendChat),
-                (["models", "info", kindPath(draftBase)], ModelsDocuments.draftsPathBase),
-                (["models", "info", kindPath("Gemma4-12B/mlx/7a8b9c0d1e2f")], ModelsDocuments.draftsPathWider),
-                (["models", "info", kindPath("Qwen3-8B/mlx/1a2b3c4d5e6f")], ModelsDocuments.draftsPathChat),
-                (["models", "info", draftBase], ModelsDocuments.draftsSetBase),
-                (["models", "info", "Gemma4-12B/mlx/7a8b9c0d1e2f"], ModelsDocuments.draftsSetWider),
-                (["models", "info", "Qwen3-8B/mlx/1a2b3c4d5e6f"], ModelsDocuments.draftsSetChat),
-            ]),
+                (Argv.line(["models", "info"], names: [drafter]), paired ? ModelsDocuments.draftsInfoDrafterPaired : ModelsDocuments.draftsInfoDrafter),
+                (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), paired ? ModelsDocuments.draftsBackendBasePaired : ModelsDocuments.draftsBackendBase),
+                (Argv.line(["models", "info"], names: ["Gemma4-12B-4bit"]), ModelsDocuments.draftsBackendWider),
+                (Argv.line(["models", "info"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.draftsBackendChat),
+                (Argv.line(["models", "info"], names: [kindPath(draftBase)]), ModelsDocuments.draftsPathBase),
+                (Argv.line(["models", "info"], names: [kindPath("Gemma4-12B/mlx/7a8b9c0d1e2f")]), ModelsDocuments.draftsPathWider),
+                (Argv.line(["models", "info"], names: [kindPath("Qwen3-8B/mlx/1a2b3c4d5e6f")]), ModelsDocuments.draftsPathChat),
+                (Argv.line(["models", "info"], names: [draftBase]), ModelsDocuments.draftsSetBase),
+                (Argv.line(["models", "info"], names: ["Gemma4-12B/mlx/7a8b9c0d1e2f"]), ModelsDocuments.draftsSetWider),
+                (Argv.line(["models", "info"], names: ["Qwen3-8B/mlx/1a2b3c4d5e6f"]), ModelsDocuments.draftsSetChat),
+            ],
             commands: [
                 (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.draftsCompleteBase),
                 (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.draftsCompleteWider),
@@ -306,15 +297,15 @@ enum ModelsPreview {
     /// same bytes either way.
     static func basePairRunner(paired: Bool) -> PreviewRunner {
         PreviewRunner(
-            reads: afterEnd([
+            reads: [
                 (["models", "list"], ModelsDocuments.basePairList),
                 (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
-                (["models", "info", "Gemma4-E4B-4bit"], paired ? ModelsDocuments.basePairBackendBasePaired : ModelsDocuments.basePairBackendBase),
-                (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.basePairBackendWider),
-                (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.basePairBackendChat),
-                (["models", "info", drafter], ModelsDocuments.basePairDrafter),
-                (["models", "info", drafter12B], ModelsDocuments.basePairDrafterWider),
-            ]),
+                (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), paired ? ModelsDocuments.basePairBackendBasePaired : ModelsDocuments.basePairBackendBase),
+                (Argv.line(["models", "info"], names: ["Gemma4-12B-4bit"]), ModelsDocuments.basePairBackendWider),
+                (Argv.line(["models", "info"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.basePairBackendChat),
+                (Argv.line(["models", "info"], names: [drafter]), ModelsDocuments.basePairDrafter),
+                (Argv.line(["models", "info"], names: [drafter12B]), ModelsDocuments.basePairDrafterWider),
+            ],
             commands: [
                 (["__complete", "config", "set-backend", "Gemma4-E4B-4bit", "--draft"], ModelsDocuments.basePairCompleteBase),
                 (["__complete", "config", "set-backend", "Gemma4-12B-4bit", "--draft"], ModelsDocuments.basePairCompleteWider),
@@ -324,20 +315,20 @@ enum ModelsPreview {
     /// The same home with the E4B paired and its drafter's directory then
     /// deleted, its environment holding what the mlx ladder asks before the
     /// draft rung, so the CLI's refusal is the draft's.
-    static let draftGoneRunner = PreviewRunner(reads: afterEnd([
+    static let draftGoneRunner = PreviewRunner(reads: [
         (["models", "list"], ModelsDocuments.draftGoneList),
         (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
-        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftGoneBackend),
-    ]))
+        (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), ModelsDocuments.draftGoneBackend),
+    ])
 
     /// The E4B paired, then its directory's record rewritten as mlx-lm's build
     /// (`chat`, `mlx_lm.convert 4bit`) -- a fake directory standing for a base
     /// converted again as mlx-lm's build, its files unchanged.
-    static let draftRebuiltRunner = PreviewRunner(reads: afterEnd([
+    static let draftRebuiltRunner = PreviewRunner(reads: [
         (["models", "list"], ModelsDocuments.draftRebuiltList),
         (["models", "status"], ModelsDocuments.kindsRegisteredStatus),
-        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.draftRebuiltBackend),
-    ]))
+        (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), ModelsDocuments.draftRebuiltBackend),
+    ])
 
     /// Reads the backends, then opens `backend`'s details, as a person does.
     static func showing(_ models: ModelsViewModel, _ backend: String) async {
@@ -369,13 +360,13 @@ enum ModelsPreview {
     /// whole (mlx-video) and a voice model (mlx-audio).
     static let routesRunner = PreviewRunner(reads: [
         (["models", "list"], ModelsDocuments.routesList),
-        (["models", "info", routeLM], ModelsDocuments.routeInfoLM),
-        (["models", "info", routeVLM], ModelsDocuments.routeInfoVLM),
-        (["models", "info", routeTextOnly], ModelsDocuments.routeInfoTextOnly),
-        (["models", "info", routeDrafter], ModelsDocuments.routeInfoDrafter),
-        (["models", "info", routeEmbeddings], ModelsDocuments.routeInfoEmbeddings),
-        (["models", "info", routeVideo], ModelsDocuments.routeInfoVideo),
-        (["models", "info", routeVoice], ModelsDocuments.routeInfoAudio),
+        (Argv.line(["models", "info"], names: [routeLM]), ModelsDocuments.routeInfoLM),
+        (Argv.line(["models", "info"], names: [routeVLM]), ModelsDocuments.routeInfoVLM),
+        (Argv.line(["models", "info"], names: [routeTextOnly]), ModelsDocuments.routeInfoTextOnly),
+        (Argv.line(["models", "info"], names: [routeDrafter]), ModelsDocuments.routeInfoDrafter),
+        (Argv.line(["models", "info"], names: [routeEmbeddings]), ModelsDocuments.routeInfoEmbeddings),
+        (Argv.line(["models", "info"], names: [routeVideo]), ModelsDocuments.routeInfoVideo),
+        (Argv.line(["models", "info"], names: [routeVoice]), ModelsDocuments.routeInfoAudio),
     ])
 
     /// Stored weights over the routes; not connected.
@@ -477,7 +468,7 @@ enum ModelsPreview {
         PreviewStore(
             reads: [
                 (["models", "list", "--all"], ModelsDocuments.quantizeListBefore),
-                (["models", "info", quantizePath], ModelsDocuments.quantizeInfoLlamaPath),
+                (Argv.line(["models", "info"], names: [quantizePath]), ModelsDocuments.quantizeInfoLlamaPath),
             ],
             commands: [(["config", "add-backend"], ModelsDocuments.quantizeAddBackendLlama)])
     }
@@ -538,13 +529,13 @@ enum ModelsPreview {
     /// then deleted, Qwen3 unpaired -- each drafter on its `models list` row,
     /// so the table reads no `models info`; each backend's answers only when
     /// its details open.
-    static let rowsDraftsRunner = PreviewRunner(reads: afterEnd([
+    static let rowsDraftsRunner = PreviewRunner(reads: [
         (["models", "list"], ModelsDocuments.rowsDraftsList),
         (["models", "status"], ModelsDocuments.rowsDraftsStatus),
-        (["models", "info", "Gemma4-E4B-4bit"], ModelsDocuments.rowsDraftsInfoBase),
-        (["models", "info", "Gemma4-12B-4bit"], ModelsDocuments.rowsDraftsInfoWider),
-        (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.rowsDraftsInfoChat),
-    ]))
+        (Argv.line(["models", "info"], names: ["Gemma4-E4B-4bit"]), ModelsDocuments.rowsDraftsInfoBase),
+        (Argv.line(["models", "info"], names: ["Gemma4-12B-4bit"]), ModelsDocuments.rowsDraftsInfoWider),
+        (Argv.line(["models", "info"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.rowsDraftsInfoChat),
+    ])
 
     /// The library on a binary dated for the CLI's M32, as the launch's
     /// vocabulary read says it.
@@ -590,7 +581,7 @@ enum ModelsPreview {
                 (["models", "status"], ModelsDocuments.deleteRolesStatus),
             ],
             commands: [
-                (["models", "delete", "Qwen3-8B-4bit"], ModelsDocuments.deleteRolesPlan),
+                (Argv.line(["models", "delete"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.deleteRolesPlan),
                 (ModelsViewModel.deleteArguments("Qwen3-8B-4bit", andBackends: true), ModelsDocuments.deleteRolesAndBackends),
             ])
     }
@@ -617,15 +608,15 @@ enum ModelsPreview {
             reads: [
                 (["models", "list"], ModelsDocuments.addList),
                 (["models", "list", "--all"], ModelsDocuments.addListAll),
-                (["models", "info", addChat], ModelsDocuments.addInfoChat),
-                (["models", "info", "Gemma4-E4B/mlx/2b3c4d5e6f70"], ModelsDocuments.addInfoBase),
-                (["models", "info", "Gemma4-12B/mlx/7a8b9c0d1e2f"], ModelsDocuments.addInfoWider),
-                (["models", "info", drafter], ModelsDocuments.addInfoDrafter),
-                (["models", "info", drafter12B], ModelsDocuments.addInfoDrafterWider),
+                (Argv.line(["models", "info"], names: [addChat]), ModelsDocuments.addInfoChat),
+                (Argv.line(["models", "info"], names: ["Gemma4-E4B/mlx/2b3c4d5e6f70"]), ModelsDocuments.addInfoBase),
+                (Argv.line(["models", "info"], names: ["Gemma4-12B/mlx/7a8b9c0d1e2f"]), ModelsDocuments.addInfoWider),
+                (Argv.line(["models", "info"], names: [drafter]), ModelsDocuments.addInfoDrafter),
+                (Argv.line(["models", "info"], names: [drafter12B]), ModelsDocuments.addInfoDrafterWider),
             ],
             commands: [
                 (["config", "scan"], ModelsDocuments.addScan),
-                (["config", "add-backend", "Qwen3-8B-4bit"], ModelsDocuments.addBackendDefault),
+                (["config", "add-backend"], ModelsDocuments.addBackendDefault),
             ])
     }
 
@@ -639,8 +630,8 @@ enum ModelsPreview {
         runner.change([
             (["models", "list"], ModelsDocuments.addListAfter),
             (["models", "list", "--all"], ModelsDocuments.addListAllAfter),
-            (["models", "info", "Qwen3-8B-4bit"], ModelsDocuments.addInfoBackendAfter),
-            (["models", "info", kindPath(addChat)], ModelsDocuments.addInfoPathAfter),
+            (Argv.line(["models", "info"], names: ["Qwen3-8B-4bit"]), ModelsDocuments.addInfoBackendAfter),
+            (Argv.line(["models", "info"], names: [kindPath(addChat)]), ModelsDocuments.addInfoPathAfter),
         ])
         await store.registerIt()
     }
@@ -661,22 +652,22 @@ enum ModelsPreview {
             reads: [
                 (["models", "list"], ModelsDocuments.deleteList),
                 (["models", "list", "--all"], ModelsDocuments.deleteListAll),
-                (["models", "info", "Llama3.2-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendLlama),
-                (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemma),
-                (["models", "info", "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf"],
+                (Argv.line(["models", "info"], names: ["Llama3.2-1B-Instruct-Q4KM"]), ModelsDocuments.deleteInfoBackendLlama),
+                (Argv.line(["models", "info"], names: ["Gemma3-1B-Instruct-Q4KM"]), ModelsDocuments.deleteInfoBackendGemma),
+                (Argv.line(["models", "info"], names: ["/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf"]),
                  ModelsDocuments.deleteInfoPathLlama),
-                (["models", "info", deleteGemmaPath], ModelsDocuments.deleteInfoPathGemma),
-                (["models", "info", deleteLlamaQ4], ModelsDocuments.deleteInfoLlamaQ4),
-                (["models", "info", deleteGemmaQ4], ModelsDocuments.deleteInfoGemmaQ4),
-                (["models", "info", deleteLlamaF16], ModelsDocuments.deleteInfoLlamaF16),
-                (["models", "info", "Gemma3-1B-Instruct/gguf/cce9d2f99787"], ModelsDocuments.deleteInfoGemmaF16),
+                (Argv.line(["models", "info"], names: [deleteGemmaPath]), ModelsDocuments.deleteInfoPathGemma),
+                (Argv.line(["models", "info"], names: [deleteLlamaQ4]), ModelsDocuments.deleteInfoLlamaQ4),
+                (Argv.line(["models", "info"], names: [deleteGemmaQ4]), ModelsDocuments.deleteInfoGemmaQ4),
+                (Argv.line(["models", "info"], names: [deleteLlamaF16]), ModelsDocuments.deleteInfoLlamaF16),
+                (Argv.line(["models", "info"], names: ["Gemma3-1B-Instruct/gguf/cce9d2f99787"]), ModelsDocuments.deleteInfoGemmaF16),
             ],
             commands: [
-                (["models", "delete", deleteLlamaQ4], ModelsDocuments.deletePlanBackend),
-                (["models", "delete", deleteGemmaQ4], ModelsDocuments.deletePlanGemma),
-                (["models", "delete", deleteLlamaF16], ModelsDocuments.deletePlanNone),
-                (["models", "delete", deleteGemmaQ4, "--yes"], ModelsDocuments.deleteKept),
-                (["models", "delete", deleteLlamaQ4, "--yes", "--and-backends"], ModelsDocuments.deleteAndBackends),
+                (Argv.line(["models", "delete"], names: [deleteLlamaQ4]), ModelsDocuments.deletePlanBackend),
+                (Argv.line(["models", "delete"], names: [deleteGemmaQ4]), ModelsDocuments.deletePlanGemma),
+                (Argv.line(["models", "delete"], names: [deleteLlamaF16]), ModelsDocuments.deletePlanNone),
+                (ModelsViewModel.deleteArguments(deleteGemmaQ4), ModelsDocuments.deleteKept),
+                (ModelsViewModel.deleteArguments(deleteLlamaQ4, andBackends: true), ModelsDocuments.deleteAndBackends),
             ])
     }
 
@@ -694,8 +685,8 @@ enum ModelsPreview {
         runner.change([
             (["models", "list"], ModelsDocuments.deleteListAfterKept),
             (["models", "list", "--all"], ModelsDocuments.deleteListAllAfterKept),
-            (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemmaAfterKept),
-            (["models", "info", deleteGemmaPath], nil),
+            (Argv.line(["models", "info"], names: ["Gemma3-1B-Instruct-Q4KM"]), ModelsDocuments.deleteInfoBackendGemmaAfterKept),
+            (Argv.line(["models", "info"], names: [deleteGemmaPath]), nil),
         ])
         if let answer = store.pending { await store.confirm(answer) }
     }
@@ -714,8 +705,8 @@ enum ModelsPreview {
             ],
             commands: [
                 (["__complete", "models", "rename"], ModelsDocuments.backendsCompleteRename),
-                (["models", "delete", "Llama3.2-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanBackend),
-                (["models", "delete", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deletePlanGemma),
+                (Argv.line(["models", "delete"], names: ["Llama3.2-1B-Instruct-Q4KM"]), ModelsDocuments.deletePlanBackend),
+                (Argv.line(["models", "delete"], names: ["Gemma3-1B-Instruct-Q4KM"]), ModelsDocuments.deletePlanGemma),
                 (ModelsViewModel.deleteArguments("Gemma3-1B-Instruct-Q4KM"), ModelsDocuments.deleteKept),
                 (ModelsViewModel.deleteArguments("Llama3.2-1B-Instruct-Q4KM", andBackends: true), ModelsDocuments.deleteAndBackends),
             ])

@@ -53,7 +53,7 @@ struct ReadsAsDocumentsTests {
         let library = await library(runner)
         #expect(library.readsDocuments)
         await library.showInfo(try portChat(library))
-        #expect(runner.calls.contains("read chats info \(Self.port)"))
+        #expect(runner.calls.contains("read chats info -- \(Self.port)"))
         #expect(!runner.calls.contains { $0.hasPrefix("run chats info") }, "the document answered: never both")
         let info = try #require(library.info)
         let details = try #require(info.details)
@@ -73,7 +73,7 @@ struct ReadsAsDocumentsTests {
         #expect(!library.readsDocuments)
         await library.showInfo(try portChat(library))
         #expect(!runner.calls.contains { $0.hasPrefix("read chats info") })
-        #expect(runner.calls.last == "run chats info \(Self.port)")
+        #expect(runner.calls.last == "run chats info -- \(Self.port)")
         #expect(library.info?.details == nil)
         #expect(library.info?.fields == Field.lines(printed("chats-info-text.txt")))
     }
@@ -85,7 +85,7 @@ struct ReadsAsDocumentsTests {
         runner.commanding(["chats", "info"], .done(stdout: printed("chats-info-text.txt")))
         let library = await library(runner)
         await library.showInfo(try portChat(library))
-        #expect(runner.calls.suffix(2) == ["read chats info \(Self.port)", "run chats info \(Self.port)"])
+        #expect(runner.calls.suffix(2) == ["read chats info -- \(Self.port)", "run chats info -- \(Self.port)"])
         #expect(library.info?.details == nil && library.info?.failure == nil)
         #expect(library.info?.fields == Field.lines(printed("chats-info-text.txt")))
     }

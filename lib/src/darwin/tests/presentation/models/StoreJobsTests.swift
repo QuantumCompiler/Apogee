@@ -36,12 +36,12 @@ struct StoreJobsTests {
     func convertGGUF() {
         let help = recorded("models-convert-help", "txt")
         var form = ConvertForm(handle: Self.snapshot, mlx: false, bytes: 2_482_980_600)
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--register"], "f16 the default, registering on")
+        #expect(form.arguments == ["models", "convert", "--register", "--", Self.snapshot], "f16 the default, registering on")
         form.register = false
-        #expect(form.arguments == ["models", "convert", Self.snapshot])
+        #expect(form.arguments == ["models", "convert", "--", Self.snapshot])
         form.levels = ["Q8_0", "Q4_K_M"]
         form.baseName = "llama-1b"
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--register-with", "Q4_K_M,Q8_0", "--base-name", "llama-1b"],
+        #expect(form.arguments == ["models", "convert", "--register-with", "Q4_K_M,Q8_0", "--register", "--base-name", "llama-1b", "--", Self.snapshot],
                 "levels in the CLI's order; choosing one registers")
         form.modelType = "llama"
         #expect(!form.arguments.contains("--model-type"), "a GGUF takes no MLX model type")
@@ -49,7 +49,7 @@ struct StoreJobsTests {
         #expect(form.steps.map(\.label) == ["Convert to GGUF F16", "Quantize to Q4_K_M", "Quantize to Q8_0", "Register llama-1b-F16, llama-1b-Q4KM, llama-1b-Q80"])
         #expect(form.steps.map(\.estimate) == ["about 2.3 GiB", "about 717 MiB", "about 1.2 GiB", nil], "estimates, said as such")
         form.precision = "bf16"
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "-t", "bf16"], "another precision is made on its own: the CLI registers and quantizes from the F16 (M2)")
+        #expect(form.arguments == ["models", "convert", "-t", "bf16", "--", Self.snapshot], "another precision is made on its own: the CLI registers and quantizes from the F16 (M2)")
         #expect(form.steps.map(\.label) == ["Convert to GGUF BF16"])
     }
 
@@ -57,12 +57,12 @@ struct StoreJobsTests {
     func convertMLX() {
         let help = recorded("models-convert-help", "txt")
         var form = ConvertForm(handle: Self.snapshot, mlx: true, bytes: nil)
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--mlx", "--register"])
+        #expect(form.arguments == ["models", "convert", "--mlx", "--register", "--", Self.snapshot])
         #expect(form.levelChoices == ["3bit", "6bit", "8bit", "mxfp4"], "the written precision is no further level")
         form.precision = "8bit"
         form.levels = ["4bit"]
         form.modelType = "gemma3"
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--mlx", "--register-with", "8bit,4bit", "--model-type", "gemma3"],
+        #expect(form.arguments == ["models", "convert", "--register-with", "8bit,4bit", "--mlx", "--model-type", "gemma3", "--", Self.snapshot],
                 "every precision listed, the written one first, and no -t: the CLI's M16 (M2)")
         pinned(form.arguments, to: help)
         #expect(form.steps.map(\.label) == ["Convert to MLX 8bit", "Convert to MLX 4bit", "Register Llama3.2-1B-Instruct-8bit, Llama3.2-1B-Instruct-4bit"])
@@ -73,15 +73,15 @@ struct StoreJobsTests {
     func quantizeForm() {
         let help = recorded("models-quantize-help", "txt")
         var form = QuantizeForm(handle: Self.f16, base: "Llama3.2-1B-Instruct", bytes: 2_479_596_089)
-        #expect(form.arguments == ["models", "quantize", Self.f16])
+        #expect(form.arguments == ["models", "quantize", "--", Self.f16])
         #expect(form.name == "Llama3.2-1B-Instruct-Q4KM")
         form.choose("Q8_0")
-        #expect(form.arguments == ["models", "quantize", Self.f16, "-t", "Q8_0"] && form.name == "Llama3.2-1B-Instruct-Q8_0".replacingOccurrences(of: "_", with: ""))
+        #expect(form.arguments == ["models", "quantize", "-t", "Q8_0", "--", Self.f16] && form.name == "Llama3.2-1B-Instruct-Q8_0".replacingOccurrences(of: "_", with: ""))
         pinned(form.arguments, to: help)
         form.rename("small")
         form.choose("Q2_K")
         #expect(form.name == "small", "a typed name stays")
-        #expect(form.registration(path: "/x/a.gguf") == ["config", "add-backend", "small", "--type", "llamacpp", "--model-path", "/x/a.gguf"])
+        #expect(form.registration(path: "/x/a.gguf") == ["config", "add-backend", "--type", "llamacpp", "--model-path", "/x/a.gguf", "--", "small"])
         form.register = false
         #expect(form.registration(path: "/x/a.gguf") == nil)
         #expect(form.steps.map(\.label) == ["Quantize to Q2_K"])
@@ -126,7 +126,7 @@ struct StoreJobsTests {
 
     /// A runner that answers `models info` of each set's path.
     static func naming(_ handles: [String], on runner: ScriptedRunner) {
-        for handle in handles { runner.reading(["models", "info", path(of: handle)], info(handle)) }
+        for handle in handles { runner.reading(["models", "info", "--", path(of: handle)], info(handle)) }
     }
 
     @Test("a conversion runs the sheet's command; its steps tick on each set its run names as stored, registration on a good end; Show the weights")
@@ -142,7 +142,7 @@ struct StoreJobsTests {
         form.levels = ["Q4_K_M"]
         model.convert(form)
         #expect(await eventually { starter.starts.count == 1 })
-        #expect(starter.starts[0].0 == ["models", "convert", Self.snapshot, "--register-with", "Q4_K_M"] && !starter.starts[0].1)
+        #expect(starter.starts[0].0 == ["models", "convert", "--register-with", "Q4_K_M", "--register", "--", Self.snapshot] && !starter.starts[0].1)
         let download = try #require(model.downloads.first)
         #expect(download.kind == .convert && download.state(of: 0) == .running)
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot, Self.f16]))
@@ -192,8 +192,8 @@ struct StoreJobsTests {
         #expect(download.named == [Self.f16], "its F16 once; Gemma's set, its projector and its source are none of its sets")
         #expect(download.state(of: 0) == .done && download.state(of: 1) == .waiting)
         let asked = runner.calls.filter { $0.hasPrefix("read models info") }
-        #expect(asked == ["read models info " + Self.path(of: Self.f16), "read models info " + Self.path(of: Self.f16),
-                          "read models info " + Self.path(of: JobIdentityTests.gemmaQ4)],
+        #expect(asked == ["read models info -- " + Self.path(of: Self.f16), "read models info -- " + Self.path(of: Self.f16),
+                          "read models info -- " + Self.path(of: JobIdentityTests.gemmaQ4)],
                 "the projector and the snapshot's folder are never asked about")
         #expect(DownloadsViewModel.storedPath("converting /a/b.gguf") == nil && DownloadsViewModel.storedPath("/m/X/mlx/1a2b") == "/m/X/mlx/1a2b")
     }
@@ -233,7 +233,7 @@ struct StoreJobsTests {
             let job = ScriptedJob()
             let runner = ScriptedRunner()
             runner.reading(["models", "list", "--all"], recorded("quantize-list-before"))
-            runner.reading(["models", "info", JobIdentityTests.llamaPath], recorded("quantize-info-llama-path"))
+            runner.reading(["models", "info", "--", JobIdentityTests.llamaPath], recorded("quantize-info-llama-path"))
             if refused {
                 runner.commanding(
                     ["config", "add-backend"],
@@ -242,7 +242,7 @@ struct StoreJobsTests {
             let (model, starter) = jobs([job], runner)
             model.quantize(QuantizeForm(handle: JobIdentityTests.llamaF16, base: "Llama3.2-1B-Instruct", bytes: nil))
             #expect(await eventually { starter.starts.count == 1 })
-            #expect(starter.starts[0].0 == ["models", "quantize", JobIdentityTests.llamaF16])
+            #expect(starter.starts[0].0 == ["models", "quantize", "--", JobIdentityTests.llamaF16])
             let download = try #require(model.downloads.first)
             runner.reading(["models", "list", "--all"], recorded("quantize-list-both-landed"))
             job.print(recorded("quantize-llama", "txt"))
@@ -267,7 +267,7 @@ struct StoreJobsTests {
             let runner = ScriptedRunner()
             runner.reading(["models", "list", "--all"], recorded("quantize-list-before"))
             // Gemma's GGUF, as the store names it: no set of Llama's.
-            runner.reading(["models", "info", JobIdentityTests.gemmaPath], recorded("quantize-info-gemma-path"))
+            runner.reading(["models", "info", "--", JobIdentityTests.gemmaPath], recorded("quantize-info-gemma-path"))
             let (model, starter) = jobs([job], runner)
             model.quantize(QuantizeForm(handle: JobIdentityTests.llamaF16, base: "Llama3.2-1B-Instruct", bytes: nil))
             #expect(await eventually { starter.starts.count == 1 })
@@ -294,7 +294,7 @@ struct StoreJobsTests {
         let (model, starter) = jobs([passing, failing], runner)
         model.check(Self.snapshot)
         #expect(await eventually { starter.starts.count == 1 })
-        #expect(starter.starts[0].0 == ["models", "repair", Self.snapshot])
+        #expect(starter.starts[0].0 == ["models", "repair", "--", Self.snapshot])
         let first = try #require(model.downloads.first)
         passing.say(.said("Llama3.2-1B-Instruct/safetensors/edaba290ce7f: 9 file(s) match the record"))
         passing.end()
@@ -314,11 +314,11 @@ struct StoreJobsTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("store-list"))
         runner.reading(["models", "list", "--all"], recorded("store-list-all"))
-        runner.reading(["models", "info", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
-        runner.reading(["models", "info", "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf"], recorded("store-info-q4"))
-        runner.reading(["models", "info", Self.f16], recorded("store-info-f16"))
-        runner.reading(["models", "info", Self.snapshot], recorded("store-info-snapshot"))
-        runner.reading(["models", "info", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
+        runner.reading(["models", "info", "--", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
+        runner.reading(["models", "info", "--", "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf"], recorded("store-info-q4"))
+        runner.reading(["models", "info", "--", Self.f16], recorded("store-info-f16"))
+        runner.reading(["models", "info", "--", Self.snapshot], recorded("store-info-snapshot"))
+        runner.reading(["models", "info", "--", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee"))
         store.showingAll = true
@@ -335,7 +335,7 @@ struct StoreJobsTests {
         store.askToConvert(snapshot, mlx: true)
         #expect(store.convertForm?.mlx == true && store.convertForm?.bytes == 2_482_980_600)
         store.convert()
-        #expect(converted?.arguments == ["models", "convert", Self.snapshot, "--mlx", "--register"] && store.convertForm == nil)
+        #expect(converted?.arguments == ["models", "convert", "--mlx", "--register", "--", Self.snapshot] && store.convertForm == nil)
         let f16 = try #require(store.sets.first { $0.handle == Self.f16 })
         let q4 = try #require(store.sets.first { $0.backend != nil })
         #expect(store.isUnquantized(f16), "its file says F16")

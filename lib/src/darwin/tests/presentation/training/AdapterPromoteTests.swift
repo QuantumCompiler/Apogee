@@ -38,19 +38,19 @@ struct AdapterPromoteTests {
         form.target = "gguf"
         form.quantize = "Q4_K_M"
         form.keepFused = true
-        #expect(form.arguments == ["train", "promote", "20261026-065637", "--as", "based", "--target", "gguf", "--quantize", "Q4_K_M", "--keep-fused"])
+        #expect(form.arguments == ["train", "promote", "--as", "based", "--target", "gguf", "--quantize", "Q4_K_M", "--keep-fused", "--", "20261026-065637"])
         form.adapter = true
-        #expect(form.arguments == ["train", "promote", "20261026-065637", "--as", "based", "--adapter"],
+        #expect(form.arguments == ["train", "promote", "--as", "based", "--adapter", "--", "20261026-065637"],
             "the CLI refuses --quantize and --keep-fused with --adapter: none sent")
         form.backend = "q4"
         form.suite = " /Users/someone/suite.jsonl "
         form.judge = "claude"
-        #expect(form.arguments == ["train", "promote", "20261026-065637", "--as", "q4", "--adapter", "--suite", "/Users/someone/suite.jsonl", "--judge", "claude"])
+        #expect(form.arguments == ["train", "promote", "--as", "q4", "--adapter", "--suite", "/Users/someone/suite.jsonl", "--judge", "claude", "--", "20261026-065637"])
         form.trainer = "mock"
         form.force = true
         #expect(form.arguments == [
-            "train", "promote", "20261026-065637", "--as", "q4", "--adapter", "--suite", "/Users/someone/suite.jsonl", "--judge", "claude",
-            "--trainer", "mock", "--force",
+            "train", "promote", "--as", "q4", "--adapter", "--suite", "/Users/someone/suite.jsonl", "--judge", "claude",
+            "--trainer", "mock", "--force", "--", "20261026-065637",
         ])
         form.adapter = false
         #expect(!(form.arguments ?? []).contains("--suite") && !(form.arguments ?? []).contains("--judge"),
@@ -71,7 +71,7 @@ struct AdapterPromoteTests {
         model.promoteForm.backend = "based"
         #expect(starter.starts.isEmpty)
         model.promote()
-        #expect(starter.starts == [["train", "promote", model.runs[0].id, "--as", "based", "--adapter"]])
+        #expect(starter.starts == [["train", "promote", "--as", "based", "--adapter", "--", model.runs[0].id]])
         for line in fixture("train-promote-adapter", "err").split(separator: "\n") { job.say(.busy(String(line))) }
         #expect(await eventually { model.run?.busy == "[promote] pinning the adapter to the base it applies over: /Users/someone/.apogee/models/tiny/gguf/bbbbbbbbbbbb/tiny-F16.gguf" })
         job.end()
@@ -96,7 +96,7 @@ struct AdapterPromoteTests {
         #expect(model.promoteForm.adapter, "the refusal names --adapter as the way")
         #expect(model.promoteForm.backend == "based" && model.promoteForm.run == model.runs[0].id)
         #expect(model.promoteRefusal == refusal)
-        #expect(model.promoteForm.arguments == ["train", "promote", model.runs[0].id, "--as", "based", "--adapter"])
+        #expect(model.promoteForm.arguments == ["train", "promote", "--as", "based", "--adapter", "--", model.runs[0].id])
         #expect(starter.starts.count == 1, "nothing runs again until the person promotes")
     }
 
@@ -148,11 +148,11 @@ struct AdapterPromoteTests {
         model.newPull()
         #expect(model.sheet == .pull && model.pullArguments == nil)
         model.pullRef = "  someone/heat-notes@main:data/train.jsonl "
-        #expect(model.pullArguments == ["datasets", "pull", "someone/heat-notes@main:data/train.jsonl"])
+        #expect(model.pullArguments == ["datasets", "pull", "--", "someone/heat-notes@main:data/train.jsonl"])
         #expect(starter.starts.isEmpty, "nothing starts until the person pulls")
         model.pull()
         #expect(model.sheet == nil && model.running == "Pulling")
-        #expect(starter.starts == [["datasets", "pull", "someone/heat-notes@main:data/train.jsonl"]])
+        #expect(starter.starts == [["datasets", "pull", "--", "someone/heat-notes@main:data/train.jsonl"]])
         job.end()
         #expect(await eventually { !model.isRunning })
     }
@@ -178,7 +178,7 @@ struct AdapterPromoteTests {
         #expect(pulled.summary == "2 file(s), 3 MiB")
         #expect(said == ["Pulled: 2 file(s), 3 MiB"])
         model.prepare(pulled.path)
-        #expect(starter.starts.last == ["datasets", "prepare", "/Users/someone/.apogee/training/datasets/raw/someone--heat-notes"])
+        #expect(starter.starts.last == ["datasets", "prepare", "--", "/Users/someone/.apogee/training/datasets/raw/someone--heat-notes"])
         prepare.end()
         #expect(await eventually { !model.isRunning })
         model.dismissPulled()

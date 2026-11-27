@@ -24,12 +24,12 @@ struct StoreViewModelTests {
     func store(_ runner: ScriptedRunner = ScriptedRunner()) async -> (StoreViewModel, ScriptedRunner) {
         runner.reading(["models", "list"], recorded("store-list"))
         runner.reading(["models", "list", "--all"], recorded("store-list-all"))
-        runner.reading(["models", "info", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
-        runner.reading(["models", "info", Self.q4Path], recorded("store-info-q4"))
-        runner.reading(["models", "info", "Llama3.2-1B-Instruct/gguf/8d51e6c04a27"], recorded("store-info-q4"))
-        runner.reading(["models", "info", "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"], recorded("store-info-f16"))
-        runner.reading(["models", "info", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"], recorded("store-info-snapshot"))
-        runner.reading(["models", "info", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
+        runner.reading(["models", "info", "--", "llama3.2-1b-Q4KM"], recorded("store-info-backend"))
+        runner.reading(["models", "info", "--", Self.q4Path], recorded("store-info-q4"))
+        runner.reading(["models", "info", "--", "Llama3.2-1B-Instruct/gguf/8d51e6c04a27"], recorded("store-info-q4"))
+        runner.reading(["models", "info", "--", "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"], recorded("store-info-f16"))
+        runner.reading(["models", "info", "--", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"], recorded("store-info-snapshot"))
+        runner.reading(["models", "info", "--", "Gemma4-26B-Instruct/mlx/a88b9f386aff"], recorded("store-info-mlx"))
         runner.commanding(["config", "scan"], .done(stdout: recorded("config-scan", "txt")))
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: Self.binary)
@@ -45,7 +45,7 @@ struct StoreViewModelTests {
             "Gemma4-26B-Instruct/mlx/a88b9f386aff", "Kokoro-82M/voice/5f3a2c91d0e4",
             "Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41", "Llama3.2-1B-Instruct/gguf/8d51e6c04a27",
         ])
-        #expect(runner.calls.contains("read models info \(Self.q4Path)"), "the registered set's handle is the CLI's answer for its path")
+        #expect(runner.calls.contains("read models info -- \(Self.q4Path)"), "the registered set's handle is the CLI's answer for its path")
         let byHandle = Dictionary(uniqueKeysWithValues: store.sets.map { ($0.handle, $0) })
         #expect(byHandle["Llama3.2-1B-Instruct/gguf/8d51e6c04a27"]?.state == "backend llama3.2-1b-Q4KM")
         #expect(byHandle["Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41"]?.state == "not registered")
@@ -93,7 +93,7 @@ struct StoreViewModelTests {
         await store.askToRegister(mlx)
         var form = try #require(store.register)
         #expect(form.name == "Gemma4-26B-Instruct-mixed_4_8")
-        #expect(form.arguments == ["config", "add-backend", "Gemma4-26B-Instruct-mixed_4_8", "--type", "mlx", "--model-path", "/Users/someone/.apogee/models/Gemma4-26B-Instruct/mlx/a88b9f386aff"])
+        #expect(form.arguments == ["config", "add-backend", "--type", "mlx", "--model-path", "/Users/someone/.apogee/models/Gemma4-26B-Instruct/mlx/a88b9f386aff", "--", "Gemma4-26B-Instruct-mixed_4_8"])
         form.cache = "q4_0"
         #expect(form.arguments?.contains("--cache-type") == false, "an MLX backend takes no attention cache type")
         let f16 = try #require(store.sets.first { $0.handle.hasSuffix("3f0c2a9b7e41") })
@@ -103,12 +103,12 @@ struct StoreViewModelTests {
         store.register?.window = "16384"
         store.register?.cache = "f16"
         #expect(store.register?.arguments == [
-            "config", "add-backend", "Llama3.2-1B-Instruct-F16", "--type", "llamacpp", "--model-path",
+            "config", "add-backend", "--type", "llamacpp", "--model-path",
             "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41/Llama3.2-1B-Instruct-F16.gguf",
-            "--context-size", "16384", "--cache-type", "f16",
+            "--context-size", "16384", "--cache-type", "f16", "--", "Llama3.2-1B-Instruct-F16",
         ])
         await store.registerIt()
-        #expect(runner.calls.contains { $0.hasPrefix("run config add-backend Llama3.2-1B-Instruct-F16 --type llamacpp") })
+        #expect(runner.calls.contains { $0.hasPrefix("run config add-backend --type llamacpp") && $0.hasSuffix("-- Llama3.2-1B-Instruct-F16") })
         #expect(runner.calls.filter { $0 == "read models list --all" }.count == 2, "read back")
     }
 
@@ -133,12 +133,12 @@ struct StoreViewModelTests {
         let model = try #require(store.pending)
         store.dismissPending()
         await store.confirm(model)
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- Llama3.2-1B-Instruct"))
         store.askToRemoveBackend("llama3.2-1b-Q4KM")
         let backend = try #require(store.pending)
         store.dismissPending()
         await store.confirm(backend)
-        #expect(runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"))
+        #expect(runner.calls.contains("run config delete-backend -- llama3.2-1b-Q4KM"))
         await store.askToRegisterAll()
         let registration = try #require(store.pending)
         store.dismissPending()
@@ -151,23 +151,23 @@ struct StoreViewModelTests {
         let (store, runner) = await store()
         let q4 = try #require(store.sets.first { $0.backend != nil })
         await store.askToDelete(q4)
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27"), "its plan read first")
+        #expect(runner.calls.contains("run models delete -- Llama3.2-1B-Instruct/gguf/8d51e6c04a27"), "its plan read first")
         try await store.confirm(#require(store.pending))
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/gguf/8d51e6c04a27 --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- Llama3.2-1B-Instruct/gguf/8d51e6c04a27"))
         // The scripted plan says nothing, so it names no backend: the
         // choice is not offered, and not passed (StoreDeleteTests has the
         // CLI's own plans).
         await store.askToDeleteModel("Llama3.2-1B-Instruct")
         #expect(!store.offersAndBackends)
         try await store.confirm(#require(store.pending), andBackends: true)
-        #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- Llama3.2-1B-Instruct"))
         #expect(!runner.calls.contains { $0.contains("--and-backends") })
         store.askToRemoveBackend("llama3.2-1b-Q4KM")
-        #expect(!runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"), "asked first")
+        #expect(!runner.calls.contains("run config delete-backend -- llama3.2-1b-Q4KM"), "asked first")
         try await store.confirm(#require(store.pending))
-        #expect(runner.calls.contains("run config delete-backend llama3.2-1b-Q4KM"))
+        #expect(runner.calls.contains("run config delete-backend -- llama3.2-1b-Q4KM"))
         await store.rename("Llama3.2-1B-Instruct", to: "Llama3.2-1B")
-        #expect(runner.calls.contains("run models rename Llama3.2-1B-Instruct Llama3.2-1B"))
+        #expect(runner.calls.contains("run models rename -- Llama3.2-1B-Instruct Llama3.2-1B"))
         #expect(store.handle(forBackend: "llama3.2-1b-Q4KM") == "Llama3.2-1B-Instruct/gguf/8d51e6c04a27", "Show its weights")
     }
 
@@ -197,9 +197,9 @@ struct StoreViewModelTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("store-list-conversions"))
         runner.reading(["models", "list", "--all"], recorded("store-list-conversions-all"))
-        runner.reading(["models", "info", wan], recorded("store-info-diffusion"))
-        runner.reading(["models", "info", head], recorded("store-info-draft-head"))
-        runner.reading(["models", "info", llama], recorded("store-info-snapshot-converts"))
+        runner.reading(["models", "info", "--", wan], recorded("store-info-diffusion"))
+        runner.reading(["models", "info", "--", head], recorded("store-info-draft-head"))
+        runner.reading(["models", "info", "--", llama], recorded("store-info-snapshot-converts"))
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: Self.binary)
         await store.refresh()

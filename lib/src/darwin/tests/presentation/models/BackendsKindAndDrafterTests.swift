@@ -168,7 +168,7 @@ struct BackendsKindAndDrafterTests {
     @Test("the base-side pairing's commands are held to the binary's verdicts: each base's own drafter taken, another width's refused in its words")
     func pairFromTheBaseHeldToVerdicts() async throws {
         let verdicts = pairingVerdicts()
-        #expect(verdicts.count == 9, "3b's five and the base side's four, in M21's order: \(verdicts.keys.sorted())")
+        #expect(verdicts.count == 7, "3b's five and M5's two, every one in the builder's order, the base after -- (GUI M23): \(verdicts.keys.sorted())")
         let model = await connected(Self.basePair())
         for base in ["Gemma4-E4B-4bit", "Gemma4-12B-4bit"] {
             await model.askToPairDrafter(try row(base, in: model))

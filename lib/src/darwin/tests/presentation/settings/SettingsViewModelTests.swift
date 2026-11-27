@@ -89,7 +89,7 @@ struct SettingsViewModelTests {
         #expect(model.permissions.map(\.tool) == ["run_command", "write_file"])
         #expect(model.permissions.map(\.level) == ["ask", "allow"])
         #expect(model.webSearch == nil && model.recall == nil, "unset keys are the defaults, said so")
-        #expect(runner.calls.contains("run config get tools.search.url"))
+        #expect(runner.calls.contains("run config get -- tools.search.url"))
     }
 
     @Test("a key goes on auth add's standard input, never its arguments, and nothing in the model keeps it")
@@ -100,7 +100,7 @@ struct SettingsViewModelTests {
         await model.connect(binary: Self.binary, version: nil)
         let secret = "sk-ant-THIS-IS-THE-SECRET"
         await model.addKey("  \(secret) ", for: "anthropic")
-        #expect(runner.calls.contains("run auth add anthropic --stdin"))
+        #expect(runner.calls.contains("run auth add --stdin -- anthropic"))
         #expect(!runner.calls.contains { $0.contains(secret) }, "never on a command line")
         #expect(runner.given == [Data("\(secret)\n".utf8)])
         let kept = String(describing: Mirror(reflecting: model).children.map { "\($0.label ?? ""): \($0.value)" })
@@ -116,15 +116,15 @@ struct SettingsViewModelTests {
         let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
         await model.connect(binary: Self.binary, version: nil)
         await model.setPermission("run_command", "deny")
-        #expect(runner.calls.contains("run config set-permission run_command deny"))
+        #expect(runner.calls.contains("run config set-permission -- run_command deny"))
         await model.allowHost(" docs.python.org ")
-        #expect(runner.calls.contains("run config add-allowed-host docs.python.org"))
+        #expect(runner.calls.contains("run config add-allowed-host -- docs.python.org"))
         await model.forbidHost("docs.python.org")
-        #expect(runner.calls.contains("run config delete-allowed-host docs.python.org"))
+        #expect(runner.calls.contains("run config delete-allowed-host -- docs.python.org"))
         await model.setDefaultVideo(nil)
-        #expect(runner.calls.contains("run config set-default-video off"))
+        #expect(runner.calls.contains("run config set-default-video -- off"))
         await model.removeKey(for: "anthropic")
-        #expect(runner.calls.contains("run auth clear anthropic"))
+        #expect(runner.calls.contains("run auth clear -- anthropic"))
         #expect(runner.calls.last?.hasPrefix("run config get") == true, "read back")
     }
 
@@ -139,7 +139,7 @@ struct SettingsViewModelTests {
         model.hasTrack52 = { true }
         await model.setConfig("memory.recall", "false")
         await model.forgetRecall()
-        #expect(runner.calls.contains("run config set memory.recall false"))
+        #expect(runner.calls.contains("run config set -- memory.recall false"))
         #expect(runner.calls.contains("run chats recall --forget --yes"), "the CLI refuses --forget alone on a pipe (GUI 4k)")
     }
 
@@ -247,21 +247,21 @@ struct SettingsViewModelTests {
     /// `write_file: deny` lost after another tool's deny.
     @Test("a change made while another runs is queued: both reach the binary in order, and both are said")
     func changesQueue() async {
-        let runner = HoldingRunner(holding: ["config", "set-permission", "run_command", "deny"])
+        let runner = HoldingRunner(holding: ["config", "set-permission", "--", "run_command", "deny"])
         let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
         let toasts = SettingsToasts()
         model.say = { toasts.say($0) }
         await model.connect(binary: Self.binary, version: nil)
         let first = Task { await model.setPermission("run_command", "deny") }
         #expect(await settingsEventually { runner.held })
-        #expect(model.working == "config set-permission run_command")
+        #expect(model.working == "config set-permission run_command deny")
         let second = Task { await model.setPermission("write_file", "deny") }
         try? await Task.sleep(for: .milliseconds(100))
-        #expect(!runner.changes.contains("config set-permission write_file deny"), "it waits its turn")
+        #expect(!runner.changes.contains("config set-permission -- write_file deny"), "it waits its turn")
         runner.release()
         await first.value
         await second.value
-        #expect(runner.changes == ["config set-permission run_command deny", "config set-permission write_file deny"])
+        #expect(runner.changes == ["config set-permission -- run_command deny", "config set-permission -- write_file deny"])
         #expect(toasts.said == ["run_command: deny", "write_file: deny"])
         #expect(model.working == nil)
     }
@@ -269,11 +269,11 @@ struct SettingsViewModelTests {
     @Test("an unset key, which config get prints as an empty line and exit 0, reads as not set; a set one as its value")
     func unsetReadsAsUnset() async {
         let runner = HoldingRunner(holding: nil)
-        runner.answers["config get tools.search.url"] = "\n"
+        runner.answers["config get -- tools.search.url"] = "\n"
         let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
         await model.connect(binary: Self.binary, version: nil)
         #expect(model.webSearch == nil)
-        runner.answers["config get tools.search.url"] = "http://localhost:8888\n"
+        runner.answers["config get -- tools.search.url"] = "http://localhost:8888\n"
         await model.refresh()
         #expect(model.webSearch == "http://localhost:8888")
     }
@@ -290,7 +290,7 @@ struct SettingsViewModelTests {
         #expect(!SettingsViewModel.canSet("") && !SettingsViewModel.canSet(" \t"))
         #expect(SettingsViewModel.canSet("http://localhost:8888"))
         await model.setConfig("tools.search.url", "http://localhost:8888")
-        #expect(runner.calls.contains("run config set tools.search.url http://localhost:8888"))
+        #expect(runner.calls.contains("run config set -- tools.search.url http://localhost:8888"))
     }
 
     // MARK: - GUI M19: the Settings window says its own lines while it is in front

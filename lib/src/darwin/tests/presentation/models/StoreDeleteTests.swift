@@ -33,22 +33,22 @@ struct StoreDeleteTests {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], recorded("delete-list"))
         runner.reading(["models", "list", "--all"], recorded("delete-list-all"))
-        runner.reading(["models", "info", "Llama3.2-1B-Instruct-Q4KM"], recorded("delete-info-backend-llama"))
-        runner.reading(["models", "info", "Gemma3-1B-Instruct-Q4KM"], recorded("delete-info-backend-gemma"))
-        runner.reading(["models", "info", Self.llamaPath], recorded("delete-info-path-llama"))
-        runner.reading(["models", "info", Self.gemmaPath], recorded("delete-info-path-gemma"))
-        runner.reading(["models", "info", Self.llamaQ4], recorded("delete-info-llama-q4"))
-        runner.reading(["models", "info", Self.gemmaQ4], recorded("delete-info-gemma-q4"))
-        runner.reading(["models", "info", Self.llamaF16], recorded("delete-info-llama-f16"))
-        runner.reading(["models", "info", Self.gemmaF16], recorded("delete-info-gemma-f16"))
+        runner.reading(["models", "info", "--", "Llama3.2-1B-Instruct-Q4KM"], recorded("delete-info-backend-llama"))
+        runner.reading(["models", "info", "--", "Gemma3-1B-Instruct-Q4KM"], recorded("delete-info-backend-gemma"))
+        runner.reading(["models", "info", "--", Self.llamaPath], recorded("delete-info-path-llama"))
+        runner.reading(["models", "info", "--", Self.gemmaPath], recorded("delete-info-path-gemma"))
+        runner.reading(["models", "info", "--", Self.llamaQ4], recorded("delete-info-llama-q4"))
+        runner.reading(["models", "info", "--", Self.gemmaQ4], recorded("delete-info-gemma-q4"))
+        runner.reading(["models", "info", "--", Self.llamaF16], recorded("delete-info-llama-f16"))
+        runner.reading(["models", "info", "--", Self.gemmaF16], recorded("delete-info-gemma-f16"))
         // The plans first, then the deletes, which a longer prefix picks out.
-        runner.commanding(["models", "delete", Self.llamaQ4], .done(stdout: recorded("delete-plan-backend", "txt")))
-        runner.commanding(["models", "delete", Self.gemmaQ4], .done(stdout: recorded("delete-plan-gemma", "txt")))
-        runner.commanding(["models", "delete", Self.llamaF16], .done(stdout: recorded("delete-plan-none", "txt")))
-        runner.commanding(["models", "delete", "Llama3.2-1B-Instruct"], .done(stdout: recorded("delete-plan-model", "txt")))
-        runner.commanding(["models", "delete", Self.gemmaQ4, "--yes"], .done(stdout: recorded("delete-kept", "txt")))
-        runner.commanding(["models", "delete", Self.llamaQ4, "--yes", "--and-backends"], .done(stdout: recorded("delete-and-backends", "txt")))
-        runner.commanding(["models", "delete", Self.llamaF16, "--yes"], .done(stdout: recorded("delete-none", "txt")))
+        runner.commanding(["models", "delete", "--", Self.llamaQ4], .done(stdout: recorded("delete-plan-backend", "txt")))
+        runner.commanding(["models", "delete", "--", Self.gemmaQ4], .done(stdout: recorded("delete-plan-gemma", "txt")))
+        runner.commanding(["models", "delete", "--", Self.llamaF16], .done(stdout: recorded("delete-plan-none", "txt")))
+        runner.commanding(["models", "delete", "--", "Llama3.2-1B-Instruct"], .done(stdout: recorded("delete-plan-model", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--", Self.gemmaQ4], .done(stdout: recorded("delete-kept", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--and-backends", "--", Self.llamaQ4], .done(stdout: recorded("delete-and-backends", "txt")))
+        runner.commanding(["models", "delete", "--yes", "--", Self.llamaF16], .done(stdout: recorded("delete-none", "txt")))
         let store = StoreViewModel(runner: runner)
         await store.connect(binary: Self.binary)
         await store.refresh()
@@ -62,7 +62,7 @@ struct StoreDeleteTests {
         let q4 = try #require(store.sets.first { $0.handle == Self.llamaQ4 })
         #expect(q4.backend == "Llama3.2-1B-Instruct-Q4KM")
         await store.askToDelete(q4)
-        #expect(runner.calls.contains("run models delete \(Self.llamaQ4)"), "models delete without --yes: the CLI's plan")
+        #expect(runner.calls.contains("run models delete -- \(Self.llamaQ4)"), "models delete without --yes: the CLI's plan")
         #expect(!runner.calls.contains { $0.hasPrefix("run models delete") && $0.contains("--yes") }, "nothing deleted before the yes")
         #expect(store.pending != nil)
     }
@@ -112,7 +112,7 @@ struct StoreDeleteTests {
             handle: "Nothing-Here/gguf/000000000000", format: "gguf", precision: nil, cliState: "ok", backend: nil,
             consumed: false, note: nil, kind: nil)
         runner.commanding(
-            ["models", "delete", missing.handle],
+            ["models", "delete", "--", missing.handle],
             .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail(recorded("delete-plan-missing", "err"))))
         await store.askToDelete(missing)
         #expect(store.pending == nil)
@@ -131,14 +131,14 @@ struct StoreDeleteTests {
         // longer prefix is answered first.)
         runner.reading(["models", "list"], recorded("delete-list-after-kept"))
         runner.reading(["models", "list", "--all"], recorded("delete-list-all-after-kept"))
-        runner.reading(["models", "info", "Gemma3-1B-Instruct-Q4KM"], recorded("delete-info-backend-gemma-after-kept"))
+        runner.reading(["models", "info", "--", "Gemma3-1B-Instruct-Q4KM"], recorded("delete-info-backend-gemma-after-kept"))
         runner.reading(
-            ["models", "info", Self.gemmaPath],
+            ["models", "info", "--", Self.gemmaPath],
             outcome: .failed(
                 exit: ChildExit(reason: .exited, status: 1),
                 stderrTail: tail("apogee models: no backend or stored weights named '\(Self.gemmaPath)'")))
         try await store.confirm(#require(store.pending))
-        #expect(runner.calls.contains("run models delete \(Self.gemmaQ4) --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- \(Self.gemmaQ4)"))
         #expect(said == ["Deleted \(Self.gemmaQ4)"])
         let kept = try #require(store.narration, "the CLI's words, kept after the delete")
         #expect(kept.title == "Deleted \(Self.gemmaQ4)")
@@ -154,7 +154,7 @@ struct StoreDeleteTests {
         runner.reading(["models", "list"], recorded("delete-list-after-removed"))
         runner.reading(["models", "list", "--all"], recorded("delete-list-all-after-removed"))
         try await store.confirm(#require(store.pending), andBackends: true)
-        #expect(runner.calls.contains("run models delete \(Self.llamaQ4) --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes --and-backends -- \(Self.llamaQ4)"))
         let removed = try #require(store.narration)
         #expect(removed.title == "Deleted \(Self.llamaQ4)")
         #expect(removed.lines.contains("--and-backends: its entry goes too, through the config editor."))
@@ -166,7 +166,7 @@ struct StoreDeleteTests {
         let f16 = try #require(store.sets.first { $0.handle == Self.llamaF16 })
         await store.askToDelete(f16)
         try await store.confirm(#require(store.pending))
-        #expect(runner.calls.contains("run models delete \(Self.llamaF16) --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- \(Self.llamaF16)"))
         #expect(store.narration == nil, "it said no more than what it removed")
         #expect(said.last == "Deleted \(Self.llamaF16)")
     }
@@ -181,7 +181,7 @@ struct StoreDeleteTests {
         let kept = try #require(store.pending, "the dialog is built from the question")
         store.dismissPending()
         await store.confirm(kept, andBackends: false)
-        #expect(runner.calls.contains("run models delete \(Self.gemmaQ4) --yes"))
+        #expect(runner.calls.contains("run models delete --yes -- \(Self.gemmaQ4)"))
         #expect(said.last == "Deleted \(Self.gemmaQ4)")
         let llama = try #require(store.sets.first { $0.handle == Self.llamaQ4 })
         await store.askToDelete(llama)
@@ -189,7 +189,7 @@ struct StoreDeleteTests {
         #expect(store.offersAndBackends, "its plan names a backend")
         store.dismissPending()
         await store.confirm(removed, andBackends: true)
-        #expect(runner.calls.contains("run models delete \(Self.llamaQ4) --yes --and-backends"))
+        #expect(runner.calls.contains("run models delete --yes --and-backends -- \(Self.llamaQ4)"))
         #expect(said.last == "Deleted \(Self.llamaQ4)")
     }
 }

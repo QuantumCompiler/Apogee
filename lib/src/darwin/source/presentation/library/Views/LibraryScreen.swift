@@ -364,7 +364,7 @@ struct MCPView: View {
             }
             Button("Cancel", role: .cancel) { model.pendingRemove = nil }
         } message: {
-            Text("apogee config delete-mcp-server \(model.pendingRemove?.name ?? "") -- its entry leaves the config, so no session connects to it; its files are left alone.")
+            Text("apogee " + Argv.shown(MCPViewModel.removeArguments(model.pendingRemove?.name ?? "")) + " -- its entry leaves the config, so no session connects to it; its files are left alone.")
         }
     }
 }
@@ -387,7 +387,7 @@ struct AgentSheet: View {
             }
             Toggle("Prose only: no output schema", isOn: $model.createForm.noSchema)
             if let arguments = model.createForm.arguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
             }
             HStack {
                 Spacer()

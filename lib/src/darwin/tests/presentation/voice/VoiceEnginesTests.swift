@@ -46,8 +46,8 @@ struct VoiceEnginesTests {
     func store() -> ScriptedRunner {
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], fixture("business/reads/Fixtures/media-list.json"))
-        runner.reading(["models", "info", Self.torch], fixture("business/reads/Fixtures/media-info-voice-torch.json"))
-        runner.reading(["models", "info", Self.mlx], fixture("business/reads/Fixtures/media-info-voice-mlx.json"))
+        runner.reading(["models", "info", "--", Self.torch], fixture("business/reads/Fixtures/media-info-voice-torch.json"))
+        runner.reading(["models", "info", "--", Self.mlx], fixture("business/reads/Fixtures/media-info-voice-mlx.json"))
         return runner
     }
 
@@ -119,7 +119,7 @@ struct VoiceEnginesTests {
         defer { try? FileManager.default.removeItem(at: home) }
         let runner = ScriptedRunner()
         runner.reading(["models", "list"], fixture("business/reads/Fixtures/models-stored-list.json"))
-        runner.reading(["models", "info", Self.torch], fixture("business/reads/Fixtures/models-stored-info-voice.json"))
+        runner.reading(["models", "info", "--", Self.torch], fixture("business/reads/Fixtures/models-stored-info-voice.json"))
         let model = VoiceViewModel(runner: runner, starter: ScriptedJobs([]), preferences: Preferences(store: MemoryStore()), home: home)
         await model.connect(binary: Self.binary)
         #expect(model.models == [MediaModel(handle: Self.torch, engine: .torch)] && model.chosenEngine == nil)

@@ -156,7 +156,7 @@ Each fixture fails on today's binary (measured 2026-11-22).
 ## Out of scope
 
 - **A name the config can't register**, refused before anything is written, the registration made one step, and the length caps: [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md).
-- **The Mac app passes no `--` before a collection name** (`CollectionsViewModel.swift:29-35`, `:48-50`), so a store named `-x` can't be read, ingested into or deleted from the app (exit 106): [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), and the app's other sites, [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md).
+- **The Mac app passes no `--` before a collection name** (`CollectionsViewModel.swift:29-35`, `:48-50`), so a store named `-x` can't be read, ingested into or deleted from the app (exit 106): [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), and the app's other sites, [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name).
 - **How far `--rag` into a live third-party database hurts it** beyond what was measured (tables added, WAL on). The fix makes it unreachable.
 
 ## Links

@@ -85,12 +85,12 @@ struct DownloadsViewModelTests {
         let (model, _) = downloads([], streams: false)
         #expect(model.formArguments == nil)
         model.reference = "  Qwen/Qwen3-8B "
-        #expect(model.formArguments == ["models", "pull", "Qwen/Qwen3-8B"])
+        #expect(model.formArguments == ["models", "pull", "--", "Qwen/Qwen3-8B"])
         model.convert = true
         model.chosenLevels = ["Q8_0", "Q4_K_M"]
-        #expect(model.formArguments == ["models", "pull", "Qwen/Qwen3-8B", "--safetensors", "--register-with", "Q4_K_M,Q8_0"], "levels in the CLI's order")
+        #expect(model.formArguments == ["models", "pull", "--register-with", "Q4_K_M,Q8_0", "--safetensors", "--", "Qwen/Qwen3-8B"], "levels in the CLI's order")
         model.chosenLevels = []
-        #expect(model.formArguments == ["models", "pull", "Qwen/Qwen3-8B", "--safetensors", "--register"])
+        #expect(model.formArguments == ["models", "pull", "--safetensors", "--register", "--", "Qwen/Qwen3-8B"])
         model.reference = "two words"
         #expect(model.formArguments == nil)
     }
@@ -105,7 +105,7 @@ struct DownloadsViewModelTests {
         model.convert = true
         model.start()
         #expect(model.reference == "")
-        #expect(starter.starts.first?.0 == ["models", "pull", "org/model", "--safetensors", "--register-with", "Q4_K_M", "--output-format", "stream-json"])
+        #expect(starter.starts.first?.0 == ["models", "pull", "--register-with", "Q4_K_M", "--safetensors", "--output-format", "stream-json", "--", "org/model"])
         #expect(starter.starts.first?.1 == true)
         let download = model.downloads[0]
         job.say(.event(.stage(index: 1, count: 3, label: "pull org/model's full weights", state: "started")))
@@ -127,7 +127,7 @@ struct DownloadsViewModelTests {
         let (model, starter) = downloads([job], streams: false)
         model.reference = "tiny:latest"
         model.start()
-        #expect(starter.starts.first?.0 == ["models", "pull", "tiny:latest"])
+        #expect(starter.starts.first?.0 == ["models", "pull", "--", "tiny:latest"])
         #expect(starter.starts.first?.1 == false)
         let download = model.downloads[0]
         #expect(DownloadsViewModel.now(download.progress) == "working")
@@ -155,7 +155,7 @@ struct DownloadsViewModelTests {
         #expect(await eventually { download.progress.status == .stopped })
         #expect(download.progress.stages[2]?.state == "stopped")
         model.again(download)
-        #expect(starter.starts[1].0 == ["models", "pull", "org/model", "--safetensors", "--register-with", "Q4_K_M", "--output-format", "stream-json"])
+        #expect(starter.starts[1].0 == ["models", "pull", "--register-with", "Q4_K_M", "--safetensors", "--output-format", "stream-json", "--", "org/model"])
         let retried = model.downloads[0]
         second.say(.event(.stage(index: 3, count: 3, label: "quantize to Q4_K_M", state: "failed")))
         second.say(.event(.notice("stopped at step 3 of 3 -- carry on with: apogee models quantize org--model/gguf/F16 Q4_K_M")))

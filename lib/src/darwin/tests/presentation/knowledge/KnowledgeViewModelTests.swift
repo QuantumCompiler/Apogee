@@ -59,14 +59,14 @@ struct RecordsViewModelTests {
         let (model, runner, _) = await records()
         let record = model.records[0]
         await model.link(record, to: "  PROJ-7 ")
-        #expect(runner.calls.contains("run knowledge|link|\(record.id)|PROJ-7"))
+        #expect(runner.calls.contains("run knowledge|link|--|\(record.id)|PROJ-7"))
         await model.move(record, to: "superseded")
-        #expect(runner.calls.contains("run knowledge|status|\(record.id)|superseded"))
+        #expect(runner.calls.contains("run knowledge|status|--|\(record.id)|superseded"))
         await model.move(record, to: "shipped")
-        #expect(!runner.calls.contains("run knowledge|status|\(record.id)|shipped"), "already shipped: nothing runs")
+        #expect(!runner.calls.contains("run knowledge|status|--|\(record.id)|shipped"), "already shipped: nothing runs")
         model.pendingDelete = record
         try await model.confirmDelete(#require(model.pendingDelete))
-        #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
+        #expect(runner.calls.contains("run knowledge|delete|--|\(record.id)"))
         await model.export(to: URL(fileURLWithPath: "/Users/someone/knowledge.md"), markdown: true, anonymize: true)
         #expect(runner.calls.contains("run knowledge|export|--format|markdown|--anonymize|-o|/Users/someone/knowledge.md"))
         #expect(runner.calls.filter { $0 == "read knowledge|list" }.count >= 5, "every change read back")
@@ -80,7 +80,7 @@ struct RecordsViewModelTests {
         let answer = try #require(model.pendingDelete)
         model.pendingDelete = nil
         await model.confirmDelete(answer)
-        #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
+        #expect(runner.calls.contains("run knowledge|delete|--|\(record.id)"))
     }
 
     @Test("the record delete's dialog line is the line the delete runs, as a person types it (GUI M21)")

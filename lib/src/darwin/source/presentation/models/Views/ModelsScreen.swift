@@ -520,7 +520,7 @@ struct RolesView: View {
                             Text(role.role.prefix(1).uppercased() + role.role.dropFirst())
                                 .font(.apogeeTitle)
                                 .foregroundStyle(Palette.textPrimary)
-                            Text((role.verb + ["<backend>"]).joined(separator: " "))
+                            Text(Argv.shown(role.verb) + " <backend>")
                                 .font(.apogeeMeta.monospaced())
                                 .foregroundStyle(Palette.textTertiary)
                         }

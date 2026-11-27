@@ -22,7 +22,7 @@ struct XcodePane: View {
             Button("Remove", role: .destructive) { Task { await xcode.remove() } }
             Button("Cancel", role: .cancel) { xcode.removing = false }
         } message: {
-            Text("apogee " + (xcode.removes ?? []).joined(separator: " ") + " -- its config entry goes; Xcode is left as it is.")
+            Text("apogee " + Argv.shown(xcode.removes ?? []) + " -- its config entry goes; Xcode is left as it is.")
         }
         SettingRow(label: "Use Apogee as an agent in Xcode") {
             XcodeAgentFields(xcode: xcode)
@@ -105,7 +105,7 @@ struct XcodeToolsRoute: View {
                 HStack {
                     Button("Register") { Task { await xcode.register() } }
                         .disabled(xcode.working != nil)
-                    Text("apogee " + register.joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
+                    Text("apogee " + Argv.shown(register)).font(.apogeeCode).foregroundStyle(Palette.textTertiary)
                         .textSelection(.enabled)
                 }
             }

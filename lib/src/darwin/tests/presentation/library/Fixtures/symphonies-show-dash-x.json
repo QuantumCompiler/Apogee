@@ -1,0 +1,1 @@
+{"description":"dash","input":{"description":"","image":false},"name":"-x","object":"symphony","overrides":false,"problems":[],"source":"config","stages":[{"image":false,"name":"one","prompt":"Say {{input}}","role":"chat"}]}

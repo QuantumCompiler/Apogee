@@ -55,7 +55,7 @@ struct SavedChatActsTests {
         let (library, _) = await library(runner)
         let chat = try #require(library.chats.first)
         await library.showInfo(chat)
-        #expect(runner.calls.last == "run chats info \(Self.first)")
+        #expect(runner.calls.last == "run chats info -- \(Self.first)")
         let info = try #require(library.info)
         #expect(info.chat == chat && info.failure == nil)
         #expect(info.fields.map(\.label) == ["id", "title", "backend", "started", "updated", "turns", "messages"])
@@ -98,7 +98,7 @@ struct SavedChatActsTests {
         let confirmed = Task { await library.confirm(confirmedAnswer) }
         #expect(await eventually { jobs.starts.count == 1 })
         #expect(
-            jobs.starts == [ScriptedJobs.Start(binary: ScriptedStarter.binary.url, arguments: ["chats", "compact", Self.first, "--yes"], streaming: false)],
+            jobs.starts == [ScriptedJobs.Start(binary: ScriptedStarter.binary.url, arguments: ["chats", "compact", "--yes", "--", Self.first], streaming: false)],
             "the CLI refuses it on a pipe without --yes")
         #expect(!runner.calls.contains { $0.hasPrefix("run chats compact") }, "never a read's command, which ends at 60 s")
         #expect(library.isCompacting(chat), "its row busy while the model folds it")
@@ -151,7 +151,7 @@ struct SavedChatActsTests {
         let compacting = Task { await library.confirm(compact) }
         #expect(await eventually { jobs.starts.count == 1 })
         let job = try #require(jobs.jobs.first)
-        #expect(jobs.starts.first?.arguments == ["chats", "compact", Self.first, "--yes"])
+        #expect(jobs.starts.first?.arguments == ["chats", "compact", "--yes", "--", Self.first])
         say(printed("chats-compact.txt"), on: job)
         job.end()
         await compacting.value

@@ -156,6 +156,7 @@
 		7C96A1DA97A961E6160DE7E7 /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
 		7D87A9290F9DB27DE81684C1 /* PresentationGraph.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 786F91EBBBD96219931E25B0 /* PresentationGraph.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7F03FFAB96DF6B0D48271E13 /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
+		7F07C97555AF8BAE1811367D /* BusinessReads.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E1D41E0FC717FE88B6A4A12 /* BusinessReads.framework */; };
 		7F20F361A587DCDCF31DFBD8 /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
 		7F794B2478DD44600ED1CA0F /* InfrastructureProcess.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C52D031291F6BA58AC5185B /* InfrastructureProcess.framework */; };
 		7FFEA12B18745AE61F2939B7 /* DataProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFA5A0ABACC1F719CFE66357 /* DataProtocol.framework */; };
@@ -1036,6 +1037,13 @@
 			remoteInfo = InfrastructureProcess;
 		};
 		66872532DE64DAB601636A7B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3EC184C8551A9247D5719BE4;
+			remoteInfo = BusinessReads;
+		};
+		67114FEA1982FEB8EAEDF4BD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
 			proxyType = 1;
@@ -2727,6 +2735,7 @@
 			files = (
 				D58BEB698235FDB8CE3187D6 /* InfrastructureProcess.framework in Frameworks */,
 				84D8CCC832842505664E8894 /* DataProtocol.framework in Frameworks */,
+				7F07C97555AF8BAE1811367D /* BusinessReads.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4510,6 +4519,7 @@
 			dependencies = (
 				A027B7EA2C12F53090F818CE /* PBXTargetDependency */,
 				26FA39427688896C91767CBE /* PBXTargetDependency */,
+				AF198A7E861DEA6F14ED7E37 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C82C91FDCF61974FE05FBC0C /* jobs */,
@@ -6959,6 +6969,11 @@
 			isa = PBXTargetDependency;
 			target = 566EF84A99783309FC98BF91 /* DataProtocol */;
 			targetProxy = 4915E3B722726E015045C91A /* PBXContainerItemProxy */;
+		};
+		AF198A7E861DEA6F14ED7E37 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3EC184C8551A9247D5719BE4 /* BusinessReads */;
+			targetProxy = 67114FEA1982FEB8EAEDF4BD /* PBXContainerItemProxy */;
 		};
 		B0254ED8DFAC245009EFA5C6 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;

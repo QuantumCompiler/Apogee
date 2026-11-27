@@ -50,39 +50,41 @@ public struct ClipForm: Sendable, Equatable {
     /// The arguments after `apogee`, writing to `output`; `nil` while the
     /// form cannot run -- a new clip needs a prompt or a seed image. The
     /// prompt is the last word, after `--`, so the binary never reads it as
-    /// a flag (`Argv`, GUI 4g).
+    /// a flag (`Argv`, GUI 4g). Each `--lora` comes first: it takes a `--`
+    /// directly after it as the end of its list (`Argv.endOfOptionsEaters`),
+    /// so `-o O --lora L -- '-dash first'` exits 109 (GUI M23).
     public func arguments(output: String) -> [String]? {
         let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        var arguments = ["video", "generate"]
+        var options: [Argv.Option] = []
+        if noLoRAs {
+            options.append(.flag("--no-lora"))
+        } else {
+            options += loras.filter { !$0.isEmpty }.map { .value("--lora", $0) }
+        }
         switch start {
         case .new:
             guard !prompt.isEmpty || image != nil else { return nil }
         case .again(let record):
-            arguments += ["--from", record]
+            options.append(.value("--from", record))
         case .extend(let clip):
-            arguments += ["--extend", clip]
+            options.append(.value("--extend", clip))
         }
-        arguments += ["-o", output]
-        if let image { arguments += ["--image", image] }
+        options.append(.value("-o", output))
+        if let image { options.append(.value("--image", image)) }
         let model = model.trimmingCharacters(in: .whitespaces)
-        if !model.isEmpty { arguments += ["-m", model] }
-        if let engine { arguments += ["--engine", engine.word] }
-        if let seed { arguments += ["--seed", String(seed)] }
-        if let duration { arguments += ["--duration", Self.number(duration)] }
-        if let resolution, !resolution.isEmpty { arguments += ["--resolution", resolution] }
-        if let steps, preset == .none { arguments += ["--steps", String(steps)] }
-        if let fps { arguments += ["--fps", String(fps)] }
+        if !model.isEmpty { options.append(.value("-m", model)) }
+        if let engine { options.append(.value("--engine", engine.word)) }
+        if let seed { options.append(.value("--seed", String(seed))) }
+        if let duration { options.append(.value("--duration", Self.number(duration))) }
+        if let resolution, !resolution.isEmpty { options.append(.value("--resolution", resolution)) }
+        if let steps, preset == .none { options.append(.value("--steps", String(steps))) }
+        if let fps { options.append(.value("--fps", String(fps))) }
         switch preset {
         case .none: break
-        case .draft: arguments.append("--draft")
-        case .final: arguments.append("--final")
+        case .draft: options.append(.flag("--draft"))
+        case .final: options.append(.flag("--final"))
         }
-        if noLoRAs {
-            arguments.append("--no-lora")
-        } else {
-            for lora in loras where !lora.isEmpty { arguments += ["--lora", lora] }
-        }
-        return prompt.isEmpty ? arguments : arguments + Argv.text(prompt)
+        return Argv.line(["video", "generate"], options: options, names: prompt.isEmpty ? [] : [prompt])
     }
 
     /// `5` for 5.0, `2.5` for 2.5.

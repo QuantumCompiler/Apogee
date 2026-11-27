@@ -209,29 +209,34 @@ public struct ConvertForm: Equatable, Sendable {
         alone ? "Registering and quantizing start from the F16, so a \(written) GGUF is made on its own. Choose f16 to register it or quantize from it." : nil
     }
 
-    /// The command, exactly as the sheet shows it.
+    /// The command, exactly as the sheet shows it: the set after `--`, and
+    /// `--register-with` -- which takes a `--` directly after it as its own
+    /// end -- never last before it (`Argv`, GUI M23). A GGUF's levels pass
+    /// `--register` beside it, which `--register-with` implies (the CLI's
+    /// help): with nothing else to follow it, no order kept a dash-led set
+    /// from being read as an option.
     public var arguments: [String] {
-        var arguments = ["models", "convert", handle]
-        if mlx { arguments.append("--mlx") }
-        if mlx && textOnly && textOnlyOffered { arguments.append("--text-only") }
+        var options: [Argv.Option] = []
+        if mlx { options.append(.flag("--mlx")) }
+        if mlx && textOnly && textOnlyOffered { options.append(.flag("--text-only")) }
         let chosen = levelChoices.filter(levels.contains)
         if mlx && !chosen.isEmpty {
             // Every precision listed, the written one first: the CLI converts
             // and names them in this order.
-            arguments += ["--register-with", ([written] + chosen).joined(separator: ",")]
+            options.append(.value("--register-with", ([written] + chosen).joined(separator: ",")))
         } else {
-            if let precision { arguments += ["-t", precision] }
+            if let precision { options.append(.value("-t", precision)) }
             if !chosen.isEmpty {
-                arguments += ["--register-with", chosen.joined(separator: ",")]
+                options += [.value("--register-with", chosen.joined(separator: ",")), .flag("--register")]
             } else if register && registers {
-                arguments.append("--register")
+                options.append(.flag("--register"))
             }
         }
         let base = baseName.trimmingCharacters(in: .whitespaces)
-        if !base.isEmpty && registers && (register || !chosen.isEmpty) { arguments += ["--base-name", base] }
+        if !base.isEmpty && registers && (register || !chosen.isEmpty) { options.append(.value("--base-name", base)) }
         let type = modelType.trimmingCharacters(in: .whitespaces)
-        if mlx && registers && !type.isEmpty { arguments += ["--model-type", type] }
-        return arguments
+        if mlx && registers && !type.isEmpty { options.append(.value("--model-type", type)) }
+        return Argv.line(["models", "convert"], options: options, names: [handle])
     }
 
     /// The steps the command takes, in its order, each with its estimate.
@@ -300,15 +305,17 @@ public struct QuantizeForm: Equatable, Sendable {
         named = true
     }
 
+    /// The command, the set after `--` (`Argv`, GUI M23).
     public var arguments: [String] {
-        ["models", "quantize", handle] + (level == "Q4_K_M" ? [] : ["-t", level])
+        Argv.line(["models", "quantize"], options: level == "Q4_K_M" ? [] : [.value("-t", level)], names: [handle])
     }
 
-    /// The registration that follows, its file read from the store after.
+    /// The registration that follows, its file read from the store after,
+    /// the typed name after `--`.
     public func registration(path: String) -> [String]? {
         let name = name.trimmingCharacters(in: .whitespaces)
         guard register, !name.isEmpty else { return nil }
-        return ["config", "add-backend", name, "--type", "llamacpp", "--model-path", path]
+        return Argv.line(["config", "add-backend"], options: [.value("--type", "llamacpp"), .value("--model-path", path)], names: [name])
     }
 
     public var steps: [StoreStep] {

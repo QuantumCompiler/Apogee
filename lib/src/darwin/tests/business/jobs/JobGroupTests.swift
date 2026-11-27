@@ -121,7 +121,7 @@ struct ChildRegistryTests {
         let binary = try fake.binary(#"echo 'pulling'; while true; do /bin/sleep 0.05; done"#)
         let registry = ChildRegistry()
         let job = JobStarter(spawner: ProcessSpawner(), folder: fake.directory, registry: registry)
-            .startJob(binary: binary, arguments: ["models", "pull", "org/model", "--output-format", "stream-json"], streaming: false)
+            .startJob(binary: binary, arguments: ["models", "pull", "--output-format", "stream-json", "--", "org/model"], streaming: false)
         let listed = try #require(registry.children.first)
         #expect(registry.children.count == 1, "listed at its start, not once it first speaks")
         #expect(listed.kind == .job)
@@ -151,11 +151,11 @@ struct ChildRegistryTests {
         let registry = ChildRegistry()
         let starter = JobStarter(spawner: ProcessSpawner(), folder: fake.directory, registry: registry)
         let jobs = [
-            starter.startJob(binary: binary, arguments: ["video", "generate", "a fox"], streaming: false),
-            starter.startJob(binary: binary, arguments: ["voice", "say", "hello"], streaming: false),
+            starter.startJob(binary: binary, arguments: ["video", "generate", "--", "a fox"], streaming: false),
+            starter.startJob(binary: binary, arguments: ["voice", "say", "--", "hello"], streaming: false),
         ]
         let session = registry.register(kind: .session, label: "Session: actor", processIdentifier: 1) { _ in }
-        #expect(registry.children.map(\.label) == ["apogee video generate a fox", "apogee voice say hello", "Session: actor"])
+        #expect(registry.children.map(\.label) == ["apogee video generate 'a fox'", "apogee voice say hello", "Session: actor"])
         let clock = ContinuousClock()
         let started = clock.now
         #expect(await registry.stop(.job, grace: .seconds(5)))
@@ -179,25 +179,26 @@ struct ChildRegistryTests {
 
     @Test("a job's label is the command as typed, up to its first option, never longer than its limit")
     func labels() {
-        #expect(ChildRegistry.label(for: ["models", "pull", "org/model", "--output-format", "stream-json"]) == "apogee models pull org/model")
-        #expect(ChildRegistry.label(for: ["video", "generate", "A lighthouse at dusk", "-o", "/Users/someone/Movies/Apogee/a.mp4"])
-            == "apogee video generate A lighthouse at dusk")
+        #expect(ChildRegistry.label(for: ["models", "pull", "--output-format", "stream-json", "--", "org/model"]) == "apogee models pull org/model")
         #expect(ChildRegistry.label(for: ["check", "--fix"]) == "apogee check")
         #expect(ChildRegistry.label(for: ["--dev", "models", "list"]) == "apogee --dev models list", "a root option first: the first words")
-        #expect(ChildRegistry.label(for: ["train", "run", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "--dataset", "heat-notes"])
+        #expect(ChildRegistry.label(for: ["train", "run", "--dataset", "heat-notes", "--", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"])
             == "apogee train run Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "a store handle whole")
-        let long = ChildRegistry.label(for: ["video", "generate", String(repeating: "a fox at dusk, ", count: 20), "-o", "/tmp/a.mp4"])
-        #expect(long.count == ChildRegistry.labelLimit && long.hasSuffix("…") && long.hasPrefix("apogee video generate a fox at dusk, "))
+        let long = ChildRegistry.label(for: ["video", "generate", "--", String(repeating: "a fox at dusk, ", count: 20)])
+        #expect(long.count == ChildRegistry.labelLimit && long.hasSuffix("…") && long.hasPrefix("apogee video generate 'a fox at dusk, "))
     }
 
-    @Test("a person's text after -- is still named: the command words, then the text, never the options between (GUI 4g)")
+    @Test("a person's text and a name after -- are named as a person types them: the command words, then the text, never the options between -- quoted where a shell would split it, -- kept before a dash-led one (GUI 4g, M23)")
     func labelsWithText() {
         #expect(ChildRegistry.label(for: ["video", "generate", "-o", "/Users/someone/Movies/Apogee/a.mp4", "--", "A lighthouse at dusk"])
-            == "apogee video generate A lighthouse at dusk")
+            == "apogee video generate 'A lighthouse at dusk'")
         #expect(ChildRegistry.label(for: ["task", "run", "--rounds", "8", "--tools", "--output-format", "stream-json", "--", "-x fix the parser"])
-            == "apogee task run -x fix the parser", "a dash-leading text is the text")
+            == "apogee task run -- '-x fix the parser'", "a dash-leading text keeps its --")
+        #expect(ChildRegistry.label(for: ["embed", "info", "--", "-x"]) == "apogee embed info -- -x")
+        #expect(ChildRegistry.label(for: ["graph", "build", "--source", "/Users/someone/code", "--graph", "notes"]) == "apogee graph build",
+                "a name given as an option's value is the option's: never shown")
         #expect(ChildRegistry.label(for: ["voice", "say", "-o", "/tmp/a.wav", "--"]) == "apogee voice say", "nothing after it")
         let long = ChildRegistry.label(for: ["video", "compose", "-o", "/tmp/a.mp4", "--", String(repeating: "a fox at dusk, ", count: 20)])
-        #expect(long.count == ChildRegistry.labelLimit && long.hasPrefix("apogee video compose a fox at dusk, "))
+        #expect(long.count == ChildRegistry.labelLimit && long.hasPrefix("apogee video compose 'a fox at dusk, "))
     }
 }

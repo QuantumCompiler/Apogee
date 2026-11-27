@@ -180,7 +180,7 @@ struct LibraryEditorCloseTests {
 
         runner.clearingFailures(["symphonies", "show"])
         model.requestClose()
-        let shows = runner.calls.filter { $0 == "read symphonies|show|notes-digest" }.count
+        let shows = runner.calls.filter { $0 == "read symphonies|show|--|notes-digest" }.count
         let held = runner.holding(["symphonies", "show"])
         let closing = Task { await model.restoreAndClose() }
         #expect(await eventually { held.arrived == 1 })
@@ -190,7 +190,7 @@ struct LibraryEditorCloseTests {
         held.open()
         await closing.value
         #expect(model.editor == nil)
-        #expect(runner.calls.filter { $0 == "read symphonies|show|notes-digest" }.count == shows + 1, "show asked again of the original")
+        #expect(runner.calls.filter { $0 == "read symphonies|show|--|notes-digest" }.count == shows + 1, "show asked again of the original")
     }
 
     @Test("Leave it closes with the refused text on disk, and asks nothing more of the binary")
@@ -308,7 +308,7 @@ struct LibraryEditorCloseTests {
         model.select(describe)
         #expect(model.image != nil, "choosing the same symphony keeps it")
         model.playIt()
-        #expect(starter.starts == [["symphonies", "play", "describe-answer", "--input", "what is it", "--image", "/Users/someone/Pictures/cat.png", "--output-format", "json"]])
+        #expect(starter.starts == [["symphonies", "play", "--input", "what is it", "--image", "/Users/someone/Pictures/cat.png", "--output-format", "json", "--", "describe-answer"]])
         first.end()
         #expect(await eventually { !model.isPlaying })
 
@@ -318,7 +318,7 @@ struct LibraryEditorCloseTests {
         model.image = "/Users/someone/Pictures/cat.png"
         #expect(!model.needsImage && model.canPlay)
         model.playIt()
-        #expect(starter.starts.last == ["symphonies", "play", "critique-revise", "--input", "what is it", "--output-format", "json"], "image: false never carries --image")
+        #expect(starter.starts.last == ["symphonies", "play", "--input", "what is it", "--output-format", "json", "--", "critique-revise"], "image: false never carries --image")
         second.end()
         #expect(await eventually { !model.isPlaying })
 

@@ -73,16 +73,17 @@ struct MediaTests {
         form.fps = 16
         form.loras = ["/loras/film.safetensors:0.8", ""]
         #expect(form.arguments(output: "/m/a.mp4") == [
-            "video", "generate", "-o", "/m/a.mp4", "--image", "/p/seed.png", "-m", "wan-5b",
+            "video", "generate", "--lora", "/loras/film.safetensors:0.8", "-o", "/m/a.mp4", "--image", "/p/seed.png", "-m", "wan-5b",
             "--seed", "7", "--duration", "2.5", "--resolution", "704x1280", "--steps", "30", "--fps", "16",
-            "--lora", "/loras/film.safetensors:0.8", "--", "a lighthouse at dusk",
-        ])
+            "--", "a lighthouse at dusk",
+        ], "--lora first: it takes a -- directly after it as its own end (GUI M23)")
         form.preset = .draft
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--steps") == false, "a preset sets the steps")
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--draft") == true)
         form.noLoRAs = true
         #expect(form.arguments(output: "/m/a.mp4")?.contains("--lora") == false)
-        #expect(form.arguments(output: "/m/a.mp4")?.suffix(3) == ["--no-lora", "--", "a lighthouse at dusk"], "the last option, the prompt after it")
+        #expect(form.arguments(output: "/m/a.mp4")?.prefix(3) == ["video", "generate", "--no-lora"], "where the LoRAs go")
+        #expect(form.arguments(output: "/m/a.mp4")?.suffix(3) == ["--draft", "--", "a lighthouse at dusk"], "the last option, the prompt after it")
 
         var again = ClipForm()
         again.start = .again("/m/draft.mp4.json")

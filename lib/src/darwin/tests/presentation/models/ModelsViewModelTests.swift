@@ -93,7 +93,7 @@ struct ModelsViewModelTests {
         #expect(model.pendingDelete?.row == row)
         #expect(
             runner.calls.filter { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") && !$0.hasPrefix("run config get") }
-                == ["run models delete qwen-mlx"],
+                == ["run models delete -- qwen-mlx"],
             "asked first: only the plan read -- and the adapters' list, a read -- nothing changed")
         try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
         let ran = runner.calls.firstIndex(of: "run models delete --yes -- qwen-mlx")!

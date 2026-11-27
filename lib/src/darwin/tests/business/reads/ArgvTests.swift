@@ -106,7 +106,7 @@ struct ArgvTests {
 
     @Test("the options that eat -- are the binary's: each refused directly before it and reaching the verb earlier, every other option probed reaching it")
     func eatersAreTheBinarys() {
-        #expect(Self.verdicts.count == 61, "recorded: \(Self.verdicts.count)")
+        #expect(Self.verdicts.count == 65, "recorded: \(Self.verdicts.count)")
         var eaters: [String: Set<String>] = [:]
         var reached: [String: Set<String>] = [:]
         for (verdict, words) in Self.verdicts {

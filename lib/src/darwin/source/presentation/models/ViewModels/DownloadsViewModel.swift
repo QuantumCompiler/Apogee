@@ -190,16 +190,19 @@ public final class DownloadsViewModel {
 
     // MARK: - Starting
 
-    /// The pull the form describes, as its arguments; `nil` until it names one.
+    /// The pull the form describes, as its arguments; `nil` until it names
+    /// one. The reference after `--`, and `--register-with` -- which takes a
+    /// `--` directly after it as its own end -- never last before it (`Argv`,
+    /// GUI M23).
     public var formArguments: [String]? {
         let ref = reference.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !ref.isEmpty, !ref.contains(" ") else { return nil }
-        var arguments = ["models", "pull", ref]
+        var options: [Argv.Option] = []
         if convert {
             let levels = Self.levels.filter(chosenLevels.contains)
-            arguments += ["--safetensors"] + (levels.isEmpty ? ["--register"] : ["--register-with", levels.joined(separator: ",")])
+            options = [.flag("--safetensors")] + (levels.isEmpty ? [.flag("--register")] : [.value("--register-with", levels.joined(separator: ","))])
         }
-        return arguments
+        return Argv.line(["models", "pull"], options: options, names: [ref])
     }
 
     public var canStart: Bool { binary != nil && formArguments != nil }
@@ -207,7 +210,7 @@ public final class DownloadsViewModel {
     /// Starts the form's pull.
     public func start() {
         guard let arguments = formArguments else { return }
-        run(arguments, reference: arguments[2])
+        run(arguments, reference: Argv.positionals(of: arguments).first ?? "")
         reference = ""
     }
 
@@ -242,7 +245,7 @@ public final class DownloadsViewModel {
     private func run(_ arguments: [String], reference: String) {
         guard let binary else { return }
         let streaming = streams() && Self.streamingVerbs.contains(Array(arguments.prefix(2)))
-        let full = arguments + (streaming ? ["--output-format", "stream-json"] : [])
+        let full = streaming ? Argv.adding(["--output-format", "stream-json"], to: arguments) : arguments
         nextID += 1
         let download = Download(id: nextID, arguments: full, reference: reference)
         downloads.insert(download, at: 0)
@@ -278,9 +281,15 @@ public final class DownloadsViewModel {
             folder: Self.folder(of: form.handle))
     }
 
-    /// `models repair <name>`: the files checked against their record, as a job.
+    /// `models repair -- <name>`: the files checked against their record, as
+    /// a job.
     public func check(_ name: String) {
-        startStore(["models", "repair", name], kind: .check, title: name, steps: [], folder: Self.folder(of: name))
+        startStore(Self.repairArguments(name), kind: .check, title: name, steps: [], folder: Self.folder(of: name))
+    }
+
+    /// The check's line, which its tooltip shows as typed.
+    public nonisolated static func repairArguments(_ name: String) -> [String] {
+        Argv.line(["models", "repair"], names: [name])
     }
 
     /// The backend a run's line says it registered: `registered <name>` or
@@ -401,7 +410,7 @@ public final class DownloadsViewModel {
     private func identify(_ download: Download) async -> Made {
         guard let path = Self.madePath(download.progress.notices) else { return .unnamed }
         guard let reader, let binary,
-            let info = await reader.read(binary: binary, ["models", "info", path]).document.map(ModelInfo.init),
+            let info = await reader.read(binary: binary, Argv.line(["models", "info"], names: [path])).document.map(ModelInfo.init),
             let handle = info.data?.handle, info.data?.format == "gguf",
             download.folder == nil || Self.folder(of: handle) == download.folder
         else { return .unlisted(path) }
@@ -448,7 +457,7 @@ public final class DownloadsViewModel {
     /// nothing.
     private func name(_ download: Download, _ path: String) async {
         guard let reader, let binary,
-            let info = await reader.read(binary: binary, ["models", "info", path]).document.map(ModelInfo.init),
+            let info = await reader.read(binary: binary, Argv.line(["models", "info"], names: [path])).document.map(ModelInfo.init),
             let handle = info.data?.handle, ["gguf", "mlx"].contains(info.data?.format ?? ""),
             handle != download.reference, download.folder == nil || Self.folder(of: handle) == download.folder,
             !download.named.contains(handle)
@@ -481,7 +490,7 @@ public final class DownloadsViewModel {
             download.outcome = "The GGUF is made; registering it was refused: \(failure)"
         } else {
             download.registered = true
-            download.registeredAfter = arguments[2]
+            download.registeredAfter = Argv.positionals(of: arguments).first
             if case .done(let stdout) = outcome {
                 download.outcome = stdout.split(whereSeparator: \.isNewline).first.map(String.init)
             }

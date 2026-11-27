@@ -529,7 +529,7 @@ public final class SessionLibraryViewModel {
     /// since the last model's window is not this one's.
     private func readWindow(of model: String, for session: SessionViewModel, replaces: Bool = false) async {
         guard let found else { return }
-        let info = await runner.read(binary: found.url, ["models", "info", model]).document
+        let info = await runner.read(binary: found.url, Argv.line(["models", "info"], names: [model])).document
         guard session.transcript.model == model else { return }
         if let info {
             session.contextWindow = Self.window(in: info)
@@ -560,7 +560,7 @@ public final class SessionLibraryViewModel {
         rolesSuite = .some(suite)
         rolesAsked += 1
         let asked = rolesAsked
-        let outcome = await runner.read(binary: found.url, ["models", "status"] + (suite.map { ["--suite", $0] } ?? []))
+        let outcome = await runner.read(binary: found.url, Argv.line(["models", "status"], options: suite.map { [.value("--suite", $0)] } ?? []))
         // A read for a suite the session has since left is let go.
         guard asked == rolesAsked else { return }
         if let document = outcome.document {
@@ -725,7 +725,7 @@ public final class SessionLibraryViewModel {
         guard let found else { return }
         var choices: [SuiteChoice] = []
         for name in suites {
-            let read = await runner.read(binary: found.url, ["models", "status", "--suite", name])
+            let read = await runner.read(binary: found.url, Argv.line(["models", "status"], options: [.value("--suite", name)]))
             choices.append(SuiteChoice(
                 name: name, footprint: read.document.flatMap(SuiteFootprint.init(document:)), isDefault: name == defaultSuite))
         }
@@ -1004,7 +1004,7 @@ public final class SessionLibraryViewModel {
     }
 
     private func delete(privately id: String, binary: URL) async -> String? {
-        let outcome = await runner.command(binary: binary, ["chats", "delete", id])
+        let outcome = await runner.command(binary: binary, Self.deleteArguments(id))
         if let failure = outcome.failure {
             self.failure = "The private session was not deleted: \(failure)"
         }
@@ -1127,7 +1127,7 @@ public final class SessionLibraryViewModel {
             return
         }
         if pauses { await session.pause() }
-        let outcome = await runner.command(binary: found.url, ["chats", "title", chat.id] + Argv.text(name))
+        let outcome = await runner.command(binary: found.url, Self.titleArguments(chat.id, name))
         if pauses && session === current && inView && !shut { session.resume() }
         await refresh()
         if let failure = outcome.failure {
@@ -1151,7 +1151,7 @@ public final class SessionLibraryViewModel {
         if current.chatID == chat.id {
             await replace(with: .new, starter: located)
         }
-        let outcome = await runner.command(binary: found.url, ["chats", "delete", chat.id])
+        let outcome = await runner.command(binary: found.url, Self.deleteArguments(chat.id))
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure
@@ -1182,7 +1182,7 @@ public final class SessionLibraryViewModel {
     /// prints, run as a command and read a `label: value` a line.
     public func showInfo(_ chat: ChatSummary) async {
         guard let found else { return }
-        switch await runner.documentOrText(binary: found.url, ["chats", "info", chat.id], asksDocument: readsDocuments, ChatDetails.init(document:)) {
+        switch await runner.documentOrText(binary: found.url, Self.infoArguments(chat.id), asksDocument: readsDocuments, ChatDetails.init(document:)) {
         case .document(let details):
             info = ChatInfo(chat: chat, fields: details.fields, failure: nil, details: details)
         case .text(let text):
@@ -1243,7 +1243,7 @@ public final class SessionLibraryViewModel {
             return
         }
         guard compactJobs[chat.id] == nil else { return }
-        let job = jobs.startJob(binary: found.url, arguments: ["chats", "compact", chat.id, "--yes"], streaming: false)
+        let job = jobs.startJob(binary: found.url, arguments: Self.compactArguments(chat.id), streaming: false)
         compactJobs[chat.id] = job
         compactions[chat.id] = JobProgress()
         for await update in job.updates { compactions[chat.id]?.apply(update) }
@@ -1596,5 +1596,30 @@ public struct Inspector: Equatable {
         case .api: "cloud API, billed"
         case .subscription: "subscription"
         }
+    }
+}
+
+// MARK: - The lines (GUI M23)
+
+extension SessionLibraryViewModel {
+    /// `chats delete -- <id>`: every positional after `--`, so the line needs
+    /// no idea of which words are ids (`Argv`, GUI M23).
+    public nonisolated static func deleteArguments(_ id: String) -> [String] {
+        Argv.line(["chats", "delete"], names: [id])
+    }
+
+    /// `chats title -- <id> <title>`: the id and the title after one `--`.
+    public nonisolated static func titleArguments(_ id: String, _ title: String) -> [String] {
+        Argv.line(["chats", "title"], names: [id, title])
+    }
+
+    /// `chats info -- <id>`.
+    public nonisolated static func infoArguments(_ id: String) -> [String] {
+        Argv.line(["chats", "info"], names: [id])
+    }
+
+    /// `chats compact --yes -- <id>`.
+    public nonisolated static func compactArguments(_ id: String) -> [String] {
+        Argv.line(["chats", "compact"], options: [.flag("--yes")], names: [id])
     }
 }

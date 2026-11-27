@@ -251,7 +251,7 @@ struct RunPage: View {
                 fact("Ran", [run.startedAt, run.finishedAt].filter { !$0.isEmpty }.joined(separator: " → "))
                 HStack {
                     Button("Gate it") { model.gate(run) }
-                        .help("apogee train eval \(run.id): the run's answers against its suite")
+                        .help("apogee " + Argv.shown(TrainingViewModel.gateArguments(run.id)) + ": the run's answers against its suite")
                     Button("Promote…") { model.newPromotion(of: run) }
                         .help("apogee train promote: fuse, verify and register it as a backend -- or, with --adapter, the adapter alone on an entry's adapters")
                 }
@@ -309,7 +309,7 @@ struct RegimesView: View {
                             Spacer()
                             Button("Run this regime") { model.runRegime(regime) }
                                 .disabled(model.isRunning)
-                                .help("apogee train regime run \(regime.name): a dataset per kit from the teacher, one gated pipeline, the last passing stage promoted")
+                                .help("apogee " + Argv.shown(TrainingViewModel.regimeArguments(regime.name)) + ": a dataset per kit from the teacher, one gated pipeline, the last passing stage promoted")
                         }
                         Text(regime.description).font(.apogeeBody).textSelection(.enabled)
                         Text("KITS, IN ORDER").font(.apogeeMeta.monospaced()).foregroundStyle(Palette.textTertiary)
@@ -430,7 +430,7 @@ struct PulledBanner: View {
             Spacer()
             Button("Prepare it") { model.prepare(pulled.path) }
                 .disabled(model.isRunning)
-                .help("apogee datasets prepare \(pulled.path): the files made trainer-ready")
+                .help("apogee " + Argv.shown(TrainingViewModel.prepareArguments(pulled.path)) + ": the files made trainer-ready")
             Button("Dismiss") { model.dismissPulled() }
         }
         .padding(.horizontal, Spacing.l)

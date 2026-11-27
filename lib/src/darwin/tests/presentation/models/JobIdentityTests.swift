@@ -36,8 +36,8 @@ struct JobIdentityTests {
     static let gemmaQ4 = "Gemma3-1B-Instruct/gguf/09f55af982ed"
     static let llamaPath = "/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/5703795782eb/Llama3.2-1B-Instruct-Q4_K_M.gguf"
     static let gemmaPath = "/Users/someone/.apogee/models/Gemma3-1B-Instruct/gguf/09f55af982ed/Gemma3-1B-Instruct-Q4_K_M.gguf"
-    static let llamaRegistration = "run config add-backend Llama3.2-1B-Instruct-Q4KM --type llamacpp --model-path \(llamaPath)"
-    static let gemmaRegistration = "run config add-backend Gemma3-1B-Instruct-Q4KM --type llamacpp --model-path \(gemmaPath)"
+    static let llamaRegistration = "run config add-backend --type llamacpp --model-path \(llamaPath) -- Llama3.2-1B-Instruct-Q4KM"
+    static let gemmaRegistration = "run config add-backend --type llamacpp --model-path \(gemmaPath) -- Gemma3-1B-Instruct-Q4KM"
 
     func jobs(_ scripted: [ScriptedJob], _ runner: ScriptedRunner) -> (DownloadsViewModel, ScriptedJobs) {
         let starter = ScriptedJobs(scripted)
@@ -52,12 +52,12 @@ struct JobIdentityTests {
     func quantizeRunner() -> ScriptedRunner {
         let runner = ScriptedRunner()
         runner.reading(["models", "list", "--all"], recorded("quantize-list-before"))
-        runner.reading(["models", "info", Self.llamaPath], recorded("quantize-info-llama-path"))
-        runner.reading(["models", "info", Self.gemmaPath], recorded("quantize-info-gemma-path"))
-        runner.reading(["models", "info", Self.llamaQ4], recorded("quantize-info-llama"))
-        runner.reading(["models", "info", Self.gemmaQ4], recorded("quantize-info-gemma"))
-        runner.commanding(["config", "add-backend", "Llama3.2-1B-Instruct-Q4KM"], .done(stdout: recorded("quantize-add-backend-llama", "txt")))
-        runner.commanding(["config", "add-backend", "Gemma3-1B-Instruct-Q4KM"], .done(stdout: recorded("quantize-add-backend-gemma", "txt")))
+        runner.reading(["models", "info", "--", Self.llamaPath], recorded("quantize-info-llama-path"))
+        runner.reading(["models", "info", "--", Self.gemmaPath], recorded("quantize-info-gemma-path"))
+        runner.reading(["models", "info", "--", Self.llamaQ4], recorded("quantize-info-llama"))
+        runner.reading(["models", "info", "--", Self.gemmaQ4], recorded("quantize-info-gemma"))
+        runner.commanding(["config", "add-backend", "--type", "llamacpp", "--model-path", Self.llamaPath, "--", "Llama3.2-1B-Instruct-Q4KM"], .done(stdout: recorded("quantize-add-backend-llama", "txt")))
+        runner.commanding(["config", "add-backend", "--type", "llamacpp", "--model-path", Self.gemmaPath, "--", "Gemma3-1B-Instruct-Q4KM"], .done(stdout: recorded("quantize-add-backend-gemma", "txt")))
         return runner
     }
 
@@ -74,7 +74,7 @@ struct JobIdentityTests {
         #expect(await eventually { starter.starts.count == 1 })
         model.quantize(Self.gemmaForm)
         #expect(await eventually { starter.starts.count == 2 })
-        #expect(starter.starts.map(\.0) == [["models", "quantize", Self.llamaF16], ["models", "quantize", Self.gemmaF16]])
+        #expect(starter.starts.map(\.0) == [["models", "quantize", "--", Self.llamaF16], ["models", "quantize", "--", Self.gemmaF16]])
         let llama = try #require(model.downloads.first { $0.reference == Self.llamaF16 })
         let gemma = try #require(model.downloads.first { $0.reference == Self.gemmaF16 })
 
@@ -85,7 +85,7 @@ struct JobIdentityTests {
         llamaJob.end()
         #expect(await eventually { llama.endedAt != nil })
         #expect(runner.calls.contains(Self.llamaRegistration), "Llama's name on Llama's GGUF")
-        #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend Llama3.2-1B-Instruct-Q4KM") && $0 != Self.llamaRegistration },
+        #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend") && $0.hasSuffix("-- Llama3.2-1B-Instruct-Q4KM") && $0 != Self.llamaRegistration },
                 "never another job's GGUF under its name")
         gemmaJob.end()
         #expect(await eventually { gemma.endedAt != nil })
@@ -146,7 +146,7 @@ struct JobIdentityTests {
 
         model.again(failed)
         #expect(await eventually { starter.starts.count == 2 })
-        #expect(starter.starts[1].0 == ["models", "quantize", Self.llamaF16] && !starter.starts[1].1)
+        #expect(starter.starts[1].0 == ["models", "quantize", "--", Self.llamaF16] && !starter.starts[1].1)
         let retried = try #require(model.downloads.first)
         #expect(retried !== failed)
         #expect(retried.kind == .quantize, "the same kind, not a pull")
@@ -317,7 +317,7 @@ struct JobIdentityTests {
         #expect(await eventually { starter.starts.count == 1 })
         model.quantize(q8Form)
         #expect(await eventually { starter.starts.count == 2 }, "both read the store before either lands")
-        #expect(starter.starts[1].0 == ["models", "quantize", Self.llamaF16, "-t", "Q8_0"])
+        #expect(starter.starts[1].0 == ["models", "quantize", "-t", "Q8_0", "--", Self.llamaF16])
         let q4 = try #require(model.downloads.first { $0.arguments == Self.llamaForm.arguments })
         let q8 = try #require(model.downloads.first { $0.arguments == q8Form.arguments })
 
@@ -343,7 +343,7 @@ struct JobIdentityTests {
         }
         #expect(q8.state(of: 0) == .waiting && q8.state(of: 1) == .waiting, "a failed quantization's step is not done")
         #expect(q8.made == nil && q8.firstLanded == nil, "no Show the weights, which would open the sibling's set")
-        #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend Llama3.2-1B-Instruct-Q80") })
+        #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend") && $0.hasSuffix("-- Llama3.2-1B-Instruct-Q80") })
 
         // Run again carries the first run's store read, and starts not done.
         model.again(q8)

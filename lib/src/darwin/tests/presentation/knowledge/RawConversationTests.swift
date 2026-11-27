@@ -34,7 +34,7 @@ struct RawConversationTests {
         #expect(record.id == Self.id && record.rawRef != nil)
         #expect(model.raw == nil, "asked for, never read on its own")
         await model.showRaw(record)
-        #expect(runner.calls.last == "run knowledge|info|\(Self.id)|--raw")
+        #expect(runner.calls.last == "run knowledge|info|--raw|--|\(Self.id)")
         #expect(!runner.calls.contains { $0.hasPrefix("read knowledge|info") }, "text mode: never with --output-format")
         #expect(model.raw == .init(record: Self.id, state: .shown(.text(
             "Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it."))))

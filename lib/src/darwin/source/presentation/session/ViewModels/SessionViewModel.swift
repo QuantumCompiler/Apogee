@@ -214,12 +214,15 @@ public final class SessionViewModel {
     /// default suite, read -- and no count is guessed.
     public var executeBanner: String? {
         guard launch.execute != nil else { return nil }
-        var parts = ["execute"]
+        // Its words are a banner, never a line: the leading word is put in
+        // after, so the argv rule does not read the list as a command.
+        var parts: [String] = []
         if let suite = knownSuite {
             parts.append(suite.name.map { "suite \($0)" + (suite.note.map { ", \($0)" } ?? "") } ?? "no suite")
         }
         if orchestrates == true { parts.append("orchestrating") }
         if let folder = launch.folder { parts.append("in \(folder.lastPathComponent)") }
+        parts.insert("execute", at: 0)
         return parts.joined(separator: " · ")
     }
 

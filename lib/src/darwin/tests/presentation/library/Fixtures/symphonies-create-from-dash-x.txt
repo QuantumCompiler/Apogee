@@ -1,0 +1,5 @@
+created symphony 'copy' (chat)
+  config: /Users/someone/.apogee/config/config.json
+
+Play it:  apogee symphonies play copy --input "…"
+Edit it:  apogee symphonies edit copy

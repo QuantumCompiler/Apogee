@@ -57,7 +57,7 @@ struct XcodeSetupTests {
         #expect(xcode.note?.hasPrefix("Xcode answers only while it runs with your project open") == true)
         #expect(xcode.register == "apogee mcp create xcode --from xcode")
         #expect(xcode.serverName == "xcode")
-        #expect(xcode.registration == ["mcp", "create", "xcode", "--from", "xcode"])
+        #expect(xcode.registration == ["mcp", "create", "--from", "xcode", "--", "xcode"])
         #expect(presets.first { $0.name == "code-exec" }?.note == nil, "present only on a row that has one")
         #expect(presets.first { $0.name == "self" }?.registration == nil, "a refusal registers nothing")
     }

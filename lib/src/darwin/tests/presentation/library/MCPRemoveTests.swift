@@ -39,7 +39,7 @@ struct MCPRemoveTests {
         runner.reading(["mcp", "list"], #"{"data":[],"object":"list"}"#)
         try await model.confirmRemove(#require(model.pendingRemove))
         #expect(model.pendingRemove == nil)
-        #expect(runner.calls.contains("run config|delete-mcp-server|\(server.name)"))
+        #expect(runner.calls.contains("run config|delete-mcp-server|--|\(server.name)"))
         #expect(runner.calls.filter { $0 == "read mcp|list" }.count == lists + 1, "read back")
         #expect(model.servers.isEmpty && model.selected == nil)
         #expect(said == ["removed MCP server 'notes' from /Users/someone/.apogee/config/config.json"], "the CLI's own line")
@@ -57,7 +57,7 @@ struct MCPRemoveTests {
         model.pendingRemove = nil
         runner.reading(["mcp", "list"], #"{"data":[],"object":"list"}"#)
         await model.confirmRemove(answer)
-        #expect(runner.calls.contains("run config|delete-mcp-server|\(server.name)"))
+        #expect(runner.calls.contains("run config|delete-mcp-server|--|\(server.name)"))
         #expect(model.servers.isEmpty && model.selected == nil)
         #expect(said == ["removed MCP server 'notes' from /Users/someone/.apogee/config/config.json"], "the CLI's own line")
     }

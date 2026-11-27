@@ -53,7 +53,7 @@ struct TrainingFollowsCLITests {
             Self.keptFailedID: fixture("train-pipeline-status-kept-failed"),
             Self.cyclePassID: fixture("train-pipeline-status-cycle-pass"),
         ].merging(runs) { $1 }
-        for (id, text) in documents { runner.reading(["train", "pipeline", "status", id], text) }
+        for (id, text) in documents { runner.reading(["train", "pipeline", "status", "--", id], text) }
         if listed {
             runner.reading(["train", "pipeline", "list"], fixture("train-pipeline-list-sweep"))
         } else {
@@ -296,7 +296,7 @@ struct TrainingFollowsCLITests {
         #expect(named.specName == "Nightly SFT" && !model.pipelineSpecs.contains(named.specName), "its name is no key")
         #expect(model.canResume(named) && model.resumeHold(named) == nil)
         #expect(TrainingViewModel.resumeWords(named) == "Resume from stage 2, b")
-        #expect(TrainingViewModel.resumeHelp(named) == "apogee train pipeline resume \(Self.namedID) --pipeline nightly: after the last stage that passed")
+        #expect(TrainingViewModel.resumeHelp(named) == "apogee train pipeline resume --pipeline nightly \(Self.namedID): after the last stage that passed")
         #expect(TrainingViewModel.pageLine(named) == TrainingViewModel.ordinaryRunWords)
         model.requestResume(named)
         #expect(model.pending == .resumePipeline(Self.namedID, pipeline: "nightly"))
@@ -304,7 +304,7 @@ struct TrainingFollowsCLITests {
         #expect(model.pendingConsequence?.hasPrefix("What passed stays") == true)
         #expect(starter.starts.isEmpty, "nothing trains before the person's word")
         try await model.confirm(#require(model.pending))
-        #expect(starter.starts == [["train", "pipeline", "resume", Self.namedID, "--pipeline", "nightly", "--output-format", "stream-json"]])
+        #expect(starter.starts == [["train", "pipeline", "resume", "--pipeline", "nightly", "--output-format", "stream-json", "--", Self.namedID]])
         #expect(starter.streamed == [true] && model.showsLivePipeline)
         job.end()
         #expect(await eventually { !model.isRunning })
@@ -322,7 +322,7 @@ struct TrainingFollowsCLITests {
         #expect(model.pendingTitle == "Resume \(Self.keptFailedID) from stage 3, c?")
         #expect(model.pendingConsequence?.hasPrefix("Stage 1, a, failed its gate and stays as it is. What passed stays") == true)
         try await model.confirm(#require(model.pending))
-        #expect(starter.starts == [["train", "pipeline", "resume", Self.keptFailedID, "--pipeline", "three", "--output-format", "stream-json"]])
+        #expect(starter.starts == [["train", "pipeline", "resume", "--pipeline", "three", "--output-format", "stream-json", "--", Self.keptFailedID]])
         job.end()
         #expect(await eventually { !model.isRunning })
     }
@@ -333,7 +333,7 @@ struct TrainingFollowsCLITests {
         await model.openPipelineRun(Self.specFileID)
         let file = try #require(model.openPipeline)
         #expect(model.canResume(file))
-        #expect(TrainingViewModel.resume(file).arguments == ["train", "pipeline", "resume", Self.specFileID, "--pipeline", "/Users/someone/two.yaml"])
+        #expect(TrainingViewModel.resume(file).arguments == ["train", "pipeline", "resume", "--pipeline", "/Users/someone/two.yaml", "--", Self.specFileID])
 
         let (gone, _, starter) = await training(runs: [Self.specFileID: fixture("train-pipeline-status-spec-file-gone")])
         await gone.openPipelineRun(Self.specFileID)
@@ -341,7 +341,7 @@ struct TrainingFollowsCLITests {
         #expect(TrainingViewModel.resumeWords(lost) == "Resume from stage 2, b", "the CLI still says where")
         #expect(!gone.canResume(lost))
         #expect(gone.resumeHold(lost)
-            == "Resume needs its spec: run 'apogee train pipeline resume \(Self.specFileID) --pipeline <spec>' in the console.")
+            == "Resume needs its spec: run 'apogee train pipeline resume --pipeline <spec> \(Self.specFileID)' in the console.")
         #expect(fixture("train-pipeline-resume-no-spec", "err").contains("-- pass --pipeline <spec> to resume \(Self.specFileID)"),
             "what the bare resume says then")
         gone.requestResume(lost)
@@ -365,7 +365,7 @@ struct TrainingFollowsCLITests {
         let named = try #require(model.openPipeline)
         #expect(!named.hasResumeField && TrainingViewModel.resumeWords(named) == "Resume from stage 2, b")
         #expect(!model.canResume(named))
-        #expect(model.resumeHold(named) == "Resume needs its spec: run 'apogee train pipeline resume \(Self.namedID) --pipeline <spec>' in the console.")
+        #expect(model.resumeHold(named) == "Resume needs its spec: run 'apogee train pipeline resume --pipeline <spec> \(Self.namedID)' in the console.")
         #expect(TrainingViewModel.resumeHelp(named).hasSuffix(": from the first stage that has not passed"))
 
         // 4j's sandbox, its names the completion's: `skills` is one.
@@ -376,7 +376,7 @@ struct TrainingFollowsCLITests {
         await spec.openPipelineRun(abortedID)
         let skills = try #require(spec.openPipeline)
         #expect(spec.canResume(skills) && spec.resumeHold(skills) == nil)
-        #expect(TrainingViewModel.resume(skills).arguments == ["train", "pipeline", "resume", abortedID], "bare, as before")
+        #expect(TrainingViewModel.resume(skills).arguments == ["train", "pipeline", "resume", "--", abortedID], "bare, as before")
         let (none, _, _) = await training(
             vocabulary: "2026-10-25", listed: false, named: "train-pipeline-complete-none", runs: [abortedID: fixture("train-pipeline-status-aborted")])
         await none.openPipelineRun(abortedID)

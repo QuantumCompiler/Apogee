@@ -104,8 +104,8 @@ struct TasksViewModelTests {
         // The read-back is the list, then the selected task's status:
         // `refresh()` fills `tasks` before it asks for the status, so wait
         // for that second read too, not only for the list to land.
-        #expect(await eventually { model.tasks.count == 1 && runner.calls.last == "read task status \(id)" })
-        #expect(runner.calls.suffix(2) == ["read task list", "read task status \(id)"])
+        #expect(await eventually { model.tasks.count == 1 && runner.calls.last == "read task status -- \(id)" })
+        #expect(runner.calls.suffix(2) == ["read task list", "read task status -- \(id)"])
     }
 
     @Test("halt, cancel and resume are the verbs, read back after")
@@ -121,9 +121,9 @@ struct TasksViewModelTests {
         await model.connect(binary: Self.binary)
         await model.select("task-1")
         await model.halt("task-1")
-        #expect(runner.calls.contains("run task halt task-1"))
+        #expect(runner.calls.contains("run task halt -- task-1"))
         await model.cancel("task-1")
-        #expect(runner.calls.contains("run task cancel task-1"))
+        #expect(runner.calls.contains("run task cancel -- task-1"))
         #expect(said == ["It stops when this round ends", "Stopping now"])
         // Halted, as the ledger now reads it: resumed, in its folder (4h).
         let halted = taskFixture("task-status-interrupted.json")
@@ -134,7 +134,7 @@ struct TasksViewModelTests {
         await model.refresh()
         #expect(model.resumable("task-1") && !model.stoppable("task-1"))
         model.resume("task-1")
-        #expect(jobs.starts.first?.arguments == ["task", "resume", "task-1", "--output-format", "stream-json"])
+        #expect(jobs.starts.first?.arguments == ["task", "resume", "--output-format", "stream-json", "--", "task-1"])
         #expect(jobs.starts.first?.folder?.path == "/Users/someone/work")
     }
 
@@ -187,8 +187,8 @@ struct TasksTruthTests {
     func model(_ jobs: [ScriptedJob] = [], list: String = "task-list-all.json") async -> (TasksViewModel, ScriptedRunner, ScriptedJobs, Said) {
         let runner = ScriptedRunner()
         runner.reading(["task", "list"], taskFixture(list))
-        runner.reading(["task", "status", Self.uses], taskFixture("task-status-uses.json"))
-        runner.reading(["task", "status", Self.stalled], taskFixture("task-status-stalled.json"))
+        runner.reading(["task", "status", "--", Self.uses], taskFixture("task-status-uses.json"))
+        runner.reading(["task", "status", "--", Self.stalled], taskFixture("task-status-stalled.json"))
         let jobs = ScriptedJobs(jobs)
         let model = TasksViewModel(runner: runner, starter: jobs)
         let said = Said()
@@ -241,7 +241,7 @@ struct TasksTruthTests {
     func noGrants() async throws {
         let (model, runner, _, _) = await model()
         let granted = taskFixture("task-status-uses.json").replacingOccurrences(of: #""grants":["run_command"]"#, with: #""grants":[]"#)
-        runner.reading(["task", "status", Self.uses], granted)
+        runner.reading(["task", "status", "--", Self.uses], granted)
         await model.select(Self.uses)
         #expect(model.grants(of: Self.uses) == "none -- with nobody present, a tool that asks is denied")
         await model.select(Self.stalled)
@@ -316,7 +316,7 @@ struct TasksTruthTests {
         #expect(model.plan(of: Self.stalled) == "1. Look for the word.\n2. Say it.")
         #expect(model.ending(of: Self.stalled) == nil, "the run in flight wins over the stalled read it has outrun")
         #expect(model.rounds(of: Self.stalled).last?.outcome == "in_flight")
-        runner.reading(["task", "status", Self.stalled], taskFixture("task-status-resumed.json"))
+        runner.reading(["task", "status", "--", Self.stalled], taskFixture("task-status-resumed.json"))
         for line in lines.dropFirst(8) { job.say(line) }
         job.end()
         #expect(await eventually { model.following(Self.stalled) == nil && model.status?.status == "done" })
@@ -343,7 +343,7 @@ struct TasksTruthTests {
         _ = await eventually { model.rounds(of: Self.halted).map(\.round) == [0, 1] }
         #expect(model.selected == Self.halted)
         #expect(model.rounds(of: Self.halted).map(\.round) == [0, 1])
-        runner.reading(["task", "status", Self.halted], taskFixture("task-status-halted-done.json"))
+        runner.reading(["task", "status", "--", Self.halted], taskFixture("task-status-halted-done.json"))
         for line in lines.dropFirst(14) { job.say(line) }
         job.end(status: 1)
         #expect(await eventually { model.following(Self.halted) == nil && model.status?.id == Self.halted })

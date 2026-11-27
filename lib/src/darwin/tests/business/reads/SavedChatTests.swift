@@ -80,7 +80,7 @@ struct SavedChatTests {
 
     @Test("the read is chats show by the chat's id; a binary before it refuses it, and prints nothing")
     func theRead() {
-        #expect(SavedChat.arguments(id: "20261022-182803-f9f6") == ["chats", "show", "20261022-182803-f9f6"])
+        #expect(SavedChat.arguments(id: "20261022-182803-f9f6") == ["chats", "show", "--", "20261022-182803-f9f6"])
         #expect(fixture("chats-show-refused.err") == "A subcommand is required\nRun with --help for more information.\n")
         #expect(ReadDocument(text: fixture("chats-show-refused.err")) == nil)
     }

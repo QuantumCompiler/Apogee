@@ -52,10 +52,6 @@ enum SuitesPreview {
             (["models", "status", "--suite", "vast"], SuitesDocuments.statusVast),
             (["models", "list"], SuitesDocuments.modelsList),
             (["system"], SuitesDocuments.system),
-            (["models", "info", "root"], SuitesDocuments.infoRoot),
-            (["models", "info", "helper"], SuitesDocuments.infoHelper),
-            (["models", "info", "scribe"], SuitesDocuments.infoScribe),
-            (["models", "info", "vast"], SuitesDocuments.infoVast),
         ],
         commands: [
             (["config", "get", "suites"], SuitesDocuments.configGetSuites),
@@ -145,9 +141,9 @@ enum SuitesPreview {
                 (["models", "status"], #"{"fields":[{"field":"suite","value":"coding"},{"field":"chat","value":"qwen   (via suite coding)"}]}"#),
                 (["models", "list"], #"{"object":"list","data":[{"backend":"qwen","backend_type":"llamacpp"},{"backend":"small","backend_type":"llamacpp"},{"backend":"claude","backend_type":"anthropic"},{"backend":"mlx-embed","backend_type":"mlx"}]}"#),
                 (["system"], #"{"gpu":{"model_budget_bytes":8589934592}}"#),
-                (["models", "info", "qwen"], #"{"name":"qwen","fields":[{"field":"size","value":"4800 MiB"},{"field":"cache","value":"4608 MiB at f16 (the default)"}]}"#),
-                (["models", "info", "small"], #"{"name":"small","fields":[{"field":"size","value":"600 MiB"},{"field":"cache","value":"none -- no attention layers"}]}"#),
-                (["models", "info", "mlx-embed"], #"{"name":"mlx-embed","fields":[{"field":"format","value":"MLX"}]}"#),
+                (Argv.line(["models", "info"], names: ["qwen"]), #"{"name":"qwen","fields":[{"field":"size","value":"4800 MiB"},{"field":"cache","value":"4608 MiB at f16 (the default)"}]}"#),
+                (Argv.line(["models", "info"], names: ["small"]), #"{"name":"small","fields":[{"field":"size","value":"600 MiB"},{"field":"cache","value":"none -- no attention layers"}]}"#),
+                (Argv.line(["models", "info"], names: ["mlx-embed"]), #"{"name":"mlx-embed","fields":[{"field":"format","value":"MLX"}]}"#),
             ],
             commands: [(["config", "get", "suites"], names.map { $0 + "\n" }.joined())]
                 + names.map { (["config", "get", "suites.\($0)"], texts[$0] ?? "") })

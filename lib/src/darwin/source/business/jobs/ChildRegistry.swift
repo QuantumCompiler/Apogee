@@ -1,3 +1,4 @@
+import BusinessReads
 import Foundation
 import Synchronization
 
@@ -117,15 +118,17 @@ public final class ChildRegistry: Sendable {
     }
 
     /// A job's label: the command the app ran as a person would type it --
-    /// `apogee` and the words before its first option, then a person's text
-    /// the line carries after `--`, the end of options (GUI 4g) -- the first
-    /// three arguments when it opens with an option, and no more than
-    /// `labelLimit` characters (a prompt can be a paragraph); the monitor
-    /// fits what it shows to its row.
+    /// `apogee` and the words before its first option, then the names and
+    /// the person's text the line carries after `--` (GUI 4g), never the
+    /// options between -- the first three arguments when it opens with an
+    /// option -- and no more than `labelLimit` characters (a prompt can be a
+    /// paragraph); the monitor fits what it shows to its row. Shown through
+    /// `Argv.shown` (GUI M23): a dash-led name keeps its `--`, and a word a
+    /// shell would split is quoted.
     public static func label(for arguments: [String]) -> String {
-        let words = arguments.prefix { !$0.hasPrefix("-") }
-        let text = arguments.firstIndex(of: "--").map { arguments[($0 + 1)...] } ?? []
-        let said = (["apogee"] + (words.isEmpty ? Array(arguments.prefix(3)) : Array(words) + text)).joined(separator: " ")
+        let words = Array(arguments.prefix { !$0.hasPrefix("-") })
+        let line = words.isEmpty ? Array(arguments.prefix(3)) : Argv.line(words, names: Array(Argv.positionals(of: arguments)))
+        let said = (["apogee"] + (line.isEmpty ? [] : [Argv.shown(line)])).joined(separator: " ")
         return said.count > labelLimit ? String(said.prefix(labelLimit - 1)) + "…" : said
     }
 

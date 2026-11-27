@@ -33,15 +33,15 @@ struct SessionMeterTests {
     static func type(_ line: String) -> String? { JSONValue.parse(line)?["type"]?.stringValue }
 
     func reads(_ runner: ScriptedRunner, of model: String) -> Int {
-        runner.calls.filter { $0 == "read models info \(model)" }.count
+        runner.calls.filter { $0 == "read models info -- \(model)" }.count
     }
 
     @Test("the recorded switch: claude's window unknown, kept through the notice, then the local model's 8192 once it answered")
     func meterFollowsTheAnswer() async {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], printed("chats-list-unsent.json"))
-        runner.reading(["models", "info", "claude"], printed("models-info-switched-claude.json"))
-        runner.reading(["models", "info", Self.local], printed("models-info-switched-local.json"))
+        runner.reading(["models", "info", "--", "claude"], printed("models-info-switched-claude.json"))
+        runner.reading(["models", "info", "--", Self.local], printed("models-info-switched-local.json"))
         let child = ScriptedSession()
         let library = SessionLibraryViewModel(
             starter: ScriptedStarter(sessions: [child]), runner: runner, preferences: Preferences(store: MemoryStore()))
@@ -72,7 +72,7 @@ struct SessionMeterTests {
     func failedReadIsUnknown() async {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], printed("chats-list-unsent.json"))
-        runner.reading(["models", "info", Self.local], printed("models-info-switched-local.json"))
+        runner.reading(["models", "info", "--", Self.local], printed("models-info-switched-local.json"))
         let child = ScriptedSession()
         let library = SessionLibraryViewModel(
             starter: ScriptedStarter(sessions: [child]), runner: runner, preferences: Preferences(store: MemoryStore()))
@@ -92,9 +92,9 @@ struct SessionMeterTests {
     func lateReadLetGo() async {
         let base = ScriptedRunner()
         base.reading(["chats", "list"], printed("chats-list-unsent.json"))
-        base.reading(["models", "info", "claude"], printed("models-info-switched-claude.json"))
-        base.reading(["models", "info", Self.local], printed("models-info-switched-local.json"))
-        let runner = HoldingRunner(base: base, holding: ["models", "info", "claude"])
+        base.reading(["models", "info", "--", "claude"], printed("models-info-switched-claude.json"))
+        base.reading(["models", "info", "--", Self.local], printed("models-info-switched-local.json"))
+        let runner = HoldingRunner(base: base, holding: ["models", "info", "--", "claude"])
         let child = ScriptedSession()
         let library = SessionLibraryViewModel(
             starter: ScriptedStarter(sessions: [child]), runner: runner, preferences: Preferences(store: MemoryStore()))

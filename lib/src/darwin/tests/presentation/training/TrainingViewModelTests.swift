@@ -49,14 +49,14 @@ struct TrainingViewModelTests {
         #expect(form.arguments == nil)
         form.student = "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"
         form.dataset = "heat-notes"
-        #expect(form.arguments == ["train", "run", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "--dataset", "heat-notes"])
+        #expect(form.arguments == ["train", "run", "--dataset", "heat-notes", "--", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"])
         form.method = "qlora"
         form.iters = " 200 "
         form.batchSize = "2"
         form.gradCheckpoint = true
         form.maskPrompt = true
-        #expect(form.arguments == ["train", "run", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f", "--dataset", "heat-notes",
-            "--method", "qlora", "--iters", "200", "--batch-size", "2", "--grad-checkpoint", "--mask-prompt"])
+        #expect(form.arguments == ["train", "run", "--dataset", "heat-notes",
+            "--method", "qlora", "--iters", "200", "--batch-size", "2", "--grad-checkpoint", "--mask-prompt", "--", "Llama3.2-1B-Instruct/safetensors/edaba290ce7f"])
         let job = ScriptedJob()
         let (model, _, starter) = await training([job])
         model.newRun()
@@ -78,21 +78,21 @@ struct TrainingViewModelTests {
         let (model, _, starter) = await training([gate, promote, regime])
         let run = model.runs[0]
         model.gate(run)
-        #expect(starter.starts.last == ["train", "eval", run.id])
+        #expect(starter.starts.last == ["train", "eval", "--", run.id])
         gate.end()
         #expect(await eventually { !model.isRunning })
         model.newPromotion(of: run)
         model.promoteForm.backend = "helper"
-        #expect(model.promoteForm.arguments == ["train", "promote", run.id, "--as", "helper"])
+        #expect(model.promoteForm.arguments == ["train", "promote", "--as", "helper", "--", run.id])
         model.promoteForm.target = "gguf"
         model.promoteForm.quantize = "Q4_K_M"
         model.promoteForm.force = true
         model.promote()
-        #expect(starter.starts.last == ["train", "promote", run.id, "--as", "helper", "--target", "gguf", "--quantize", "Q4_K_M", "--force"])
+        #expect(starter.starts.last == ["train", "promote", "--as", "helper", "--target", "gguf", "--quantize", "Q4_K_M", "--force", "--", run.id])
         promote.end(status: 1, stderr: "apogee train: run failed its gate")
         #expect(await eventually { !model.isRunning })
         model.runRegime(model.regimes[0])
-        #expect(starter.starts.last == ["train", "regime", "run", "foundation"])
+        #expect(starter.starts.last == ["train", "regime", "run", "--", "foundation"])
         regime.end()
     }
 
@@ -135,7 +135,7 @@ struct TrainingViewModelTests {
         model.pending = .deleteDataset("heat-notes")
         try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run datasets|delete|--yes|--|heat-notes"))
-        #expect(TrainingViewModel.Pending.rollback(backend: "helper").arguments == ["train", "rollback", "helper"])
+        #expect(TrainingViewModel.Pending.rollback(backend: "helper").arguments == ["train", "rollback", "--", "helper"])
         model.newSynthesis()
         model.synthForm.name = "clerk-data"
         model.synthForm.count = "50"

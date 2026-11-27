@@ -118,8 +118,8 @@ struct StoreCommandsTests {
             ("mlx-audio", "Kokoro-82M/voice/5f3a2c91d0e4"),
         ]
         for (route, handle) in sets {
-            for flags in ["--register", "--register-with 8bit,4bit", "--text-only", "--model-type gemma4"] {
-                let command = "models convert \(handle) --mlx \(flags)"
+            for flags in [[Argv.Option.flag("--register")], [.value("--register-with", "8bit,4bit")], [.flag("--text-only")], [.value("--model-type", "gemma4")]] {
+                let command = Argv.line(["models", "convert"], options: [.flag("--mlx")] + flags, names: [handle]).joined(separator: " ")
                 #expect(verdicts[command]?.hasPrefix("refused: apogee models: '\(handle)' is ") == true, "\(command): \(verdicts[command] ?? "not recorded")")
             }
             let conversion = routeInfo(route).data?.mlxConversion
@@ -149,7 +149,7 @@ struct StoreCommandsTests {
         var form = ConvertForm(handle: Self.snapshot, mlx: true, bytes: nil)
         form.precision = "8bit"
         form.levels = ["4bit"]
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--mlx", "--register-with", "8bit,4bit"])
+        #expect(form.arguments == ["models", "convert", "--register-with", "8bit,4bit", "--mlx", "--", Self.snapshot])
         #expect(Self.verdicts[form.arguments.joined(separator: " ")] == "taken")
         #expect(form.steps.map(\.label) == ["Convert to MLX 8bit", "Convert to MLX 4bit", "Register Nothing-Here-8bit, Nothing-Here-4bit"], "the steps and names unchanged")
         let before = "models convert \(Self.snapshot) --mlx -t 8bit --register-with 4bit"
@@ -163,13 +163,13 @@ struct StoreCommandsTests {
         form.precision = "bf16"
         #expect(!form.register && form.levels.isEmpty && form.alone)
         #expect(form.aloneNote?.contains("start from the F16") == true)
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "-t", "bf16"])
+        #expect(form.arguments == ["models", "convert", "-t", "bf16", "--", Self.snapshot])
         form.register = true
         #expect(form.precision == nil && !form.alone, "Register makes the F16")
         form.precision = "q8_0"
         form.levels = ["Q4_K_M"]
         #expect(form.precision == nil, "a level quantizes from the F16")
-        #expect(form.arguments == ["models", "convert", Self.snapshot, "--register-with", "Q4_K_M"])
+        #expect(form.arguments == ["models", "convert", "--register-with", "Q4_K_M", "--register", "--", Self.snapshot])
         let refused = "models convert \(Self.snapshot) -t bf16 --register"
         #expect(Self.verdicts[refused]?.hasPrefix("refused: apogee models: --register makes the F16") == true, "recorded: \(Self.verdicts[refused] ?? "not recorded")")
     }

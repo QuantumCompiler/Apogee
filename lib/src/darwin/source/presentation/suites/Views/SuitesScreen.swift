@@ -90,7 +90,7 @@ struct SuiteDetail: View {
                 }
                 HStack {
                     Button(over ? "Open a chat under it anyway" : "Open a chat under it") { model.openChat(under: suite) }
-                        .help("apogee chat --suite \(suite.name)\(over ? " --force: run it over this machine's memory" : "")")
+                        .help("apogee " + Argv.shown(Argv.line(["chat"], options: [.value("--suite", suite.name)] + (over ? [.flag("--force")] : []))) + (over ? ": run it over this machine's memory" : ""))
                     Button(over ? "Switch the session to it anyway" : "Switch the session to it") { model.switchSession(to: suite) }
                         .disabled(!model.canSwitchSession)
                         .help("Carries the open conversation on under \(suite.name), as /suite does: the session restarts with --resume and --suite\(over ? " --force" : "")")

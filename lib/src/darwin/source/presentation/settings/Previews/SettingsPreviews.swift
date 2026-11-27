@@ -39,7 +39,7 @@ enum SettingsPreview {
         ],
         commands: [
             (["config", "get", "permissions"], permissions),
-            (["config", "get", "tools.search.url"], "\n"),
+            (Argv.line(["config", "get"], names: ["tools.search.url"]), "\n"),
             (["chats", "recall"], SettingsDocuments.chatsRecall),
         ],
         refused: [["config", "get"]])
@@ -58,14 +58,14 @@ enum SettingsPreview {
             ],
             commands: [
                 (["config", "get", "permissions"], permissions),
-                (["config", "get", "backends.claude-api.server_tools"], SettingsDocuments.configGetServerTools),
-                (["config", "get", "backends.gpt.server_tools"], SettingsDocuments.configGetServerToolsNone),
+                (Argv.line(["config", "get"], names: ["backends.claude-api.server_tools"]), SettingsDocuments.configGetServerTools),
+                (Argv.line(["config", "get"], names: ["backends.gpt.server_tools"]), SettingsDocuments.configGetServerToolsNone),
                 (["chats", "recall"], SettingsDocuments.chatsRecall),
             ],
             refused: [["config", "get"]],
             refusals: older
-                ? [(["config", "get", "backends.claude-api.server_tools"], SettingsDocuments.configGetServerToolsOlder),
-                   (["config", "get", "backends.gpt.server_tools"], SettingsDocuments.configGetServerToolsOlderGpt)]
+                ? [(Argv.line(["config", "get"], names: ["backends.claude-api.server_tools"]), SettingsDocuments.configGetServerToolsOlder),
+                   (Argv.line(["config", "get"], names: ["backends.gpt.server_tools"]), SettingsDocuments.configGetServerToolsOlderGpt)]
                 : [])
     }
 
@@ -93,13 +93,13 @@ enum SettingsPreview {
             reads: [
                 (["auth", "list"], SettingsDocuments.providersAuthList),
                 (["providers", "scan"], scan),
-                (["providers", "register", "codex"], SettingsDocuments.providersRegisterCodex),
-                (["providers", "register", "ollama"], SettingsDocuments.providersRegisterOllamaNone),
+                (Argv.line(["providers", "register"], names: ["codex"]), SettingsDocuments.providersRegisterCodex),
+                (Argv.line(["providers", "register"], names: ["ollama"]), SettingsDocuments.providersRegisterOllamaNone),
                 (["check"], check),
             ] + (list.map { [(["models", "list"], $0)] } ?? []),
             commands: [
                 (["config", "get", "permissions"], permissions),
-                (["config", "get", "tools.allowed_hosts"], hosts),
+                (Argv.line(["config", "get"], names: ["tools.allowed_hosts"]), hosts),
             ],
             refused: [["config", "get"]])
     }
@@ -133,10 +133,10 @@ enum SettingsPreview {
             ],
             commands: [
                 (["config", "get", "permissions"], permissions),
-                (["mcp", "create", "xcode", "--from", "xcode"], SettingsDocuments.xcodeMCPCreate),
-            ] + (registered ? [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGet)] : []),
+                (Argv.line(["mcp", "create"], options: [.value("--from", "xcode")], names: ["xcode"]), SettingsDocuments.xcodeMCPCreate),
+            ] + (registered ? [(Argv.line(["config", "get"], names: ["mcp_servers.xcode"]), SettingsDocuments.xcodeConfigGet)] : []),
             refused: [["config", "get"]],
-            refusals: registered ? [] : [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGetNone)])
+            refusals: registered ? [] : [(Argv.line(["config", "get"], names: ["mcp_servers.xcode"]), SettingsDocuments.xcodeConfigGetNone)])
     }
 
     /// A binary before the CLI's 56d, in its recordings: `check` with no

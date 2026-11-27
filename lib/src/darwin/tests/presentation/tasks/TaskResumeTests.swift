@@ -31,8 +31,8 @@ struct TaskResumeTests {
     func model(_ jobs: [ScriptedJob] = []) async -> (TasksViewModel, ScriptedRunner, ScriptedJobs) {
         let runner = ScriptedRunner()
         runner.reading(["task", "list"], taskFixture("task-list-interrupted.json"))
-        runner.reading(["task", "status", Self.interrupted], taskFixture("task-status-interrupted.json"))
-        runner.reading(["task", "status", Self.exhausted], taskFixture("task-status-exhausted.json"))
+        runner.reading(["task", "status", "--", Self.interrupted], taskFixture("task-status-interrupted.json"))
+        runner.reading(["task", "status", "--", Self.exhausted], taskFixture("task-status-exhausted.json"))
         let jobs = ScriptedJobs(jobs)
         let model = TasksViewModel(runner: runner, starter: jobs)
         await model.connect(binary: Self.binary)
@@ -55,7 +55,7 @@ struct TaskResumeTests {
         await model.select(Self.interrupted)
         model.resume(Self.interrupted)
         let start = try #require(jobs.starts.first)
-        #expect(start.arguments == ["task", "resume", Self.interrupted, "--output-format", "stream-json"])
+        #expect(start.arguments == ["task", "resume", "--output-format", "stream-json", "--", Self.interrupted])
         #expect(start.folder?.path == "/Users/someone/work", "the CLI resumes a task only where it was started")
     }
 
@@ -111,7 +111,7 @@ struct TaskResumeTests {
         #expect(await eventually { model.selected == Self.interrupted })
         #expect(model.stoppable(Self.interrupted) && !model.resumable(Self.interrupted), "its own run, in flight")
         job.end(status: 137)
-        #expect(await eventually { model.run(for: Self.interrupted)?.isRunning == false && runner.calls.last == "read task status \(Self.interrupted)" })
+        #expect(await eventually { model.run(for: Self.interrupted)?.isRunning == false && runner.calls.last == "read task status -- \(Self.interrupted)" })
         #expect(await eventually { model.shown?.process == nil })
         #expect(model.resumable(Self.interrupted) && !model.stoppable(Self.interrupted))
         model.resume(Self.interrupted)
@@ -139,8 +139,8 @@ struct ResumeStartingTests {
     func model(_ jobs: [ScriptedJob]) async -> (TasksViewModel, ScriptedRunner, ScriptedJobs) {
         let runner = ScriptedRunner()
         runner.reading(["task", "list"], taskFixture("task-list-all.json"))
-        runner.reading(["task", "status", Self.stalled], taskFixture("task-status-stalled.json"))
-        runner.reading(["task", "status", Self.granted], taskFixture("task-status-stalled-granted.json"))
+        runner.reading(["task", "status", "--", Self.stalled], taskFixture("task-status-stalled.json"))
+        runner.reading(["task", "status", "--", Self.granted], taskFixture("task-status-stalled-granted.json"))
         let jobs = ScriptedJobs(jobs)
         let model = TasksViewModel(runner: runner, starter: jobs)
         await model.connect(binary: Self.binary)
@@ -179,9 +179,9 @@ struct ResumeStartingTests {
         model.resume(Self.stalled)
         #expect(model.stoppable(Self.stalled))
         await model.halt(Self.stalled)
-        #expect(runner.calls.contains("run task halt \(Self.stalled)"))
+        #expect(runner.calls.contains("run task halt -- \(Self.stalled)"))
         await model.cancel(Self.stalled)
-        #expect(runner.calls.contains("run task cancel \(Self.stalled)"))
+        #expect(runner.calls.contains("run task cancel -- \(Self.stalled)"))
         job.end(status: 130)
     }
 
@@ -193,7 +193,7 @@ struct ResumeStartingTests {
         model.say = { said.append($0) }
         await model.select(Self.granted)
         model.resume(Self.granted)
-        #expect(jobs.starts.first?.arguments == ["task", "resume", Self.granted, "--output-format", "stream-json"])
+        #expect(jobs.starts.first?.arguments == ["task", "resume", "--output-format", "stream-json", "--", Self.granted])
         job.end(status: 1, stderr: taskFixture("task-resume-refused.err"))
         let line = "apogee task: task \(Self.granted) cannot resume: --allow write_file: the config says permissions.write_file: deny -- a task's grant is never wider than the config (its grants are held to the config and its agent as they are now)"
         #expect(await eventually { model.failure == line })

@@ -31,8 +31,8 @@ struct BackendsDeleteTests {
         runner.reading(["models", "status"], recorded("backends-status"))
         runner.commanding(["__complete", "models", "rename"], .done(stdout: recorded("backends-complete-rename", "txt")))
         // The plans first, then the deletes, which a longer prefix picks out.
-        runner.commanding(["models", "delete", Self.llama], .done(stdout: recorded("delete-plan-backend", "txt")))
-        runner.commanding(["models", "delete", Self.gemma], .done(stdout: recorded("delete-plan-gemma", "txt")))
+        runner.commanding(["models", "delete", "--", Self.llama], .done(stdout: recorded("delete-plan-backend", "txt")))
+        runner.commanding(["models", "delete", "--", Self.gemma], .done(stdout: recorded("delete-plan-gemma", "txt")))
         runner.commanding(["models", "delete", "--yes", "--", Self.gemma], .done(stdout: recorded("delete-kept", "txt")))
         runner.commanding(["models", "delete", "--yes", "--and-backends", "--", Self.llama], .done(stdout: recorded("delete-and-backends", "txt")))
         let model = ModelsViewModel(runner: runner)
@@ -46,7 +46,7 @@ struct BackendsDeleteTests {
         #expect(model.groups.flatMap(\.rows).map(\.backend) == [Self.gemma, Self.llama])
         let row = try #require(model.rows.first { $0.backend == Self.llama })
         await model.askToDelete(row)
-        #expect(runner.calls.contains("run models delete \(Self.llama)"), "models delete without --yes: the CLI's plan")
+        #expect(runner.calls.contains("run models delete -- \(Self.llama)"), "models delete without --yes: the CLI's plan")
         #expect(!runner.calls.contains { $0.hasPrefix("run models delete") && $0.contains("--yes") }, "nothing deleted before the yes")
         #expect(model.pendingDelete?.row == row)
     }

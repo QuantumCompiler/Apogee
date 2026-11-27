@@ -1,4 +1,5 @@
 import BusinessJobs
+import BusinessReads
 import PresentationStyles
 import SwiftUI
 
@@ -55,7 +56,7 @@ public struct DownloadsView: View {
                 .font(.apogeeMeta.monospaced())
             }
             if let arguments = model.formArguments {
-                Text((["apogee"] + arguments).joined(separator: " "))
+                Text("apogee " + Argv.shown(arguments))
                     .font(.apogeeCode)
                     .foregroundStyle(Palette.textTertiary)
                     .textSelection(.enabled)
@@ -85,7 +86,7 @@ struct DownloadCard: View {
                 } else {
                     if let resume = progress.resumeCommand {
                         Button("Run \(resume.prefix(2).joined(separator: " "))…") { model.resume(download) }
-                            .help((["apogee"] + resume).joined(separator: " "))
+                            .help("apogee " + Argv.shown(resume))
                     } else if progress.status != .done {
                         Button("Run again") { model.again(download) }
                     }

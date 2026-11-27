@@ -127,8 +127,8 @@ struct SessionIdentityTests {
         let renaming = try #require(library.renaming)
         #expect(renaming.id == Self.switchedOlderID)
         await library.rename(renaming, to: "Port Notes")
-        #expect(runner.calls.contains("run chats title \(Self.switchedOlderID) -- Port Notes"))
-        #expect(!runner.calls.contains { $0.hasPrefix("run chats title \(Self.emptyID)") })
+        #expect(runner.calls.contains("run chats title -- \(Self.switchedOlderID) Port Notes"))
+        #expect(!runner.calls.contains { $0.hasPrefix("run chats title -- \(Self.emptyID)") })
         #expect(await eventually { starter.openedCount == 3 }, "this binary would put its own title back: paused, renamed, resumed")
         #expect(starter.launches[2].resume == Self.switchedOlderID)
 
@@ -136,8 +136,8 @@ struct SessionIdentityTests {
         let asked = try #require(library.pending)
         #expect(asked == .delete(try #require(library.chats.first { $0.id == Self.switchedOlderID })))
         try await library.confirm(#require(library.pending))
-        #expect(runner.calls.contains("run chats delete \(Self.switchedOlderID)"))
-        #expect(!runner.calls.contains("run chats delete \(Self.emptyID)"))
+        #expect(runner.calls.contains("run chats delete -- \(Self.switchedOlderID)"))
+        #expect(!runner.calls.contains("run chats delete -- \(Self.emptyID)"))
     }
 
     @Test("before M28: an empty chat appearing while a session runs is passed over -- a chat with no turns can't be one that has run a turn")
@@ -212,8 +212,8 @@ struct SessionIdentityTests {
         // Closed unsent, this binary saves the private chat empty beside it.
         runner.reading(["chats", "list"], #"{"data":[{"backend":"claude","id":"p0","model":"","name":"p0","turns":0,"updated":"2026-10-26T17:29:00Z"},{"backend":"claude","id":"20261026-172750-7e11","model":"","name":"Terminal Notes","turns":1,"updated":"2026-10-26T17:27:50Z"}],"object":"list"}"#)
         await library.newSession()
-        #expect(ledger.all == ["private: stop", "private: ended", "run chats delete p0"], "its own chat, found once it appears")
-        #expect(!runner.calls.contains("run chats delete \(Self.outsideID)"))
+        #expect(ledger.all == ["private: stop", "private: ended", "run chats delete -- p0"], "its own chat, found once it appears")
+        #expect(!runner.calls.contains("run chats delete -- \(Self.outsideID)"))
     }
 
     @Test("before M28: a chat the session left saved as it closed -- a turn and all -- is never the next one's: the list is read afresh after the close")
@@ -248,7 +248,7 @@ struct SessionIdentityTests {
         // Its input closed, this binary saves the private chat, empty.
         runner.reading(["chats", "list"], #"{"object":"list","data":[{"id":"p0","name":"p0","turns":0,"updated":"2026-10-20T17:00:00Z"}]}"#)
         await library.newSession()
-        #expect(ledger.all == ["private: stop", "private: ended", "run chats delete p0"])
+        #expect(ledger.all == ["private: stop", "private: ended", "run chats delete -- p0"])
     }
 
     // MARK: - Since M28: the chat the session names
@@ -277,7 +277,7 @@ struct SessionIdentityTests {
         let renaming = try #require(library.renaming)
         #expect(renaming.id == Self.switchedID)
         await library.rename(renaming, to: "Port Notes")
-        #expect(runner.calls.contains("run chats title \(Self.switchedID) -- Port Notes"))
+        #expect(runner.calls.contains("run chats title -- \(Self.switchedID) Port Notes"))
         #expect(starter.openedCount == 2, "a binary that keeps outside renames: renamed in place")
 
         let relaunched = ScriptedStarter(sessions: [ScriptedSession()])
@@ -289,7 +289,7 @@ struct SessionIdentityTests {
         library.current.onAction?(.delete)
         #expect(library.pending == .delete(try #require(library.chats.first { $0.id == Self.switchedID })))
         try await library.confirm(#require(library.pending))
-        #expect(runner.calls.contains("run chats delete \(Self.switchedID)"))
+        #expect(runner.calls.contains("run chats delete -- \(Self.switchedID)"))
         #expect(!runner.calls.contains { $0.hasPrefix("run chats delete") && !$0.hasSuffix(Self.switchedID) })
     }
 

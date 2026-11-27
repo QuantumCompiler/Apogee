@@ -128,7 +128,7 @@ public final class SuitesViewModel {
         // The CLI's verdict for each suite, where its read states one.
         var priced: [String: SuiteFootprint] = [:]
         for suite in read {
-            if let document = await runner.read(binary: binary, ["models", "status", "--suite", suite.name]).document,
+            if let document = await runner.read(binary: binary, Argv.line(["models", "status"], options: [.value("--suite", suite.name)])).document,
                 let footprint = SuiteFootprint(document: document)
             {
                 priced[suite.name] = footprint
@@ -168,7 +168,7 @@ public final class SuitesViewModel {
     /// footprint prices them, 53d) -- unknown when one cannot be read.
     private func memory(of backend: String, binary: URL) async -> Memory {
         if let kind = kinds[backend], kind != .local { return .none }
-        guard let info = await runner.read(binary: binary, ["models", "info", backend]).document else { return .unknown }
+        guard let info = await runner.read(binary: binary, Argv.line(["models", "info"], names: [backend])).document else { return .unknown }
         let model = ModelInfo(document: info)
         if let path = model.field("model_path"), !path.isEmpty { weightsFiles[backend] = path }
         let memory = Self.memory(in: model)
@@ -318,7 +318,7 @@ public final class SuitesViewModel {
     /// `config set-default-suite <name>`, or `off`; read back.
     public func makeDefault(_ suite: Suite?) async {
         guard let binary else { return }
-        let outcome = await runner.command(binary: binary, ["config", "set-default-suite", suite?.name ?? "off"])
+        let outcome = await runner.command(binary: binary, Argv.line(["config", "set-default-suite"], names: [suite?.name ?? "off"]))
         await refresh()
         if let failure = outcome.failure {
             say?("That didn't work: \(failure)")

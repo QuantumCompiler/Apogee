@@ -38,12 +38,12 @@ public final class RecordsViewModel {
         public var arguments: [String]? {
             let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
-            var arguments = ["knowledge", "capture"]
-            if let status { arguments += ["--status", status] }
-            if let discipline { arguments += ["--discipline", discipline] }
+            var options: [Argv.Option] = []
+            if let status { options.append(.value("--status", status)) }
+            if let discipline { options.append(.value("--discipline", discipline)) }
             let link = link.trimmingCharacters(in: .whitespaces)
-            if !link.isEmpty { arguments += ["--link", link] }
-            return arguments + Argv.text(text)
+            if !link.isEmpty { options.append(.value("--link", link)) }
+            return Argv.line(["knowledge", "capture"], options: options, names: [text])
         }
     }
 
@@ -200,7 +200,7 @@ public final class RecordsViewModel {
         raw = RawView(record: record.id, state: .reading)
         let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
         let answer = await runner.documentOrText(
-            binary: binary, ["knowledge", "info", record.id, "--raw"], asksDocument: asks, RawConversation.init(document:))
+            binary: binary, Argv.line(["knowledge", "info"], options: [.flag("--raw")], names: [record.id]), asksDocument: asks, RawConversation.init(document:))
         guard raw?.record == record.id else { return }
         switch answer {
         case .document(let conversation):
@@ -258,7 +258,7 @@ public final class RecordsViewModel {
         let mine = asks
         self.asked = asked
         let outcome = await runner.command(
-            binary: binary, ["knowledge", "query", "--status", asked.branch ?? "", "--json"] + Argv.text(asked.question))
+            binary: binary, Argv.line(["knowledge", "query"], options: [.value("--status", asked.branch ?? ""), .flag("--json")], names: [asked.question]))
         guard asks == mine, self.asked == asked, branch == asked.branch else { return }
         if case .done(let stdout) = outcome, let document = ReadDocument(text: stdout), let query = KnowledgeQuery(document: document) {
             self.query = query
@@ -283,17 +283,18 @@ public final class RecordsViewModel {
 
     // MARK: - Changing
 
-    /// `knowledge link <id> <ref>`, read back.
+    /// `knowledge link -- <id> <ref>`, the id and the typed ref after one
+    /// `--` (`Argv`, GUI M23), read back.
     public func link(_ record: KnowledgeRecord, to ref: String) async {
         let ref = ref.trimmingCharacters(in: .whitespaces)
         guard !ref.isEmpty else { return }
-        await change(["knowledge", "link", record.id, ref], doing: "Linking")
+        await change(Argv.line(["knowledge", "link"], names: [record.id, ref]), doing: "Linking")
     }
 
-    /// `knowledge status <id> <branch>`, read back.
+    /// `knowledge status -- <id> <branch>`, read back.
     public func move(_ record: KnowledgeRecord, to status: String) async {
         guard status != record.status else { return }
-        await change(["knowledge", "status", record.id, status], doing: "Moving")
+        await change(Argv.line(["knowledge", "status"], names: [record.id, status]), doing: "Moving")
     }
 
     /// `knowledge delete <id>` -- the record and its raw archive -- after the
@@ -306,22 +307,20 @@ public final class RecordsViewModel {
         await change(Self.deleteArguments(record), doing: "Deleting")
     }
 
-    /// `knowledge delete <id>`: the line `confirmDelete` runs, which its
-    /// dialog shows as typed (GUI M21).
+    /// `knowledge delete -- <id>`: the line `confirmDelete` runs, which its
+    /// dialog shows as typed (GUI M21), the id after `--` (GUI M23).
     public static func deleteArguments(_ record: KnowledgeRecord) -> [String] {
-        ["knowledge", "delete", record.id]
+        Argv.line(["knowledge", "delete"], names: [record.id])
     }
 
     /// `knowledge export --format json|markdown [--anonymize] -o <file>`.
     public func export(to file: URL, markdown: Bool, anonymize: Bool) async {
-        var arguments = ["knowledge", "export", "--format", markdown ? "markdown" : "json"]
-        if anonymize { arguments.append("--anonymize") }
-        arguments += ["-o", file.path]
-        await change(arguments, doing: "Exporting")
+        await change(Self.exportArguments(file: file.path, markdown: markdown, anonymize: anonymize), doing: "Exporting")
     }
 
+    /// The export's line: its options alone, the file `-o`'s value.
     public static func exportArguments(file: String, markdown: Bool, anonymize: Bool) -> [String] {
-        ["knowledge", "export", "--format", markdown ? "markdown" : "json"] + (anonymize ? ["--anonymize"] : []) + ["-o", file]
+        Argv.line(["knowledge", "export"], options: [.value("--format", markdown ? "markdown" : "json")] + (anonymize ? [.flag("--anonymize")] : []) + [.value("-o", file)])
     }
 
     private func change(_ arguments: [String], doing: String) async {

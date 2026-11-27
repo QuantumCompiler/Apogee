@@ -114,7 +114,7 @@ public final class VoiceViewModel {
     /// A voice model's voices: `models info <it>`'s `voices` field, one
     /// language a line -- an MLX build's own presets as the CLI lists them.
     private func readVoices(of handle: String?) async {
-        guard let binary, let handle, let info = await runner.read(binary: binary, ["models", "info", handle]).document else {
+        guard let binary, let handle, let info = await runner.read(binary: binary, Argv.line(["models", "info"], names: [handle])).document else {
             voices = []
             return
         }
@@ -215,14 +215,14 @@ public final class VoiceViewModel {
     public var plannedArguments: [String]? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        var arguments = ["voice", "say", "-o", plannedOutput.path]
+        var options: [Argv.Option] = [.value("-o", plannedOutput.path)]
         if models.count > 1, let voiceModel {
-            arguments += ["-m", voiceModel]
-            if let engine = chosenEngine { arguments += ["--engine", engine.word] }
+            options.append(.value("-m", voiceModel))
+            if let engine = chosenEngine { options.append(.value("--engine", engine.word)) }
         }
-        if !voice.isEmpty { arguments += ["--voice", voice] }
-        if speed != 1 { arguments += ["--speed", String(format: "%g", speed)] }
-        return arguments + Argv.text(text)
+        if !voice.isEmpty { options.append(.value("--voice", voice)) }
+        if speed != 1 { options.append(.value("--speed", String(format: "%g", speed))) }
+        return Argv.line(["voice", "say"], options: options, names: [text])
     }
 
     /// Whether the place runs something now: a speech, or the install one

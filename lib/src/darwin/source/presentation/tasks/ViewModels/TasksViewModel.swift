@@ -139,7 +139,7 @@ public final class TasksViewModel {
     public func refresh() async {
         guard let binary else { return }
         if listing != .read { listing = .reading }
-        let outcome = await runner.read(binary: binary, ["task", "list"] + (showingAll ? ["--all"] : []))
+        let outcome = await runner.read(binary: binary, Argv.line(["task", "list"], options: showingAll ? [.flag("--all")] : []))
         if let document = outcome.document {
             tasks = TaskSummary.list(from: document)
             listTotal = document.total
@@ -166,7 +166,7 @@ public final class TasksViewModel {
 
     private func readStatus(_ id: String) async {
         guard let binary else { return }
-        let outcome = await runner.read(binary: binary, ["task", "status", id])
+        let outcome = await runner.read(binary: binary, Argv.line(["task", "status"], names: [id]))
         guard selected == id else { return }
         if let document = outcome.document, let view = TaskView(document: document) {
             status = view
@@ -406,7 +406,7 @@ public final class TasksViewModel {
             return
         }
         guard let binary else { return }
-        let outcome = await runner.read(binary: binary, ["task", "recipes", "show", name])
+        let outcome = await runner.read(binary: binary, Argv.line(["task", "recipes", "show"], names: [name]))
         guard let document = outcome.document, let recipe = TaskRecipe(document: document) else {
             recipeFailure = outcome.failure ?? "the recipe could not be read"
             return
@@ -426,20 +426,26 @@ public final class TasksViewModel {
         form = NewTaskForm()
     }
 
-    /// `task resume <id>`, followed live, in the folder the task was started
+    /// `task resume -- <id>`, followed live, in the folder the task was started
     /// in -- its read's: the CLI resumes a task nowhere else
     /// (`task_resume_refusal`), so a resume from the home folder failed for
     /// every task started elsewhere. Only a task `resumable` names.
     public func resume(_ id: String) {
         guard resumable(id), let view = lastView(of: id) else { return }
-        follow(["task", "resume", id, "--output-format", "stream-json"], folder: URL(fileURLWithPath: view.folder, isDirectory: true))
+        follow(Self.resumeArguments(id), folder: URL(fileURLWithPath: view.folder, isDirectory: true))
     }
 
-    /// The task a run's arguments resume: the id after `task resume`, as
-    /// `resume(_:)` writes the line; `nil` for any other run.
+    /// `task resume --output-format stream-json -- <id>`: the id after `--`,
+    /// the stream flag added before it (`Argv`, GUI M23).
+    public nonisolated static func resumeArguments(_ id: String) -> [String] {
+        Argv.adding(["--output-format", "stream-json"], to: Argv.line(["task", "resume"], names: [id]))
+    }
+
+    /// The task a run's arguments resume: the id after `--` on a `task
+    /// resume` line, as `resume(_:)` writes it; `nil` for any other run.
     public nonisolated static func resumedTask(in arguments: [String]) -> String? {
-        guard arguments.count > 2, arguments.starts(with: ["task", "resume"]) else { return nil }
-        return arguments[2]
+        guard arguments.starts(with: ["task", "resume"]) else { return nil }
+        return Argv.positionals(of: arguments).first
     }
 
     /// Whether a row says its task was killed mid-round: its `interrupted`,
@@ -494,14 +500,14 @@ public final class TasksViewModel {
 
     // MARK: - Controls
 
-    /// Stop after this round: `task halt <id>`.
+    /// Stop after this round: `task halt -- <id>`.
     public func halt(_ id: String) async {
-        await command(["task", "halt", id], done: "It stops when this round ends")
+        await command(Argv.line(["task", "halt"], names: [id]), done: "It stops when this round ends")
     }
 
-    /// Stop now: `task cancel <id>`.
+    /// Stop now: `task cancel -- <id>`.
     public func cancel(_ id: String) async {
-        await command(["task", "cancel", id], done: "Stopping now")
+        await command(Argv.line(["task", "cancel"], names: [id]), done: "Stopping now")
     }
 
     private func command(_ arguments: [String], done: String) async {
@@ -587,16 +593,14 @@ public struct NewTaskForm: Equatable {
         if let recipe { return recipeArguments(recipe) }
         let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return nil }
-        var arguments = ["task", "run"]
-        for text in Self.lines(requires) { arguments += ["--require", text] }
-        for file in Self.lines(requireFiles) { arguments += ["--require-file", file] }
-        arguments += ["--rounds", String(min(32, max(1, rounds)))]
+        var options: [Argv.Option] = Self.lines(requires).map { .value("--require", $0) } + Self.lines(requireFiles).map { .value("--require-file", $0) }
+        options.append(.value("--rounds", String(min(32, max(1, rounds)))))
         if tools || allowWrites || allowCommands {
-            arguments.append("--tools")
-            if allowWrites { arguments += ["--allow", "write_file", "--allow", "edit_file"] }
-            if allowCommands { arguments += ["--allow", "run_command"] }
+            options.append(.flag("--tools"))
+            if allowWrites { options += [.value("--allow", "write_file"), .value("--allow", "edit_file")] }
+            if allowCommands { options.append(.value("--allow", "run_command")) }
         }
-        return arguments + modelArguments + ["--output-format", "stream-json"] + Argv.text(goal)
+        return Argv.adding(["--output-format", "stream-json"], to: Argv.line(["task", "run"], options: options + modelOptions, names: [goal]))
     }
 
     /// `task run --recipe <name>`: the recipe's own checks, tools and rounds
@@ -604,13 +608,12 @@ public struct NewTaskForm: Equatable {
     private func recipeArguments(_ recipe: TaskRecipe) -> [String]? {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if recipe.takesInput && input.isEmpty { return nil }
-        var arguments = ["task", "run", "--recipe", recipe.name]
-        if recipe.takesInput { arguments += ["--input", input] }
-        for text in Self.lines(requires) { arguments += ["--require", text] }
-        for file in Self.lines(requireFiles) { arguments += ["--require-file", file] }
-        if let rounds = typedRounds(recipe) { arguments += ["--rounds", rounds] }
-        for grant in givenGrants(recipe) { arguments += ["--allow", grant] }
-        return arguments + modelArguments + ["--output-format", "stream-json"]
+        var options: [Argv.Option] = [.value("--recipe", recipe.name)]
+        if recipe.takesInput { options.append(.value("--input", input)) }
+        options += Self.lines(requires).map { .value("--require", $0) } + Self.lines(requireFiles).map { .value("--require-file", $0) }
+        if let rounds = typedRounds(recipe) { options.append(.value("--rounds", rounds)) }
+        options += givenGrants(recipe).map { .value("--allow", $0) }
+        return Argv.adding(["--output-format", "stream-json"], to: Argv.line(["task", "run"], options: options + modelOptions))
     }
 
     /// The same run as a hand-typed line -- the recipe expanded as the CLI
@@ -621,14 +624,13 @@ public struct NewTaskForm: Equatable {
         guard let recipe, recipeArguments(recipe) != nil,
             let goal = recipe.renderedGoal(input: input.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return nil }
-        var arguments = ["task", "run"]
-        for text in recipe.require + Self.lines(requires) { arguments += ["--require", text] }
-        for file in recipe.requireFiles + Self.lines(requireFiles) { arguments += ["--require-file", file] }
-        if recipe.tools { arguments.append("--tools") }
-        if let rounds = typedRounds(recipe) ?? recipe.rounds.map(String.init) { arguments += ["--rounds", rounds] }
-        if !recipe.agent.isEmpty { arguments += ["--agent", recipe.agent] }
-        for grant in givenGrants(recipe) { arguments += ["--allow", grant] }
-        return arguments + modelArguments + Argv.text(goal)
+        var options: [Argv.Option] = (recipe.require + Self.lines(requires)).map { .value("--require", $0) }
+        options += (recipe.requireFiles + Self.lines(requireFiles)).map { .value("--require-file", $0) }
+        if recipe.tools { options.append(.flag("--tools")) }
+        if let rounds = typedRounds(recipe) ?? recipe.rounds.map(String.init) { options.append(.value("--rounds", rounds)) }
+        if !recipe.agent.isEmpty { options.append(.value("--agent", recipe.agent)) }
+        options += givenGrants(recipe).map { .value("--allow", $0) }
+        return Argv.line(["task", "run"], options: options + modelOptions, names: [goal])
     }
 
     /// The recipe's suggested grants left ungiven: said, as the CLI says them.
@@ -647,9 +649,9 @@ public struct NewTaskForm: Equatable {
         return rounds == (recipe.rounds ?? 8) ? nil : String(rounds)
     }
 
-    private var modelArguments: [String] {
+    private var modelOptions: [Argv.Option] {
         let model = model.trimmingCharacters(in: .whitespaces)
-        return model.isEmpty ? [] : ["-m", model]
+        return model.isEmpty ? [] : [.value("-m", model)]
     }
 
     /// Whether it has a check: a task with none is done when the model says so.
@@ -658,16 +660,10 @@ public struct NewTaskForm: Equatable {
             || !(recipe?.require.isEmpty ?? true) || !(recipe?.requireFiles.isEmpty ?? true)
     }
 
-    /// `arguments` as a person would type them at a shell: `apogee task run
-    /// 'Digest docs' --rounds 8`.
+    /// `arguments` as a person would type them at a shell, through
+    /// `Argv.shown`: `apogee task run --rounds 8 'Digest docs'` (GUI M23).
     public static func typed(_ arguments: [String]) -> String {
-        (["apogee"] + arguments).map(quoted).joined(separator: " ")
-    }
-
-    static func quoted(_ word: String) -> String {
-        let plain = word.allSatisfy { $0.isLetter || $0.isNumber || "-_./:=@%+,".contains($0) }
-        if plain && !word.isEmpty { return word }
-        return "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        "apogee " + Argv.shown(arguments)
     }
 }
 

@@ -114,11 +114,11 @@ public struct MCPPreset: Sendable, Equatable, Identifiable {
         return words[3]
     }
 
-    /// What registering it runs, as a person types it -- its line's `mcp
-    /// create <server> --from <preset>`, built as Library's Register builds
-    /// it; `nil` where the row has no such line.
+    /// What registering it runs -- its line's `mcp create <server> --from
+    /// <preset>`, built as Library's Register builds it, the server after
+    /// `--` (`Argv`, GUI M23); `nil` where the row has no such line.
     public var registration: [String]? {
-        serverName.map { ["mcp", "create", $0, "--from", name] }
+        serverName.map { Argv.line(["mcp", "create"], options: [.value("--from", name)], names: [$0]) }
     }
 
     public static func list(from document: ReadDocument) -> [MCPPreset] {

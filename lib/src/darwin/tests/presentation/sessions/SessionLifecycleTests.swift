@@ -193,7 +193,7 @@ struct QuitTests {
         #expect(library.needsShutdown)
         let before = ledger.all.count
         let report = await library.quit()
-        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: ended", "run chats delete p9"])
+        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: ended", "run chats delete -- p9"])
         #expect(report == ShutdownReport(ended: true, deleteFailure: nil))
         #expect(!library.needsShutdown)
         #expect(starter.live == 0)
@@ -227,7 +227,7 @@ struct QuitTests {
         let report = await quitting.value
         await closing.value
         #expect(report == ShutdownReport(ended: true, deleteFailure: nil))
-        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: ended", "run chats delete p9"])
+        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: ended", "run chats delete -- p9"])
         #expect(!library.needsShutdown)
         _ = await library.quit()
         #expect(ledger.all.filter { $0.hasPrefix("run chats delete") }.count == 1, "asked again, nothing runs twice")
@@ -285,10 +285,10 @@ struct QuitTests {
         let before = ledger.all.count
         let quitting = Task { await library.quit() }
         #expect(await eventually { clock.sleeping == 1 && ledger.all.count == before + 1 })
-        #expect(!ledger.all.contains("run chats delete p9"), "no delete while the child may still save it")
+        #expect(!ledger.all.contains("run chats delete -- p9"), "no delete while the child may still save it")
         clock.advance(by: SessionViewModel.grace)
         let report = await quitting.value
-        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: terminate", "run chats delete p9"])
+        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: terminate", "run chats delete -- p9"])
         #expect(report == ShutdownReport(ended: false, deleteFailure: nil, deletedWhileEnding: true))
         secret.releaseStop()
     }

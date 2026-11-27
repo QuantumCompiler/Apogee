@@ -24,8 +24,8 @@ struct XcodeSettingsTests {
     /// The verbs the pane may run, and nothing else: its three reads, its two
     /// changes, and `check` read again after a change.
     static let paneVerbs = [
-        "read mcp presets", "run config get mcp_servers.xcode", "read acp registration",
-        "run mcp create xcode --from xcode", "run config delete-mcp-server xcode", "read check",
+        "read mcp presets", "run config get -- mcp_servers.xcode", "read acp registration",
+        "run mcp create --from xcode -- xcode", "run config delete-mcp-server -- xcode", "read check",
     ]
 
     /// The Xcode-found home, its preset not registered: what `apogee-dev`
@@ -38,7 +38,7 @@ struct XcodeSettingsTests {
         runner.reading(["mcp", "presets"], recordedText(presets))
         runner.reading(["acp", "registration"], recordedText("xcode-acp-registration.json"))
         runner.when(
-            ["config", "get", "mcp_servers.xcode"],
+            ["config", "get", "--", "mcp_servers.xcode"],
             registered ? .done(stdout: recordedText("xcode-config-get.txt")) : refused("xcode-config-get-none.err"))
         return runner
     }
@@ -114,9 +114,9 @@ struct XcodeSettingsTests {
         #expect(preset.register == "apogee mcp create xcode --from xcode")
         #expect(preset.note?.contains("\"Allow External Agents to Use Xcode Tools\"") == true)
         #expect(model.xcode.entry == .notRegistered, "the CLI's no such config key")
-        #expect(model.xcode.registers == ["mcp", "create", "xcode", "--from", "xcode"])
+        #expect(model.xcode.registers == ["mcp", "create", "--from", "xcode", "--", "xcode"])
         #expect(model.xcode.removes == nil)
-        #expect(runner.calls.contains("run config get mcp_servers.xcode"))
+        #expect(runner.calls.contains("run config get -- mcp_servers.xcode"))
     }
 
     @Test("a row not runnable -- xcrun off the PATH -- says what is missing in the CLI's words, and Register isn't offered")
@@ -144,7 +144,7 @@ struct XcodeSettingsTests {
         #expect(model.xcode.entry == .registered(command: "/usr/bin/xcrun"))
         #expect(model.xcode.registered)
         #expect(model.xcode.registers == nil)
-        #expect(model.xcode.removes == ["config", "delete-mcp-server", "xcode"])
+        #expect(model.xcode.removes == ["config", "delete-mcp-server", "--", "xcode"])
         #expect(model.xcode.row("mcpbridge")?.detail.hasPrefix("Xcode's tools for Apogee's agents: registered as 'xcode'") == true)
     }
 
@@ -244,14 +244,14 @@ struct XcodeSettingsTests {
     func register() async throws {
         let runner = home()
         let (model, said) = await settings(runner)
-        runner.when(["mcp", "create", "xcode", "--from", "xcode"], .done(stdout: recordedText("xcode-mcp-create.txt")))
-        runner.when(["config", "get", "mcp_servers.xcode"], .done(stdout: recordedText("xcode-config-get.txt")))
+        runner.when(["mcp", "create", "--from", "xcode", "--", "xcode"], .done(stdout: recordedText("xcode-mcp-create.txt")))
+        runner.when(["config", "get", "--", "mcp_servers.xcode"], .done(stdout: recordedText("xcode-config-get.txt")))
         runner.reading(["check"], recordedText("xcode-check-registered.json"))
         let before = runner.calls.count
         await model.xcode.register()
         let after = Array(runner.calls.dropFirst(before))
-        #expect(after.first == "run mcp create xcode --from xcode")
-        #expect(after.contains("run config get mcp_servers.xcode"), "read back")
+        #expect(after.first == "run mcp create --from xcode -- xcode")
+        #expect(after.contains("run config get -- mcp_servers.xcode"), "read back")
         #expect(after.contains("read check"), "check read again: the bridge row follows")
         #expect(model.xcode.entry == .registered(command: "/usr/bin/xcrun"))
         #expect(model.xcode.row("mcpbridge")?.detail.contains("registered as 'xcode'") == true)
@@ -269,7 +269,7 @@ struct XcodeSettingsTests {
     func registerRefused() async {
         let runner = home()
         let (model, said) = await settings(runner)
-        runner.when(["mcp", "create", "xcode", "--from", "xcode"], refused("xcode-mcp-create-taken.err"))
+        runner.when(["mcp", "create", "--from", "xcode", "--", "xcode"], refused("xcode-mcp-create-taken.err"))
         await model.xcode.register()
         #expect(model.xcode.failure?.hasPrefix("apogee mcp: updating config: MCP server 'xcode' already exists; pass --force to replace it") == true)
         #expect(model.xcode.said == nil)
@@ -283,15 +283,15 @@ struct XcodeSettingsTests {
         model.xcode.askToRemove()
         #expect(model.xcode.removing, "asked, as Library's Remove is")
         #expect(!runner.calls.contains { $0.hasPrefix("run config delete-mcp-server") }, "nothing removed on the ask")
-        runner.when(["config", "delete-mcp-server", "xcode"], .done(stdout: recordedText("xcode-config-delete.txt")))
-        runner.when(["config", "get", "mcp_servers.xcode"], refused("xcode-config-get-none.err"))
+        runner.when(["config", "delete-mcp-server", "--", "xcode"], .done(stdout: recordedText("xcode-config-delete.txt")))
+        runner.when(["config", "get", "--", "mcp_servers.xcode"], refused("xcode-config-get-none.err"))
         runner.reading(["check"], recordedText("xcode-check.json"))
         await model.xcode.remove()
         #expect(!model.xcode.removing)
-        #expect(runner.calls.contains("run config delete-mcp-server xcode"))
+        #expect(runner.calls.contains("run config delete-mcp-server -- xcode"))
         #expect(model.xcode.entry == .notRegistered, "read back")
         #expect(model.xcode.said?.lines == ["removed MCP server 'xcode' from /Users/someone/.apogee-dev/config/config.json"])
-        #expect(model.xcode.registers == ["mcp", "create", "xcode", "--from", "xcode"], "offered again")
+        #expect(model.xcode.registers == ["mcp", "create", "--from", "xcode", "--", "xcode"], "offered again")
     }
 
     @Test("Remove isn't asked where nothing is registered")
@@ -313,17 +313,17 @@ struct XcodeSettingsTests {
         let beforeCopy = runner.calls.count
         model.xcode.copied()
         #expect(runner.calls.count == beforeCopy, "Copy's word runs no command (M19)")
-        runner.when(["mcp", "create", "xcode", "--from", "xcode"], .done(stdout: recordedText("xcode-mcp-create.txt")))
-        runner.when(["config", "get", "mcp_servers.xcode"], .done(stdout: recordedText("xcode-config-get.txt")))
+        runner.when(["mcp", "create", "--from", "xcode", "--", "xcode"], .done(stdout: recordedText("xcode-mcp-create.txt")))
+        runner.when(["config", "get", "--", "mcp_servers.xcode"], .done(stdout: recordedText("xcode-config-get.txt")))
         await model.xcode.register()
         model.xcode.askToRemove()
-        runner.when(["config", "delete-mcp-server", "xcode"], .done(stdout: recordedText("xcode-config-delete.txt")))
+        runner.when(["config", "delete-mcp-server", "--", "xcode"], .done(stdout: recordedText("xcode-config-delete.txt")))
         await model.xcode.remove()
         let pane = runner.calls.dropFirst(settingsReads)
         #expect(!runner.calls.contains { $0.hasPrefix("read mcp list") || $0.hasPrefix("run mcp list") })
         #expect(!runner.calls.contains { $0.contains("mcp test") })
         #expect(pane.allSatisfy { Self.paneVerbs.contains($0) }, "\(Array(pane))")
-        #expect(pane.contains("run mcp create xcode --from xcode") && pane.contains("run config delete-mcp-server xcode"))
+        #expect(pane.contains("run mcp create --from xcode -- xcode") && pane.contains("run config delete-mcp-server -- xcode"))
     }
 
     @Test("the pane's reads run when it is chosen, never in Settings' refresh")

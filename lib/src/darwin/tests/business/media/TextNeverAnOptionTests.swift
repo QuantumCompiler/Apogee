@@ -10,6 +10,23 @@ import Testing
 /// its run. Every option goes before the `--`.
 @Suite("Media text after --")
 struct MediaTextAfterDashesTests {
+    @Test("a dash-led prompt with a LoRA reaches the verb on a binary that does not stream: --lora before -o, as the binary's recorded verdict takes it (GUI M23)")
+    func loraBeforeTheOutput() throws {
+        var form = ClipForm()
+        form.prompt = "-dash first"
+        form.loras = ["/Users/someone/l.safetensors"]
+        let line = try #require(form.arguments(output: "/Users/someone/a.mp4"))
+        #expect(line == ["video", "generate", "--lora", "/Users/someone/l.safetensors", "-o", "/Users/someone/a.mp4", "--", "-dash first"])
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../reads/Fixtures/argv-end-of-options-verdicts.txt")
+        let verdicts = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { $0.split(separator: "\t", maxSplits: 1).map(String.init) }
+        let verdict = { (line: String) in verdicts.first { $0.count == 2 && $0[1] == line }?[0] }
+        #expect(verdict("video generate --lora /Users/someone/l.safetensors -o /Users/someone/a.mp4 -- -dash")?.hasPrefix("exit 1: apogee video: there is no LoRA") == true,
+                "--lora first reaches the verb")
+        #expect(verdict("video generate -o /Users/someone/a.mp4 --lora /Users/someone/l.safetensors -- -dash") == "exit 109: The following argument was not expected: -dash",
+                "--lora last before -- takes it as its own end")
+    }
+
     @Test("a clip's prompt is the last word, after --, whatever it begins with; a clip with no prompt has no --")
     func clipPrompt() {
         var form = ClipForm()

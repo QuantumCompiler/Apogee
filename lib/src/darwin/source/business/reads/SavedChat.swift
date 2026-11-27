@@ -64,9 +64,10 @@ public struct SavedChat: Sendable, Equatable {
         warnings = document.value["warnings"]?.arrayValue.map { $0.compactMap(SavedWarning.init(entry:)) }
     }
 
-    /// The arguments of the read after `apogee`, for the chat `id`.
+    /// The arguments of the read after `apogee`, for the chat `id`: the id
+    /// after `--`, as every positional is (`Argv`, GUI M23).
     public static func arguments(id: String) -> [String] {
-        ["chats", "show", id]
+        Argv.line(["chats", "show"], names: [id])
     }
 
     static func nonEmpty(_ value: JSONValue?) -> String? {

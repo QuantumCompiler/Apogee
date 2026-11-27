@@ -70,7 +70,7 @@ struct SessionRenameTests {
         let (library, runner, starter) = await opened(Self.newer, listed: Self.listedNewer, ledger: ledger)
         let id = Self.chatID(Self.newer)
         await library.rename(library.chats[0], to: "Port Notes")
-        #expect(ledger.all == ["run chats title \(id) -- Port Notes"])
+        #expect(ledger.all == ["run chats title -- \(id) Port Notes"])
         #expect(runner.calls.drop { !$0.hasPrefix("run chats title") }.contains("read chats list"), "read back")
         #expect(starter.openedCount == 1)
         #expect(starter.live == 1, "the session runs on")
@@ -82,7 +82,7 @@ struct SessionRenameTests {
         let (library, _, starter) = await opened(Self.older, listed: Self.listedOlder, ledger: ledger)
         let id = Self.chatID(Self.older)
         await library.rename(library.chats[0], to: "Renamed From Outside")
-        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title -- \(id) Renamed From Outside"])
         #expect(await eventually { starter.openedCount == 2 })
         #expect(starter.launches.map(\.resume) == [id, id], "resumed by its id")
         #expect(starter.live == 1)
@@ -98,8 +98,8 @@ struct SessionRenameTests {
         await library.rename(library.chats[0], to: "Renamed From Outside")
         #expect(ledger.all.isEmpty, "the turn runs on, and nothing is renamed yet")
         starter.handed[0].emit(Self.older.first { JSONValue.parse($0)?["type"]?.stringValue == "result" }!)
-        #expect(await eventually { ledger.all.contains("run chats title \(id) -- Renamed From Outside") })
-        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        #expect(await eventually { ledger.all.contains("run chats title -- \(id) Renamed From Outside") })
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title -- \(id) Renamed From Outside"])
         #expect(await eventually { starter.openedCount == 2 })
     }
 
@@ -124,8 +124,8 @@ struct SessionRenameTests {
         #expect(ledger.all == ["child 1: stop"], "not while the child is still saving on its way out")
         starter.handed[0].releaseStop()
         await switching.value
-        #expect(await eventually { ledger.all.contains("run chats title \(id) -- Renamed From Outside") })
-        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        #expect(await eventually { ledger.all.contains("run chats title -- \(id) Renamed From Outside") })
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title -- \(id) Renamed From Outside"])
         await Lifecycle.law(starter, "the rename after the switch")
         #expect(starter.openedCount == 2, "the switch's chat, and nothing resumed: the closed session is gone for good")
     }
@@ -144,7 +144,7 @@ struct SessionRenameTests {
         starter.handed[0].releaseStop()
         await switching.value
         await renaming.value
-        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title \(id) -- Renamed From Outside"])
+        #expect(Array(ledger.all.prefix(3)) == ["child 1: stop", "child 1: ended", "run chats title -- \(id) Renamed From Outside"])
         await Lifecycle.law(starter, "the rename")
     }
 
@@ -182,7 +182,7 @@ struct SessionRenameTests {
         await library.rename(library.chats[0], to: "Renamed From Outside")
         #expect(ledger.all.isEmpty)
         starter.handed[0].end(.failed)
-        #expect(await eventually { ledger.all == ["run chats title \(id) -- Renamed From Outside"] })
+        #expect(await eventually { ledger.all == ["run chats title -- \(id) Renamed From Outside"] })
         #expect(starter.openedCount == 1, "nothing to pause or resume: its child is gone")
     }
 }

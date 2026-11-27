@@ -49,7 +49,7 @@ struct TrainingChatChoicesTests {
         #expect(!model.backends.contains("EmbeddingGemma-300M-bf16"))
         model.promoteForm.backend = "Qwen3-8B-4bit"
         model.promoteForm.judge = model.backends.first
-        #expect(model.promoteForm.arguments == ["train", "promote", model.runs[0].id, "--as", "Qwen3-8B-4bit", "--adapter", "--judge", "Gemma4-E4B-4bit"])
+        #expect(model.promoteForm.arguments == ["train", "promote", "--as", "Qwen3-8B-4bit", "--adapter", "--judge", "Gemma4-E4B-4bit", "--", model.runs[0].id])
     }
 
     @Test("the entry an adapter goes onto: the registered chat and vision entries, never the embedding entry")

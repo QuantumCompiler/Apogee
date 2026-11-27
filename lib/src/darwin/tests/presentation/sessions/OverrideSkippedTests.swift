@@ -196,10 +196,10 @@ struct TryAgainAdoptsTests {
         #expect(library.inspector.recall == Self.recallHolds, "the Recall section, and its Forget, drawn")
         let chat = try #require(library.chats.first)
         await library.rename(chat, to: "Ports")
-        #expect(runner.calls.contains("run chats title \(chat.id) -- Ports"))
+        #expect(runner.calls.contains("run chats title -- \(chat.id) Ports"))
         library.askToDelete(chat)
         try await library.confirm(#require(library.pending))
-        #expect(runner.calls.contains("run chats delete \(chat.id)"))
+        #expect(runner.calls.contains("run chats delete -- \(chat.id)"))
         // The session says its own suite: the roles follow it, read once by
         // the adoption.
         child.emit(#"{"type":"session","protocol_version":1,"model":"m3","next_turn":1,"suite":"rich"}"#)
@@ -263,7 +263,7 @@ struct TryAgainAdoptsTests {
         secret.emit(#"{"type":"result","text":"ok","turn":1}"#)
         #expect(await eventually { library.current.chatID == "p9" }, "its own chat, found against the list the adoption read")
         await library.newSession()
-        #expect(runner.calls.contains("run chats delete p9"), "deleted when it closed, as it promised")
+        #expect(runner.calls.contains("run chats delete -- p9"), "deleted when it closed, as it promised")
         await library.shutDown()
     }
 

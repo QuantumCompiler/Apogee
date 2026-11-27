@@ -282,7 +282,7 @@ public final class ComposeViewModel {
     /// -- the composer reads the rest from the project it keeps. The brief
     /// after `--`, as a new composition's (`Argv`).
     static func resumeArguments(_ project: ProjectRecord) -> [String] {
-        ["video", "compose", "-o", project.output] + Argv.text(project.brief)
+        Argv.line(["video", "compose"], options: [.value("-o", project.output)], names: [project.brief])
     }
 
     /// Whether an install runs, said: nothing composes beside it.

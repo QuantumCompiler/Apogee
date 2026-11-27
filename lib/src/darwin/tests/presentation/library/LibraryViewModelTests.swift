@@ -36,7 +36,7 @@ struct LibraryViewModelTests {
         form.description = "Sort incoming issues"
         form.tools = "none"
         form.noSchema = true
-        #expect(form.arguments == ["agents", "create", "triage", "--description", "Sort incoming issues", "--tools", "none", "--no-schema"])
+        #expect(form.arguments == ["agents", "create", "--description", "Sort incoming issues", "--tools", "none", "--no-schema", "--", "triage"])
         let home = try dataHome()
         defer { try? FileManager.default.removeItem(at: home) }
         let runner = ScriptedRunner()
@@ -48,10 +48,10 @@ struct LibraryViewModelTests {
         let triage = try #require(model.agents.first { $0.name == "triage" })
         model.pendingDelete = triage
         try await model.confirmDelete(#require(model.pendingDelete), purge: false)
-        #expect(runner.calls.contains("run agents|delete|triage|--keep-files"))
+        #expect(runner.calls.contains("run agents|delete|--keep-files|--|triage"))
         model.pendingDelete = triage
         try await model.confirmDelete(#require(model.pendingDelete), purge: true)
-        #expect(runner.calls.contains("run agents|delete|triage|--purge"))
+        #expect(runner.calls.contains("run agents|delete|--purge|--|triage"))
         model.edit(model.agents.first { $0.bundled }!, file: "prompts/security-review.txt")
         #expect(model.editor == nil, "a shipped agent's files are Apogee's")
     }
@@ -69,7 +69,7 @@ struct LibraryViewModelTests {
             let answer = try #require(model.pendingDelete)
             model.pendingDelete = nil
             await model.confirmDelete(answer, purge: purge)
-            #expect(runner.calls.contains("run agents|delete|triage|\(purge ? "--purge" : "--keep-files")"))
+            #expect(runner.calls.contains("run agents|delete|\(purge ? "--purge" : "--keep-files")|--|triage"))
         }
     }
 
@@ -85,7 +85,7 @@ struct LibraryViewModelTests {
         model.pendingDelete = nil
         let lists = runner.calls.filter { $0 == "read symphonies|list" }.count
         await model.confirmDelete(answer)
-        #expect(runner.calls.contains("run symphonies|delete|notes-digest"))
+        #expect(runner.calls.contains("run symphonies|delete|--|notes-digest"))
         #expect(runner.calls.filter { $0 == "read symphonies|list" }.count == lists + 1, "read back")
     }
 
@@ -118,7 +118,7 @@ struct LibraryViewModelTests {
         model.select(model.symphonies.first { $0.name == "critique-revise" }!)
         model.input = "A draft README for the tool."
         model.playIt()
-        #expect(starter.starts == [["symphonies", "play", "critique-revise", "--input", "A draft README for the tool.", "--output-format", "json"]])
+        #expect(starter.starts == [["symphonies", "play", "--input", "A draft README for the tool.", "--output-format", "json", "--", "critique-revise"]])
         job.say(.busy("stage 1/2 critique — asking utility (writer): Below is a draft. Work out what it is meant to do -- from… · 0.0 s"))
         job.say(.said(fixture("symphony-play")))
         job.end()
@@ -163,14 +163,14 @@ struct LibraryViewModelTests {
         await model.refresh()
         #expect(model.servers.first?.state == "connected")
         await model.register(model.presets.first { $0.name == "code-exec" }!, as: "code")
-        #expect(runner.calls.contains("run mcp|create|code|--from|code-exec"))
+        #expect(runner.calls.contains("run mcp|create|--from|code-exec|--|code"))
         await model.setEnabled(model.servers[0], false)
-        #expect(runner.calls.contains("run mcp|disable|code"))
+        #expect(runner.calls.contains("run mcp|disable|--|code"))
         model.selected = "code"
         model.tool = "run_python"
         model.arguments = #"{"code": "print(6 * 7)"}"#
         await model.tryTool()
-        #expect(runner.calls.last == #"run mcp|test|code|run_python|{"code": "print(6 * 7)"}"#)
+        #expect(runner.calls.last == #"run mcp|test|--|code|run_python|{"code": "print(6 * 7)"}"#)
         #expect(model.tried == "42")
     }
 }

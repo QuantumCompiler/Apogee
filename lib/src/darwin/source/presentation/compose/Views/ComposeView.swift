@@ -1,5 +1,6 @@
 import BusinessJobs
 import BusinessMedia
+import BusinessReads
 import PresentationStyles
 import SwiftUI
 
@@ -370,7 +371,7 @@ struct ComposeSheet: View {
                     .foregroundStyle(Palette.textSecondary)
             }
             if let arguments = model.plannedArguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             }
             HStack {
                 Spacer()

@@ -349,7 +349,7 @@ struct RegisterProviderSheet: View {
                 )
                 .textFieldStyle(.roundedBorder)
             }
-            Text("apogee " + model.registration(for: provider, model: modelName).joined(separator: " "))
+            Text("apogee " + Argv.shown(model.registration(for: provider, model: modelName)))
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
                 .textSelection(.enabled)
@@ -380,7 +380,7 @@ struct KeySheet: View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             Text("\(SettingsViewModel.providerName(provider)) API key").font(.apogeeHeading)
             SecureField("Key", text: $key).textFieldStyle(.roundedBorder)
-            Text("apogee auth add \(provider) --stdin -- the key on its input, never on a command line.")
+            Text("apogee " + Argv.shown(SettingsViewModel.addKeyArguments(provider)) + " -- the key on its input, never on a command line.")
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
             HStack {

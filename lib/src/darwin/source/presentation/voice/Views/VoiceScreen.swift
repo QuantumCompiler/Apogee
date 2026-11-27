@@ -1,6 +1,7 @@
 import AVFoundation
 import BusinessJobs
 import BusinessMedia
+import BusinessReads
 import PresentationShell
 import PresentationStyles
 import SwiftUI
@@ -280,7 +281,7 @@ struct SaySheet: View {
                 .font(.apogeeSmall)
                 .foregroundStyle(Palette.textSecondary)
             if let arguments = model.plannedArguments {
-                Text((["apogee"] + arguments).joined(separator: " ")).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
+                Text("apogee " + Argv.shown(arguments)).font(.apogeeCode).foregroundStyle(Palette.textTertiary).textSelection(.enabled)
             }
             HStack {
                 Spacer()

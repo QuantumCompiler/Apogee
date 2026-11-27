@@ -1,3 +1,4 @@
+import BusinessReads
 import BusinessSession
 import PresentationStyles
 import SwiftUI
@@ -108,7 +109,7 @@ struct ExecuteDoorSheet: View {
     private var command: String {
         let launch = library.executeForm.launch(orchestrates: library.canOrchestrate)
         let words = launch.arguments.filter { $0 != "--output-format" && $0 != "--input-format" && $0 != "stream-json" }
-        let line = (["apogee"] + words).joined(separator: " ")
+        let line = "apogee " + Argv.shown(words)
         guard let folder = library.executeForm.folder else { return line }
         return "cd \(folder.path) && \(line)"
     }

@@ -215,30 +215,30 @@ public struct ComposeForm: Sendable, Equatable {
     /// reads it as a flag (`Argv`, GUI 4g); an edit's instruction is
     /// `--edit`'s value, which the binary takes whole.
     public func arguments(output: String, dryRun: Bool = false) -> [String]? {
-        var arguments = ["video", "compose"]
+        var options: [Argv.Option] = []
         let brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         if let from {
             let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !instruction.isEmpty || !redo.isEmpty else { return nil }
-            arguments += ["--from", from]
-            if !instruction.isEmpty { arguments += ["--edit", instruction] }
-            for scene in redo.sorted() { arguments += ["--redo-scene", String(scene)] }
+            options.append(.value("--from", from))
+            if !instruction.isEmpty { options.append(.value("--edit", instruction)) }
+            options += redo.sorted().map { .value("--redo-scene", String($0)) }
         } else {
             guard !brief.isEmpty else { return nil }
         }
-        arguments += ["-o", output]
+        options.append(.value("-o", output))
         if from == nil {
-            if let assets { arguments += ["--assets", assets] }
-            if let music { arguments += ["--music", music] }
-            if !captions { arguments.append("--no-captions") }
+            if let assets { options.append(.value("--assets", assets)) }
+            if let music { options.append(.value("--music", music)) }
+            if !captions { options.append(.flag("--no-captions")) }
             let voiceModel = voiceModel.trimmingCharacters(in: .whitespaces)
-            if !voiceModel.isEmpty { arguments += ["--voice-model", voiceModel] }
+            if !voiceModel.isEmpty { options.append(.value("--voice-model", voiceModel)) }
             let voice = voice.trimmingCharacters(in: .whitespaces)
-            if !voice.isEmpty { arguments += ["--voice", voice] }
+            if !voice.isEmpty { options.append(.value("--voice", voice)) }
             let model = model.trimmingCharacters(in: .whitespaces)
-            if !model.isEmpty { arguments += ["-m", model] }
+            if !model.isEmpty { options.append(.value("-m", model)) }
         }
-        if dryRun { arguments.append("--dry-run") }
-        return from == nil ? arguments + Argv.text(brief) : arguments
+        if dryRun { options.append(.flag("--dry-run")) }
+        return Argv.line(["video", "compose"], options: options, names: from == nil ? [brief] : [])
     }
 }

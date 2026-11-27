@@ -130,11 +130,11 @@ public struct SessionsScreen: View {
             library.current.transcript.turnInFlight
                 ? "Nothing of it is written: switching stops the turn running in it and ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
                 : "Nothing of it is written: switching ends this session's apogee, and the conversation goes with it. Keep it running, or end it?"
-        case .delete(let chat): "apogee chats delete \(chat.id) -- the conversation and its turns are removed, and this can't be undone."
+        case .delete(let chat): "apogee " + Argv.shown(SessionLibraryViewModel.deleteArguments(chat.id)) + " -- the conversation and its turns are removed, and this can't be undone."
         case .compact(let chat):
             library.isOpen(chat) && library.current.isLive
                 ? "Its session compacts it, as /compact does: the history so far is folded into a summary the model carries on from. The turns before it aren't kept word for word."
-                : "apogee chats compact \(chat.id) --yes -- its history is folded into a summary the model carries on from. The turns before it aren't kept word for word, and this can't be undone."
+                : "apogee " + Argv.shown(SessionLibraryViewModel.compactArguments(chat.id)) + " -- its history is folded into a summary the model carries on from. The turns before it aren't kept word for word, and this can't be undone."
         case .forgetRecall: library.forgetRecallMessage
         case nil: ""
         }
@@ -311,7 +311,7 @@ struct ChatInfoSheet: View {
                 }
             }
             .font(.apogeeSmall)
-            Text("apogee chats info \(info.chat.id)\(info.details == nil ? "" : " --output-format json")")
+            Text("apogee " + Argv.shown(info.details == nil ? SessionLibraryViewModel.infoArguments(info.chat.id) : Argv.adding(["--output-format", "json"], to: SessionLibraryViewModel.infoArguments(info.chat.id))))
                 .font(.apogeeCode)
                 .foregroundStyle(Palette.textTertiary)
             HStack {

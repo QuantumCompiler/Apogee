@@ -88,7 +88,7 @@ struct RoleLinesNarratedTests {
     @Test("Delete with its weights and its backend says every role it cleared, in 4e's narration")
     func deleteWithBackendsSaysTheRoles() async throws {
         let (model, runner) = await backends(list: "delete-roles-list", status: "delete-roles-status")
-        runner.commanding(["models", "delete", "Qwen3-8B-4bit"], .done(stdout: recorded("delete-roles-plan", "txt")))
+        runner.commanding(["models", "delete", "--", "Qwen3-8B-4bit"], .done(stdout: recorded("delete-roles-plan", "txt")))
         runner.commanding(["models", "delete", "--yes", "--and-backends", "--", "Qwen3-8B-4bit"], .done(stdout: recorded("delete-roles-and-backends", "txt")))
         await model.askToDelete(try #require(model.rows.first { $0.backend == "Qwen3-8B-4bit" }))
         #expect(model.offersAndBackends, "the plan names the backend")
@@ -125,7 +125,7 @@ struct RoleLinesNarratedTests {
             ("Gemma4-12B", "Gemma4-12B/mlx/7a8b9c0d1e2f"), ("Gemma4-E4B-Assistant", "Gemma4-E4B-Assistant/mlx/4d5e6f708192"),
             ("Gemma4-12B-Assistant", "Gemma4-12B-Assistant/mlx/8192a3b4c5d6"),
         ] {
-            runner.reading(["models", "info", handle], recorded("add-info-\(model)"))
+            runner.reading(["models", "info", "--", handle], recorded("add-info-\(model)"))
         }
         runner.commanding(["config", "scan"], .done(stdout: recorded("add-scan", "txt")))
         let store = StoreViewModel(runner: runner)
@@ -138,8 +138,8 @@ struct RoleLinesNarratedTests {
     func registered(_ runner: ScriptedRunner) {
         runner.reading(["models", "list"], recorded("add-list-after"))
         runner.reading(["models", "list", "--all"], recorded("add-list-all-after"))
-        runner.reading(["models", "info", "Qwen3-8B-4bit"], recorded("add-info-backend-after"))
-        runner.reading(["models", "info", Self.qwenPath], recorded("add-info-path-after"))
+        runner.reading(["models", "info", "--", "Qwen3-8B-4bit"], recorded("add-info-backend-after"))
+        runner.reading(["models", "info", "--", Self.qwenPath], recorded("add-info-path-after"))
     }
 
     @Test("Register on a store with no default says the default it set: the CLI's two lines kept, the toast as before")
@@ -150,7 +150,7 @@ struct RoleLinesNarratedTests {
         let qwen = try #require(store.sets.first { $0.handle == "Qwen3-8B/mlx/1a2b3c4d5e6f" })
         #expect(await eventually { store.infos[qwen.handle] != nil })
         await store.askToRegister(qwen)
-        #expect(store.register?.arguments == ["config", "add-backend", "Qwen3-8B-4bit", "--type", "mlx", "--model-path", Self.qwenPath])
+        #expect(store.register?.arguments == ["config", "add-backend", "--type", "mlx", "--model-path", Self.qwenPath, "--", "Qwen3-8B-4bit"])
         runner.commanding(["config", "add-backend"], .done(stdout: recorded("add-backend-default", "txt")))
         registered(runner)
         await store.registerIt()
@@ -201,7 +201,7 @@ struct RoleLinesNarratedTests {
         store.askToRemoveBackend("Gemma4-12B-4bit")
         runner.commanding(["config", "delete-backend"], .done(stdout: recorded("delete-backend-clears", "txt")))
         try await store.confirm(#require(store.pending))
-        #expect(runner.calls.contains("run config delete-backend Gemma4-12B-4bit"))
+        #expect(runner.calls.contains("run config delete-backend -- Gemma4-12B-4bit"))
         #expect(store.narration?.lines.last == "models.default cleared: it named 'Gemma4-12B-4bit'")
     }
 }

@@ -98,7 +98,7 @@ public final class SettingsViewModel {
         /// add-backend`, the model where its type needs one.
         public func registration(model: String = "") -> [String] {
             let model = model.trimmingCharacters(in: .whitespaces)
-            return ["config", "add-backend", provider, "--type", type] + (model.isEmpty ? [] : ["--model", model])
+            return Argv.line(["config", "add-backend"], options: [.value("--type", type)] + (model.isEmpty ? [] : [.value("--model", model)]), names: [provider])
         }
     }
 
@@ -173,8 +173,8 @@ public final class SettingsViewModel {
     /// Config values read through `config get`: absent is the default.
     public private(set) var webSearch: String?
     public private(set) var recall: String?
-    /// The change running now, in a few words; a change made meanwhile
-    /// waits its turn (GUI 6c).
+    /// The change running now, its line as a person types it (`Argv.shown`,
+    /// GUI M23); a change made meanwhile waits its turn (GUI 6c).
     public private(set) var working: String?
     /// A long fix running now: `check --fix`, `bootstrap`.
     public private(set) var fixing: JobProgress?
@@ -379,7 +379,7 @@ public final class SettingsViewModel {
             allowedHostsUnread = nil
             return
         }
-        switch await runner.command(binary: binary, ["config", "get", AllowedHosts.key]) {
+        switch await runner.command(binary: binary, Argv.line(["config", "get"], names: [AllowedHosts.key])) {
         case .done(let text):
             allowedHosts = AllowedHosts.list(text)
             allowedHostsUnread = nil
@@ -398,7 +398,7 @@ public final class SettingsViewModel {
     private func readServerTools(_ binary: URL) async {
         var read: [String: ServerToolsConsent] = [:]
         for row in backends where ServerTools.held(by: row.backendType) {
-            switch await runner.command(binary: binary, ["config", "get", ServerTools.key(of: row.backend)]) {
+            switch await runner.command(binary: binary, Argv.line(["config", "get"], names: [ServerTools.key(of: row.backend)])) {
             case .done(let text): read[row.backend] = .consented(ServerTools.list(text))
             case let other: read[row.backend] = .unreadable(other.failure ?? "it could not be read")
             }
@@ -488,7 +488,7 @@ public final class SettingsViewModel {
     /// default): `config get` of an unset key prints an empty line and exits
     /// 0, so an empty answer is unset (GUI 6c), as a refusal is.
     private func value(_ binary: URL, _ key: String) async -> String? {
-        if case .done(let text) = await runner.command(binary: binary, ["config", "get", key]) {
+        if case .done(let text) = await runner.command(binary: binary, Argv.line(["config", "get"], names: [key])) {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : value
         }
@@ -506,7 +506,7 @@ public final class SettingsViewModel {
 
     // MARK: - Changing
 
-    /// Stores a provider's key: `auth add <provider> --stdin`, the key on its
+    /// Stores a provider's key: `auth add --stdin -- <provider>`, the key on its
     /// standard input and nowhere else. The key is a parameter, used once and
     /// dropped: nothing here keeps it.
     public func addKey(_ key: String, for provider: String) async {
@@ -514,38 +514,48 @@ public final class SettingsViewModel {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         await change(
-            binary, ["auth", "add", provider, "--stdin"], input: Data((trimmed + "\n").utf8),
+            binary, Self.addKeyArguments(provider), input: Data((trimmed + "\n").utf8),
             done: "\(provider) key saved. It won't be shown again.")
     }
 
-    /// Removes a stored key: `auth clear <provider>`.
+    /// `auth add --stdin -- <provider>`: the provider after `--` (`Argv`,
+    /// GUI M23), the key on standard input and never on the line.
+    public static func addKeyArguments(_ provider: String) -> [String] {
+        Argv.line(["auth", "add"], options: [.flag("--stdin")], names: [provider])
+    }
+
+    /// Removes a stored key: `auth clear -- <provider>`.
     public func removeKey(for provider: String) async {
         guard let binary = binaryURL else { return }
-        await change(binary, ["auth", "clear", provider], done: "\(provider) key removed")
+        await change(binary, Argv.line(["auth", "clear"], names: [provider]), done: "\(provider) key removed")
     }
 
+    /// `config set-permission -- <tool> <level>`.
     public func setPermission(_ tool: String, _ level: String) async {
         guard let binary = binaryURL else { return }
-        await change(binary, ["config", "set-permission", tool, level], done: "\(tool): \(level)")
+        await change(binary, Argv.line(["config", "set-permission"], names: [tool, level]), done: "\(tool): \(level)")
     }
 
-    /// Allows a host: `config add-allowed-host`, its own words the
-    /// confirmation, and the list read back where the binary reads it.
+    /// Allows a host: `config add-allowed-host -- <host>`, the typed host
+    /// trimmed, its own words the confirmation, and the list read back where
+    /// the binary reads it.
     public func allowHost(_ host: String) async {
         guard let binary = binaryURL, !host.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        await change(binary, ["config", "add-allowed-host", host.trimmingCharacters(in: .whitespaces)], done: nil)
+        await change(binary, Argv.line(["config", "add-allowed-host"], names: [host.trimmingCharacters(in: .whitespaces)]), done: nil)
     }
 
-    /// Removes a host: `config delete-allowed-host`, as `allowHost`.
+    /// Removes a host: `config delete-allowed-host -- <host>`, the host as
+    /// the list holds it, byte for byte -- never trimmed, so a listed one
+    /// the CLI keeps with a space is the one removed (GUI M23).
     public func forbidHost(_ host: String) async {
         guard let binary = binaryURL, !host.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        await change(binary, ["config", "delete-allowed-host", host.trimmingCharacters(in: .whitespaces)], done: nil)
+        await change(binary, Argv.line(["config", "delete-allowed-host"], names: [host]), done: nil)
     }
 
-    /// `config set-default-video <pipeline>`, or `off`.
+    /// `config set-default-video -- <pipeline>`, or `off`.
     public func setDefaultVideo(_ pipeline: String?) async {
         guard let binary = binaryURL else { return }
-        await change(binary, ["config", "set-default-video", pipeline ?? "off"], done: nil)
+        await change(binary, Argv.line(["config", "set-default-video"], names: [pipeline ?? "off"]), done: nil)
     }
 
     /// A plain config key (52e's `config set`): the web search address,
@@ -554,7 +564,7 @@ public final class SettingsViewModel {
     /// command.
     public func setConfig(_ key: String, _ value: String) async {
         guard let binary = binaryURL, hasTrack52(), Self.canSet(value) else { return }
-        await change(binary, ["config", "set", key, value], done: "\(key) is \(value)")
+        await change(binary, Argv.line(["config", "set"], names: [key, value]), done: "\(key) is \(value)")
     }
 
     /// Whether `value` can be set: anything but empty or blank -- what the
@@ -609,7 +619,7 @@ public final class SettingsViewModel {
     /// older binary, `config add-backend` as before (4k).
     public func registration(for provider: Provider, model: String = "") -> [String] {
         let model = model.trimmingCharacters(in: .whitespaces)
-        return registersOne && model.isEmpty ? ["providers", "register", provider.provider] : provider.registration(model: model)
+        return registersOne && model.isEmpty ? Argv.line(["providers", "register"], names: [provider.provider]) : provider.registration(model: model)
     }
 
     /// Whether Register can run for `provider` with `model` named: a type
@@ -645,7 +655,7 @@ public final class SettingsViewModel {
 
     /// `providers register <id>`, read as its document, the pane read back.
     private func registerOne(_ binary: URL, _ arguments: [String], title: String) async {
-        working = arguments.prefix(3).joined(separator: " ")
+        working = Argv.shown(arguments)
         let outcome = await runner.read(binary: binary, arguments)
         working = nil
         await refresh()
@@ -689,7 +699,7 @@ public final class SettingsViewModel {
 
     /// One change, made: `change`'s, in its turn.
     private func made(_ binary: URL, _ arguments: [String], input: Data?, done: String?) async -> String? {
-        working = arguments.prefix(3).joined(separator: " ")
+        working = Argv.shown(arguments)
         let outcome = await runner.command(binary: binary, arguments, input: input)
         working = nil
         await refresh()

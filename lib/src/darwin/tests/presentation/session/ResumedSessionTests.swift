@@ -39,7 +39,7 @@ struct ResumedSessionTests {
         let (model, starter) = resumed(reader, sessions: [child])
         model.start()
         #expect(await eventually { starter.openedCount == 1 && reader.calls.count == 1 })
-        #expect(reader.calls == ["read chats show 20261022-182803-f9f6"])
+        #expect(reader.calls == ["read chats show -- 20261022-182803-f9f6"])
         #expect(starter.launches.map(\.resume) == ["20261022-182803-f9f6"])
         child.emit(resumedChatLines[0])
         #expect(await eventually { model.transcript.status == .ready })
@@ -116,7 +116,7 @@ struct ResumedSessionTests {
         second.emit(#"{"type":"session","protocol_version":1,"model":"chatty","next_turn":6}"#)
         #expect(await eventually { model.transcript.status == .ready })
         #expect(model.transcript.items == kept, "its own rows, and no second copy of the earlier turns")
-        #expect(reader.calls == ["read chats show 20261022-182803-f9f6"], "read once, when it opened")
+        #expect(reader.calls == ["read chats show -- 20261022-182803-f9f6"], "read once, when it opened")
     }
 
     @Test("a new chat reads nothing; started again once ended, the conversation it was saved as is read back")

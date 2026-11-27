@@ -27,8 +27,8 @@ struct SettingsParityTests {
         let runner = RuleRunner()
         runner.reading(["models", "list"], recordedText("models-list-server-tools.json"))
         runner.reading(["providers", "scan"], recordedText("providers-scan.json"))
-        runner.when(["config", "get", "backends.claude-api.server_tools"], .done(stdout: recordedText("config-get-server-tools.txt")))
-        runner.when(["config", "get", "backends.gpt.server_tools"], .done(stdout: recordedText("config-get-server-tools-none.txt")))
+        runner.when(["config", "get", "--", "backends.claude-api.server_tools"], .done(stdout: recordedText("config-get-server-tools.txt")))
+        runner.when(["config", "get", "--", "backends.gpt.server_tools"], .done(stdout: recordedText("config-get-server-tools-none.txt")))
         return runner
     }
 
@@ -54,7 +54,7 @@ struct SettingsParityTests {
         runner.reading(["providers", "scan"], recordedText("providers-scan-registered.json"))
         await model.register(claude)
         #expect(model.registering == nil)
-        #expect(runner.calls.contains("run config add-backend claude --type claude-cli"))
+        #expect(runner.calls.contains("run config add-backend --type claude-cli -- claude"))
         #expect(runner.calls.last { $0.hasPrefix("read providers scan") } != nil)
         #expect(model.providers.first { $0.provider == "claude" }?.backend == "backend: claude", "read back")
         #expect(model.providers.first { $0.provider == "claude" }?.registers == false)
@@ -71,7 +71,7 @@ struct SettingsParityTests {
         await model.register(ollama)
         #expect(!runner.calls.contains { $0.hasPrefix("run config add-backend") }, "no model, nothing run")
         await model.register(ollama, model: " llama3.2 ")
-        #expect(runner.calls.contains("run config add-backend ollama --type ollama-cli --model llama3.2"))
+        #expect(runner.calls.contains("run config add-backend --type ollama-cli --model llama3.2 -- ollama"))
         #expect(model.failure?.hasPrefix("apogee config: backend 'claude' already exists") == true)
     }
 
@@ -82,7 +82,7 @@ struct SettingsParityTests {
         await model.connect(binary: Self.binary, version: "0.2.0")
         #expect(model.backends.map(\.backend) == ["claude", "claude-api", "gpt"], "the configured entries; a roster's models are not")
         #expect(runner.calls.filter { $0.hasSuffix(".server_tools") } == [
-            "run config get backends.claude-api.server_tools", "run config get backends.gpt.server_tools",
+            "run config get -- backends.claude-api.server_tools", "run config get -- backends.gpt.server_tools",
         ])
         #expect(model.serverTools["claude-api"] == .consented(["web_search", "code_execution"]))
         #expect(model.serverTools["gpt"] == .consented([]))
@@ -97,7 +97,7 @@ struct SettingsParityTests {
     @Test("a binary before 55g refuses the key: said in its words, never read as none")
     func serverToolsUnreadable() async throws {
         let runner = recorded()
-        runner.when(["config", "get", "backends.claude-api.server_tools"], refused("config-get-server-tools-older.err"))
+        runner.when(["config", "get", "--", "backends.claude-api.server_tools"], refused("config-get-server-tools-older.err"))
         let model = model(runner)
         await model.connect(binary: Self.binary, version: "0.1.9")
         let api = try #require(model.backends.first { $0.backend == "claude-api" })

@@ -11,7 +11,7 @@ enum ReviewPreview {
     static let runner = PreviewRunner(reads: [
         (["review", "targets"], ReviewDocuments.targets),
         (["review", "skills", "list"], ReviewDocuments.skills),
-        (["review", "skills", "show", "security"], ReviewDocuments.skillShow),
+        (ReviewViewModel.showArguments("security"), ReviewDocuments.skillShow),
     ])
 
     /// No sweep targets yet: review-targets.json, its two targets sliced out.
