@@ -160,7 +160,7 @@ struct VideoInstallTests {
         let model = VideoViewModel(starter: jobs, preferences: Preferences(store: MemoryStore()), home: home)
         model.say = { toasts.say($0) }
         model.streams = { true }
-        model.installElsewhere = { true }
+        model.installElsewhere = { "apogee bootstrap" }
         model.connect(binary: Self.binary)
         model.newClip()
         model.form.prompt = "a heron lands on a pier at dusk"
@@ -168,7 +168,7 @@ struct VideoInstallTests {
         first.replay(
             stdout: recordedFixture("business/media/Fixtures/generate-refused-runtime.jsonl"),
             stderr: recordedFixture("business/media/Fixtures/generate-refused-runtime.err"), status: 1, streaming: true)
-        #expect(await eventually { toasts.contain("apogee train setup --with video is already running") })
+        #expect(await eventually { toasts.contain("apogee bootstrap is already running: generate the clip again once it has finished") })
         #expect(model.consent == nil)
     }
 
@@ -184,5 +184,68 @@ struct VideoInstallTests {
         #expect(model.consent == nil)
         #expect(toasts.contain("Not installed. apogee train setup --with video installs it whenever you want it"))
         #expect(jobs.starts.count == 1)
+    }
+
+    // MARK: - GUI 6c: asked when an install starts, not only when offered
+
+    /// The M19 refusal a failed install names its rebuild in.
+    static let unfit = "apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'video' set runs on >=3.10 -- rebuild it on a Python that fits: apogee train setup --rebuild --with video\n"
+    static let rebuild = ["train", "setup", "--rebuild", "--yes", "--with", "video"]
+
+    @Test("a consent raised earlier starts nothing while another install runs: the running command said, the consent kept for later")
+    func consentWaitsForAnotherInstall() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let first = ScriptedJob()
+        let install = ScriptedJob()
+        let jobs = ScriptedJobs([first, install, ScriptedJob()])
+        let toasts = Toasts()
+        let model = await refused(jobs, first, home: home, toasts: toasts)
+        model.installElsewhere = { "apogee train setup" }
+        model.install()
+        #expect(jobs.starts.count == 1, "no second train setup beside the first")
+        #expect(model.consent?.arguments == Self.install)
+        #expect(toasts.said.last == "apogee train setup is already running: press Install again once it has finished")
+        model.installElsewhere = { nil }
+        model.install()
+        #expect(jobs.arguments(1) == Self.install)
+        install.end()
+    }
+
+    @Test("a failed install's rebuild is not offered while another install runs; a rebuild waits for a run on the environment")
+    func rebuildWaits() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let first = ScriptedJob()
+        let install = ScriptedJob()
+        let again = ScriptedJob()
+        let installAgain = ScriptedJob()
+        let jobs = ScriptedJobs([first, install, again, installAgain])
+        let toasts = Toasts()
+        let model = await refused(jobs, first, home: home, toasts: toasts)
+        model.install()
+        model.installElsewhere = { "apogee train setup" }
+        install.replay(stdout: "", stderr: Self.unfit, status: 1, streaming: false)
+        #expect(await eventually { !model.isInstalling && !toasts.said.isEmpty })
+        #expect(model.consent == nil, "no rebuild offered beside another install")
+        #expect(toasts.said.last == "apogee train setup is already running: once it has finished, apogee train setup --rebuild --yes --with video rebuilds the environment")
+        #expect(model.installing?.phase == .failed)
+        // Once it has finished: the clip again, refused, its install asked
+        // and failing as before -- now its rebuild is asked.
+        model.installElsewhere = { nil }
+        model.generate()
+        #expect(jobs.starts.count == 3)
+        again.replay(
+            stdout: recordedFixture("business/media/Fixtures/generate-refused-runtime.jsonl"),
+            stderr: recordedFixture("business/media/Fixtures/generate-refused-runtime.err"), status: 1, streaming: true)
+        #expect(await eventually { model.consent?.arguments == Self.install })
+        model.install()
+        installAgain.replay(stdout: "", stderr: Self.unfit, status: 1, streaming: false)
+        #expect(await eventually { model.consent?.arguments == Self.rebuild })
+        model.usingEnvironment = { "apogee voice say" }
+        model.install()
+        #expect(jobs.starts.count == 4, "nothing moves the environment from under the speech")
+        #expect(model.consent?.arguments == Self.rebuild)
+        #expect(toasts.said.last == "apogee voice say is using Apogee's Python environment: press Rebuild again once it has finished")
     }
 }

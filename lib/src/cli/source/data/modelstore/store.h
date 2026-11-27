@@ -135,6 +135,14 @@ struct WeightsHandle {
 /// quantization made the file from weights in the store (`models/lineage.h`).
 [[nodiscard]] std::optional<WeightsHandle> parse_weights_handle(std::string_view text);
 
+/// `ref` once the stored model `from` is renamed `to` (57i): a handle naming
+/// a set of `from` -- `<from>/<format>/<id>`, what a conversion and a
+/// quantization record their source by -- names the same set under `to`.
+/// Nullopt for anything else: a repository id, a path, another model's
+/// handle.
+[[nodiscard]] std::optional<std::string> renamed_handle(std::string_view ref, std::string_view from,
+                                                        std::string_view to);
+
 // --- paths ---------------------------------------------------------------------------
 
 [[nodiscard]] std::filesystem::path model_dir(const StoreRoots& roots, std::string_view format,

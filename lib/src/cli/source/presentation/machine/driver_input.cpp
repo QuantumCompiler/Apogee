@@ -16,6 +16,9 @@ struct DriverInput::State {
     std::deque<DriverLine> lines;
     /// The driver closed its end and the reader has stopped.
     bool closed = false;
+    /// The session was asked to end (57a): nothing more is handed out,
+    /// whatever the reader still reads.
+    bool ended = false;
     /// The open turn: the last `user` line read whose turn has not ended.
     std::optional<DriverLine> open;
     std::uint64_t next_sequence = 1;
@@ -36,6 +39,9 @@ DriverInput::DriverInput(std::istream& in) : state_{std::make_shared<State>()} {
                 }
                 state->changed.notify_all();
                 continue;
+            }
+            if (state->ended) {
+                continue;  // asked to end: nothing more is handed out
             }
             DriverLine line{std::move(text), {}, 0};
             if (message.kind == DriverMessage::Kind::User) {
@@ -67,8 +73,9 @@ DriverInput::~DriverInput() {
 
 std::optional<DriverLine> DriverInput::next_line() {
     std::unique_lock lock{state_->mutex};
-    state_->changed.wait(lock, [this] { return !state_->lines.empty() || state_->closed; });
-    if (state_->lines.empty()) {
+    state_->changed.wait(
+        lock, [this] { return !state_->lines.empty() || state_->closed || state_->ended; });
+    if (state_->ended || state_->lines.empty()) {
         return std::nullopt;
     }
     DriverLine line = std::move(state_->lines.front());
@@ -82,15 +89,26 @@ std::optional<DriverLine> DriverInput::next_line_in_turn(bool& cancelled) {
     const auto stopped = [this] {
         return state_->open.has_value() && state_->open->turn.stop_requested();
     };
-    state_->changed.wait(lock,
-                         [&] { return !state_->lines.empty() || state_->closed || stopped(); });
-    if (!state_->lines.empty()) {
+    state_->changed.wait(lock, [&] {
+        return !state_->lines.empty() || state_->closed || state_->ended || stopped();
+    });
+    if (!state_->ended && !state_->lines.empty()) {
         DriverLine line = std::move(state_->lines.front());
         state_->lines.pop_front();
         return line;
     }
     cancelled = stopped();
     return std::nullopt;
+}
+
+void DriverInput::end() {
+    const std::lock_guard lock{state_->mutex};
+    state_->ended = true;
+    state_->lines.clear();
+    if (state_->open.has_value()) {
+        state_->open->turn.cancel();
+    }
+    state_->changed.notify_all();
 }
 
 void DriverInput::end_turn(std::uint64_t sequence) {

@@ -30,7 +30,8 @@ struct PreviewRunner: CommandRunning {
 }
 
 /// A job that says what it was given, then keeps running: a run in
-/// progress.
+/// progress -- or, when what it says ends with its end, a run that has
+/// ended.
 final class PreviewJob: JobRunning {
     let updates: AsyncStream<JobUpdate>
     private let continuation: AsyncStream<JobUpdate>.Continuation
@@ -38,6 +39,7 @@ final class PreviewJob: JobRunning {
     init(_ said: [JobUpdate]) {
         (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
         said.forEach { continuation.yield($0) }
+        if case .ended = said.last { continuation.finish() }
     }
 
     func stop(grace: Duration) async {

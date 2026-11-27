@@ -76,6 +76,23 @@ struct EventDecoderTests {
         #expect(event.fields["glow"] == .bool(true))
     }
 
+    @Test("a tool call's state decodes (the CLI's 56a), its target only where it names one")
+    func toolCall() {
+        let pending = EventDecoder.decode(
+            line: #"{"type":"tool_call","id":"call_1","name":"write_file","state":"pending","target":"todo.md","turn":1}"#)
+        #expect(pending.kind == .toolCall(ToolCall(id: "call_1", name: "write_file", state: "pending", target: "todo.md")))
+        #expect(pending.turn == 1)
+        #expect(
+            EventDecoder.decode(line: #"{"type":"tool_call","id":"c2","name":"git_status","state":"done"}"#).kind
+                == .toolCall(ToolCall(id: "c2", name: "git_status", state: "done", target: nil)))
+        // A state a later build adds is kept as written.
+        #expect(
+            EventDecoder.decode(line: #"{"type":"tool_call","id":"c3","name":"x","state":"queued"}"#).kind
+                == .toolCall(ToolCall(id: "c3", name: "x", state: "queued", target: nil)))
+        // One missing what its case needs is kept, as every known type is.
+        #expect(EventDecoder.decode(line: #"{"type":"tool_call","name":"x","state":"done"}"#).kind == .unknown(type: "tool_call"))
+    }
+
     @Test("a known type missing what its case needs is kept as unknown, never guessed at")
     func knownButIncomplete() {
         #expect(EventDecoder.decode(line: #"{"type":"answer_delta","turn":1}"#).kind == .unknown(type: "answer_delta"))

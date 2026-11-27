@@ -96,7 +96,7 @@ struct PipelineCycleTests {
     }
 
     @Test("Run asks first in the TUI's words, then starts train pipeline run --pipeline <name> with its stream, supervised")
-    func runAsksFirst() async {
+    func runAsksFirst() async throws {
         let job = ScriptedJob()
         let (model, _, starter) = await training(jobs: [job])
         model.pending = .runPipeline("skills")
@@ -105,7 +105,7 @@ struct PipelineCycleTests {
         #expect(model.pendingAction == "Start" && model.pending?.isDestructive == false)
         #expect(model.pending?.arguments == ["train", "pipeline", "run", "--pipeline", "skills"])
         #expect(starter.starts.isEmpty, "nothing trains before the person's word")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "pipeline", "run", "--pipeline", "skills", "--output-format", "stream-json"]])
         #expect(starter.streamed == [true])
         #expect(model.isRunning && model.running == "Running skills" && model.live == .pipeline && model.showsLivePipeline)
@@ -118,7 +118,7 @@ struct PipelineCycleTests {
         let job = ScriptedJob()
         let (model, runner, _) = await training(jobs: [job])
         model.pending = .runPipeline("skills")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         let lines = jobStream("train-pipeline-run")
         func through(_ marker: (String) -> Bool) -> ArraySlice<String> {
             let end = lines.firstIndex(where: marker)!
@@ -159,7 +159,7 @@ struct PipelineCycleTests {
         #expect(model.pendingTitle == "Resume \(Self.abortedID) from stage 2, refusals?")
         #expect(model.pendingAction == "Resume")
         #expect(starter.starts.isEmpty)
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "pipeline", "resume", Self.abortedID, "--output-format", "stream-json"]])
         #expect(starter.streamed == [true] && model.showsLivePipeline)
         let lines = jobStream("train-pipeline-resume")
@@ -177,13 +177,13 @@ struct PipelineCycleTests {
     }
 
     @Test("Stop reaches a running pipeline; what passed stays, and Resume is said")
-    func stopped() async {
+    func stopped() async throws {
         let job = ScriptedJob()
         let (model, _, _) = await training(jobs: [job])
         var said: [String] = []
         model.say = { said.append($0) }
         model.pending = .runPipeline("skills")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         say(jobStream("train-pipeline-run-stopped").prefix(4), on: job)
         await model.stop()
         #expect(await eventually { !model.isRunning && !said.isEmpty })
@@ -191,14 +191,14 @@ struct PipelineCycleTests {
     }
 
     @Test("one act at a time: while a pipeline runs, nothing else starts and the cycle's pass isn't offered")
-    func oneAtATime() async {
+    func oneAtATime() async throws {
         let job = ScriptedJob()
         let (model, _, starter) = await training(jobs: [job])
         model.pending = .runPipeline("nightly")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(!model.canRunCycle)
         model.pending = .runCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts.count == 1)
         job.end()
         #expect(await eventually { !model.isRunning && model.canRunCycle })
@@ -242,7 +242,7 @@ struct PipelineCycleTests {
     }
 
     @Test("Run one pass asks first in the TUI's words, then starts train cycle run with its stream; the pass is watched and the history read back")
-    func runOnceConfirmed() async {
+    func runOnceConfirmed() async throws {
         let job = ScriptedJob()
         let (model, runner, starter) = await training(status: "train-status-cycle", cycle: "train-cycle-status-passed", jobs: [job])
         var said: [String] = []
@@ -252,7 +252,7 @@ struct PipelineCycleTests {
         #expect(model.pendingConsequence == "It trains, gates and may promote -- this machine is held until it ends.")
         #expect(model.pendingAction == "Run one pass" && model.pending?.isDestructive == false)
         #expect(starter.starts.isEmpty, "nothing runs before the person's word")
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(starter.starts == [["train", "cycle", "run", "--output-format", "stream-json"]] && starter.streamed == [true])
         #expect(model.live == .cycle && model.cycleHeld && !model.canHaltCycle, "no halt while a pass holds the cycle")
         let lines = jobStream("train-cycle-run-passed")
@@ -269,11 +269,11 @@ struct PipelineCycleTests {
     }
 
     @Test("a failing pass is said in the CLI's words; the halt it left is read back, Resume offered and Run held")
-    func failedPass() async {
+    func failedPass() async throws {
         let job = ScriptedJob()
         let (model, runner, _) = await training(status: "train-status-cycle", cycle: "train-cycle-status-passed", jobs: [job])
         model.pending = .runCycle
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         runner.reading(["train", "status"], fixture("train-status-cycle-halted"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-halted"))
         say(jobStream("train-cycle-run-failed"), on: job)
@@ -286,7 +286,7 @@ struct PipelineCycleTests {
     }
 
     @Test("Halt and Resume ask first, run as their verbs and are read back; their answers said in the CLI's words")
-    func haltAndResume() async {
+    func haltAndResume() async throws {
         let (model, runner, _) = await training(status: "train-status-cycle", cycle: "train-cycle-status-passed")
         var said: [String] = []
         model.say = { said.append($0) }
@@ -298,7 +298,7 @@ struct PipelineCycleTests {
         #expect(!runner.calls.contains("run train|cycle|halt"))
         runner.reading(["train", "status"], fixture("train-status-cycle-halted"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-halted-by-hand"))
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run train|cycle|halt"))
         #expect(said == ["cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle resume'"])
         #expect(model.cycleHalted && model.canResumeCycle && !model.canRunCycle && !model.canHaltCycle, "read back")
@@ -308,18 +308,20 @@ struct PipelineCycleTests {
         #expect(model.pendingTitle == "Resume the training cycle?" && model.pendingAction == "Resume")
         runner.reading(["train", "status"], fixture("train-status-cycle"))
         runner.reading(["train", "cycle", "status"], fixture("train-cycle-status-passed"))
-        await model.confirm()
+        try await model.confirm(#require(model.pending))
         #expect(runner.calls.contains("run train|cycle|resume"))
         #expect(said.last?.hasPrefix("cycle resumed (was halted: ") == true)
         #expect(!model.cycleHalted && model.canRunCycle && model.canHaltCycle)
     }
 
-    @Test("a pass another holds -- the person's scheduler's -- holds Run and Halt back, and says why")
+    @Test("a pass another holds -- the person's scheduler's -- holds Run and Halt back, and says why; an older binary's adds the CLI's remedy for a dead pass's lock")
     func heldElsewhere() async {
         let (model, _, _) = await training(status: "train-status-cycle-active", cycle: "train-cycle-status-active")
         #expect(model.cycle?.active == true && model.cycleHeld)
         #expect(!model.canRunCycle && !model.canHaltCycle && !model.canResumeCycle)
-        #expect(model.cycleHoldText == TrainingViewModel.heldWords)
+        #expect(model.cycleHoldText == TrainingViewModel.heldWords + " " + TrainingViewModel.lockRemedyWords,
+            "recorded before the CLI's 57g, which tells a dead pass's lock from a live one")
+        #expect(model.cycleStateWords == "a pass is running")
     }
 
     @Test("a failed train status is said where the cycle is, and no apogee is the place's empty state")

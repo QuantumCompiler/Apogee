@@ -597,6 +597,36 @@ TEST_CASE("attaching an image again looks at it again, without describing it aga
     CHECK_FALSE(as_it_is->parts.empty());
 }
 
+TEST_CASE("an image a turn cancelled before its loop would have shown is shown on the next",
+          "[commands][attachments][media][cancel][57r]") {
+    // Found reviewing 57r: `for_turn` hands the picture to the turn and
+    // forgets it, so a cancel before the loop -- the message it rode dropped
+    // -- left the chat model never shown it.
+    MediaChat fixture;
+    fixture.chat->sees = true;
+    fixture.write("stop.png");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-media"), fixture.hooks()};
+    REQUIRE(attached.attach("stop.png", fixture.work));
+    attached.settle();
+
+    const apogee::logger::Session before = fixture.session;
+    attached.begin_turn();
+    REQUIRE(attached.for_turn(0, "what is it?", fixture.budget(), 4, {}).inlined.size() == 1);
+    fixture.session = before;
+    attached.abandon_turn();
+    CHECK(attached.describe().front().find("read as it is with your next message") !=
+          std::string::npos);
+
+    const ChatAttachments::Turn next = attached.for_turn(0, "what is it?", fixture.budget(), 4, {});
+    REQUIRE(next.inlined.size() == 1);
+    CHECK(next.inlined.front().name == "stop.png (as it is)");
+    CHECK(next.inlined.front().message == 0);
+    REQUIRE(next.inlined.front().parts.size() == 1);
+    CHECK(next.inlined.front().parts.front().image_url ==
+          "data:image/png;base64," + apogee::agentloop::base64_encode("PNGBYTES"));
+}
+
 TEST_CASE("a chat model that cannot see has its images described by the vision role",
           "[commands][attachments][media]") {
     MediaChat fixture{"  default_vision: eyes\n"};
@@ -1064,6 +1094,107 @@ TEST_CASE("after compaction a folder's map rides the next message, once; trimmed
     attached.after_turn({"proj (map)"});
     CHECK(fixture.heard("the map of proj no longer fits the conversation -- it is left out"));
     CHECK(riding(attached.for_turn(10, "q", fixture.budget(), 4, {}), "proj (map)") == nullptr);
+}
+
+// --- A turn cancelled before its loop (57r) --------------------------------
+
+TEST_CASE("a turn cancelled before its loop leaves its attachments waiting for the next message",
+          "[commands][attachments][map][cancel][57r]") {
+    // Found reviewing 57r: the cancel put the session back -- the anchors
+    // `for_turn` set on the message it dropped gone with it -- while what
+    // waited for that message stayed used up, so a file said to be inlined
+    // whole was only ever searched, and its map never sent.
+    Fixture fixture;
+    fixture.write("proj/a.md", "Pelicans nest on the coast of Peru.\n");
+    fixture.write("proj/b.md", "Brown pelicans nest in colonies.\n");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("proj", fixture.work));
+    attached.settle();
+    const std::string waiting = "inlined with your next message, with a map of its folders";
+    REQUIRE(attached.describe().front().find(waiting) != std::string::npos);
+
+    const apogee::logger::Session before = fixture.session;
+    attached.begin_turn();
+    const ChatAttachments::Turn dropped =
+        attached.for_turn(2, "where do pelicans nest?", fixture.budget(), 4, {});
+    REQUIRE(riding(dropped, "proj") != nullptr);
+    REQUIRE(fixture.session.attachments.front().inline_at == std::optional<std::size_t>{2});
+    // Cancelled before the loop: the session as it was, and so what waited.
+    fixture.session = before;
+    attached.abandon_turn();
+    CHECK_FALSE(attached.retrieves());
+    CHECK(attached.describe().front().find(waiting) != std::string::npos);
+    CHECK_FALSE(fixture.heard("undone"));
+
+    // The turn that is sent -- on message 2 again, the cancelled one never
+    // kept -- carries it whole, its map after it, and searches nothing.
+    const ChatAttachments::Turn next =
+        attached.for_turn(2, "where do pelicans nest?", fixture.budget(), 4, {});
+    REQUIRE(riding(next, "proj") != nullptr);
+    CHECK(riding(next, "proj")->message == 2);
+    CHECK(riding(next, "proj")->text.find("Pelicans nest on the coast of Peru.") !=
+          std::string::npos);
+    REQUIRE(riding(next, "proj (map)") != nullptr);
+    CHECK(riding(next, "proj (map)")->message == 2);
+    CHECK_FALSE(next.retrieved.has_value());
+    CHECK(fixture.session.attachments.front().inline_at == std::optional<std::size_t>{2});
+    CHECK(fixture.session.attachments.front().map_at == std::optional<std::size_t>{2});
+
+    // Abandoned again with no turn begun: nothing changes.
+    attached.abandon_turn();
+    CHECK(attached.describe().front().find(", inlined, with a map of its folders") !=
+          std::string::npos);
+}
+
+TEST_CASE("a compaction a cancelled turn discards is taken back, its attachments where they were",
+          "[commands][attachments][map][cancel][57r]") {
+    Fixture fixture;
+    fixture.write("proj/a.md", "Pelicans nest on the coast of Peru.\n");
+    fixture.write("proj/b.md", "Brown pelicans nest in colonies.\n");
+    ChatAttachments attached{*fixture.harness, fixture.session,
+                             ChatAttachments::index_for("chat-1"), fixture.hooks()};
+    REQUIRE(attached.attach("proj", fixture.work));
+    attached.settle();
+    attached.begin_turn();
+    REQUIRE(riding(attached.for_turn(0, "q", fixture.budget(), 4, {}), "proj") != nullptr);
+    attached.after_turn({});
+
+    // The next turn compacts, says so, and is cancelled before its loop.
+    const apogee::logger::Session before = fixture.session;
+    attached.begin_turn();
+    attached.after_compaction();
+    CHECK(fixture.heard("compaction folded the messages the attachments rode"));
+    CHECK(fixture.heard("the attachments' maps ride your next message again"));
+    fixture.session = before;
+    attached.abandon_turn();
+    // What it said is taken back, once.
+    CHECK(fixture.heard(
+        "the turn's compaction is undone with it -- the attachments are as they were before "
+        "the turn"));
+    CHECK(std::ranges::count_if(fixture.said, [](const std::string& line) {
+              return line.find("undone") != std::string::npos;
+          }) == 1);
+
+    // Where they were: inlined and mapped on message 0, not searched, the map
+    // not moved onto the next message.
+    CHECK_FALSE(attached.retrieves());
+    const ChatAttachments::Turn next = attached.for_turn(2, "q", fixture.budget(), 4, {});
+    REQUIRE(riding(next, "proj") != nullptr);
+    CHECK(riding(next, "proj")->message == 0);
+    REQUIRE(riding(next, "proj (map)") != nullptr);
+    CHECK(riding(next, "proj (map)")->message == 0);
+    CHECK_FALSE(next.retrieved.has_value());
+
+    // A compaction a turn kept says nothing more when the next is abandoned.
+    attached.begin_turn();
+    attached.after_compaction();
+    attached.after_turn({});
+    attached.begin_turn();
+    attached.abandon_turn();
+    CHECK(std::ranges::count_if(fixture.said, [](const std::string& line) {
+              return line.find("undone") != std::string::npos;
+          }) == 1);
 }
 
 TEST_CASE("a map takes its place in the attachment share, and none is drawn on an unknown window",

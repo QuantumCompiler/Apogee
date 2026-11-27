@@ -20,6 +20,7 @@
 
 #include "cli/config_suites.h"
 #include "cli/graph.h"
+#include "cli/helpers.h"
 #include "cli/video_generate.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -27,6 +28,7 @@
 #include "contracts/host.h"
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
+#include "contracts/mcp_serve.h"
 #include "contracts/paths.h"
 #include "contracts/server_tools.h"
 #include "graph/code_languages.h"
@@ -302,6 +304,7 @@ const std::vector<FieldRead>& backend_field_reads() {
         {"idle_unload_seconds",
          [](const BackendConfig& b) { return whole(b.idle_unload_seconds); }},
         {"server_tools", [](const BackendConfig& b) { return one_per_line(b.server_tools); }},
+        {"mcp_serve", [](const BackendConfig& b) { return one_per_line(b.mcp_serve); }},
         {"adapters", [](const BackendConfig& b) { return adapter_lines(b.adapters); }},
         {"draft", [](const BackendConfig& b) { return render(b.draft); }},
         {"draft_block_size", [](const BackendConfig& b) { return whole(b.draft_block_size); }},
@@ -872,27 +875,46 @@ void bind_upgrade(CLI::App& parent, const RootContext& context) {
         "comments that explain it; nothing already there changes");
     cmd->callback([&context]() {
         const std::filesystem::path path = config_path_for(context);
+        const std::string yaml = path.string() +
+                                 " is in the older YAML format -- 'apogee config migrate' converts "
+                                 "it to JSON first; upgrade adds options to a JSON config";
+        const std::string current =
+            path.string() +
+            " is current -- it has every option this release's starter config has\n";
         try {
+            // A first read answers the read-only cases -- a YAML config, a
+            // broken one, one that is current -- and takes no lock.
             const std::string content = harness::read_config_file(path);
             if (!harness::jsonc::looks_like_jsonc(content)) {
-                fail(path.string() +
-                     " is in the older YAML format -- 'apogee config migrate' converts it to "
-                     "JSON first; upgrade adds options to a JSON config");
+                fail(yaml);
             }
             (void)harness::parse_config(content, path.string());
-            const harness::Upgrade upgrade =
-                harness::upgrade_config_text(content, harness::config_template());
-            if (upgrade.added.empty()) {
-                std::cout << path.string()
-                          << " is current -- it has every option this release's starter config "
-                             "has\n";
+            if (harness::upgrade_config_text(content, harness::config_template()).added.empty()) {
+                std::cout << current;
                 return;
             }
-            harness::edit_config_file(path, [&upgrade](std::string_view) { return upgrade.text; });
-            std::cout << "added " << upgrade.added.size()
-                      << (upgrade.added.size() == 1 ? " option" : " options") << " to "
-                      << path.string() << ":\n";
-            for (const std::string& option : upgrade.added) {
+            // What is written is computed from the text read under the lock
+            // (57f): an edit that landed while this waited for it -- a
+            // backend added from Settings or the admin plane -- is upgraded
+            // with the rest, never written over with the first read's text.
+            std::vector<std::string> added;
+            harness::edit_config_file(path, [&yaml, &added](std::string_view locked) {
+                if (!harness::jsonc::looks_like_jsonc(locked)) {
+                    throw ConfigEditError(yaml);
+                }
+                harness::Upgrade upgrade =
+                    harness::upgrade_config_text(locked, harness::config_template());
+                added = std::move(upgrade.added);
+                return std::move(upgrade.text);
+            });
+            if (added.empty()) {
+                // Another upgrade landed first: the file came back as it was.
+                std::cout << current;
+                return;
+            }
+            std::cout << "added " << added.size() << (added.size() == 1 ? " option" : " options")
+                      << " to " << path.string() << ":\n";
+            for (const std::string& option : added) {
                 std::cout << "  " << option << "\n";
             }
         } catch (const ConfigEditError& e) {
@@ -1101,6 +1123,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
     // A comma-separated list of the vendors' server-side tools (47a): the
     // loader refuses a name the entry's vendor does not run.
     static const std::string kServerToolsType = word_list_value(harness::server_tool_names());
+    // The model calls `apogee mcp serve` may make on the entry (54b): the
+    // editor asks the entry's provider whether it may serve one.
+    static const std::string kMcpServeType = word_list_value(harness::mcp_serve_tool_names());
     // One flag per editable field, spelled as `add-backend` spells it.
     const std::vector<FieldFlag> flags{
         {"type", "", "Backend type", types},
@@ -1132,6 +1157,10 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
          "The vendor's own server-side tools this entry may run, comma-separated: "
          "web_search, code_execution -- consent for that vendor to search or run code "
          "under your key, where the host gate cannot see"},
+        {"mcp_serve", kMcpServeType,
+         "The model calls 'apogee mcp serve' may make on this entry for another MCP host, "
+         "comma-separated: complete -- consent for a host to run this model, given only where "
+         "its provider says it is local and unmetered"},
         // 53a: each adapter pinned to the base's weights as they are now.
         {"adapters", kPathValue,
          "LoRA adapters applied over model_path, never merged into it: <path>[:<scale>], "
@@ -1170,8 +1199,9 @@ void bind_set_backend(CLI::App& parent, const RootContext& context) {
         for (const auto& [field, value] : *values) {
             edits.push_back({.field = field, .value = value});
         }
+        const std::filesystem::path path = config_path_for(context);
         const BackendFieldsOutcome outcome =
-            set_backend_fields(config_path_for(context), *name, edits);
+            set_backend_fields(path, *name, edits, provider_metered_probe(path));
         if (!outcome.refusal.empty()) {
             fail(outcome.refusal);
         }
@@ -1375,6 +1405,12 @@ void bind_set_permission(CLI::App& parent, const RootContext& context) {
     auto level = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand(
         "set-permission", "Set what the permission gate does for a tool: ask, allow, or deny");
+    // What a level binds (57o): an MCP tool's level holds even where its
+    // server calls the tool read-only; the native read tools have none.
+    cmd->footer(
+        "A level on an MCP tool (mcp__<server>__<tool>) binds even when its server marks it "
+        "read-only: deny refuses it, ask asks (and so denies under serve), allow runs it. The "
+        "native read tools (read_file, git_status, ...) never ask and take no level.");
     cmd->add_option("tool", *tool, "Tool name, e.g. write_file or run_command")
         ->type_name(kToolValue)
         ->required();

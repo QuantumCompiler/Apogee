@@ -26,6 +26,10 @@ public protocol ChatSession: AnyObject, Sendable {
     func close() async
     /// Ends the session, escalating only as far as it must.
     func stop(grace: Duration) async
+    /// Takes the stop's terminate step now, for a caller that will wait no
+    /// longer -- the app quitting once the grace has passed -- so the child
+    /// is signalled before the caller goes (GUI 6a).
+    func terminateNow() async
     /// Its child's process id, when it has one.
     var processIdentifier: Int32? { get }
 }

@@ -1,13 +1,21 @@
 #include "platform/child_process.h"
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <Availability.h>
+#endif
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -98,6 +106,24 @@ void suppress_sigpipe(int fd) {
     (void)fd;
     static std::once_flag once;
     std::call_once(once, [] { ::signal(SIGPIPE, SIG_IGN); });
+#endif
+}
+
+/// Adds "change into `folder`" to a spawn's actions (56a), by the call the
+/// platform has: POSIX 2024's on a macOS 26 target, where the older `_np`
+/// spelling is deprecated, and that spelling before it and on glibc 2.29 and
+/// later. Elsewhere it fails, and the start is refused saying so.
+[[nodiscard]] int add_chdir(posix_spawn_file_actions_t& actions, const char* folder) {
+#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && \
+    __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000
+    return posix_spawn_file_actions_addchdir(&actions, folder);
+#elif defined(__APPLE__) || \
+    (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29)))
+    return posix_spawn_file_actions_addchdir_np(&actions, folder);
+#else
+    (void)actions;
+    (void)folder;
+    return ENOSYS;
 #endif
 }
 
@@ -212,6 +238,11 @@ public:
 
     [[nodiscard]] std::optional<int> wait_for_exit(std::chrono::milliseconds timeout) override {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
+        // From 1 ms, doubling to 20 (57z): a child that closed its pipes is
+        // usually a moment from being reaped, and a fixed 20 ms first sleep
+        // cost every short-lived child -- each git call a tool makes -- that
+        // much again. A slow one is checked no more often than before.
+        useconds_t pause = 1000;
         for (;;) {
             if (exited()) {
                 return WIFEXITED(exit_status_) ? WEXITSTATUS(exit_status_) : -1;
@@ -222,7 +253,8 @@ public:
             // Polling rather than blocking in waitpid: the caller wants a
             // budget, and SIGCHLD handling would be a process-wide change for
             // one backend's benefit.
-            ::usleep(20 * 1000);
+            ::usleep(pause);
+            pause = std::min<useconds_t>(pause * 2, 20 * 1000);
         }
     }
 
@@ -326,16 +358,133 @@ std::string find_on_path(std::string_view program) {
     return {};
 }
 
+namespace {
+
+/// Bytes of a child's stderr kept for an error message.
+constexpr std::size_t kStderrTail = 8 * 1024;
+
+/// The last line in `tail` with anything on it.
+[[nodiscard]] std::string last_line(std::string_view tail) {
+    while (!tail.empty() && (tail.back() == '\n' || tail.back() == '\r' || tail.back() == ' ')) {
+        tail.remove_suffix(1);
+    }
+    const std::size_t start = tail.find_last_of('\n');
+    return std::string{start == std::string_view::npos ? tail : tail.substr(start + 1)};
+}
+
+}  // namespace
+
+CapturedRun run_captured(const ChildCommand& command, const CapturedLimits& limits,
+                         const std::function<void(std::string_view)>& on_line) {
+    CapturedRun out;
+    const std::string& program = command.program;
+    std::string error;
+    const std::unique_ptr<ChildProcess> child = start_child(command, error);
+    if (child == nullptr) {
+        out.error = "could not start " + program + (error.empty() ? "" : ": " + error);
+        return out;
+    }
+    child->close_stdin();
+
+    const auto deadline = std::chrono::steady_clock::now() + limits.timeout;
+    std::string pending;  // a stderr line not yet ended
+    const auto take_stderr = [&](std::string_view piece) {
+        out.tail += piece;
+        if (out.tail.size() > kStderrTail) {
+            out.tail.erase(0, out.tail.size() - kStderrTail);
+        }
+        if (!on_line) {
+            return;
+        }
+        pending += piece;
+        for (std::size_t end = pending.find('\n'); end != std::string::npos;
+             end = pending.find('\n')) {
+            on_line(std::string_view{pending}.substr(0, end));
+            pending.erase(0, end + 1);
+        }
+    };
+    const auto stop = [&](std::string why) {
+        child->terminate();
+        (void)child->wait_for_exit(std::chrono::seconds{2});
+        out.error = std::move(why);
+    };
+
+    bool out_open = true;
+    bool err_open = true;
+    std::string piece;
+    while (out_open || err_open) {
+        if (limits.stopped && limits.stopped()) {
+            stop("stopped");
+            return out;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            stop(program + " took longer than " +
+                 std::to_string(
+                     std::chrono::duration_cast<std::chrono::seconds>(limits.timeout).count()) +
+                 " seconds");
+            return out;
+        }
+        if (out_open) {
+            switch (child->read_stdout(piece, std::chrono::milliseconds{50})) {
+                case ReadStatus::Data:
+                    out.out += piece;
+                    if (out.out.size() > limits.max_output) {
+                        stop(program + " wrote more than " +
+                             std::to_string(limits.max_output / (1024 * 1024)) + " MB");
+                        return out;
+                    }
+                    break;
+                case ReadStatus::Timeout:
+                    break;
+                case ReadStatus::Eof:
+                case ReadStatus::Error:
+                    out_open = false;
+                    break;
+            }
+        }
+        if (err_open) {
+            switch (child->read_stderr(piece, std::chrono::milliseconds{out_open ? 0 : 50})) {
+                case ReadStatus::Data:
+                    take_stderr(piece);
+                    break;
+                case ReadStatus::Timeout:
+                    break;
+                case ReadStatus::Eof:
+                case ReadStatus::Error:
+                    err_open = false;
+                    break;
+            }
+        }
+    }
+    if (!pending.empty() && on_line) {
+        on_line(pending);
+    }
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    const std::optional<int> status =
+        child->wait_for_exit(std::max(remaining, std::chrono::milliseconds{1000}));
+    if (!status.has_value()) {
+        stop(program + " did not exit");
+        return out;
+    }
+    out.status = status;
+    if (*status != 0) {
+        const std::string said = last_line(out.tail);
+        out.error = program + " failed" + (said.empty() ? "" : ": " + said);
+    }
+    return out;
+}
+
 #if defined(_WIN32)
 
 std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::string& error) {
     (void)command;
-    // A recorded per-item skip, said out loud. The vendor-CLI backends need a
-    // CreateProcess implementation with overlapped I/O on the pipes; until it
-    // exists, refusing with a message beats a silent gap.
-    error =
-        "this build cannot spawn child processes: the vendor-CLI backends have no Windows "
-        "implementation yet. Use a direct-API backend on this platform";
+    // A recorded per-item skip, said out loud. A CreateProcess implementation
+    // with overlapped I/O on the pipes is not written yet; until it exists,
+    // refusing with a message beats a silent gap. Platform-neutral (57k): it
+    // reaches a model's tool and a direct-API turn as well as a vendor CLI,
+    // and the vendor backends say their own advice before they get here.
+    error = "this build cannot start other programs on Windows yet";
     return nullptr;
 }
 
@@ -395,6 +544,16 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
         error = "'" + command.program + "' was not found on PATH";
         return nullptr;
     }
+    if (!command.working_directory.empty()) {
+        // Said here, by name, rather than as the spawn's errno: a folder that
+        // is not there is the caller's to report.
+        std::error_code code;
+        if (!std::filesystem::is_directory(command.working_directory, code)) {
+            error = "could not start '" + resolved + "' in " + command.working_directory +
+                    ": no such folder";
+            return nullptr;
+        }
+    }
 
     // Three pipes: to the child's stdin, from its stdout, from its stderr.
     std::array<int, 2> in{-1, -1};
@@ -439,6 +598,16 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
 #elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
     posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
 #endif
+    // The child's folder (56a), changed into in the child before it runs, so
+    // this process's own folder never moves -- every thread here reads it.
+    if (!command.working_directory.empty() &&
+        add_chdir(actions, command.working_directory.c_str()) != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        posix_spawnattr_destroy(&attributes);
+        error = "could not start '" + resolved + "' in " + command.working_directory +
+                ": this platform cannot start a child in another folder";
+        return nullptr;
+    }
 
     std::vector<std::string> storage;
     storage.push_back(resolved);
@@ -452,15 +621,22 @@ std::unique_ptr<ChildProcess> start_child(const ChildCommand& command, std::stri
     }
     argv.push_back(nullptr);
 
-    // The environment is INHERITED, with only what the caller explicitly added
-    // layered on. Never synthesised: see ChildCommand::extra_environment.
+    // The environment is INHERITED, less only what the caller explicitly
+    // dropped and with only what it explicitly added layered on. Never
+    // synthesised: see ChildCommand::extra_environment.
     std::vector<std::string> env_storage;
     std::vector<char*> envp;
-    if (command.extra_environment.empty()) {
+    if (command.extra_environment.empty() && command.unset_environment.empty()) {
         envp.clear();
     } else {
         for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
-            env_storage.emplace_back(*entry);
+            const std::string_view inherited{*entry};
+            const std::string_view name = inherited.substr(0, inherited.find('='));
+            if (std::ranges::find(command.unset_environment, name) !=
+                command.unset_environment.end()) {
+                continue;
+            }
+            env_storage.emplace_back(inherited);
         }
         for (const auto& [name, value] : command.extra_environment) {
             std::string entry = name;

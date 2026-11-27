@@ -1,0 +1,26 @@
+converting it to F16, quantizing it to Q4_K_M and registering 2 backends
+
+[1/3] convert to F16
+converting /Users/someone/.apogee/models/Llama3.2-1B-Instruct/safetensors/edaba290ce7f to a GGUF (f16, about 2.3 GiB)
+hashing it (2.3 GiB) -- its SHA-256 names its folder in the store
+
+/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41/Llama3.2-1B-Instruct-F16.gguf
+verified: GGUF header parsed -- llama, 1 tensors, 2.3 GiB
+
+[2/3] quantize to Q4_K_M
+hashing it (770 MiB) -- its SHA-256 names its folder in the store
+
+/Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf
+2.3 GiB -> 770 MiB
+
+[3/3] register 2 backends
+registered Llama3.2-1B-Instruct-F16
+registered Llama3.2-1B-Instruct-Q4KM
+
+ready:
+  Llama3.2-1B-Instruct-F16  (a base model: it continues text rather than answering -- to chat, convert its instruction-tuned release)
+  Llama3.2-1B-Instruct-Q4KM  (a base model: it continues text rather than answering -- to chat, convert its instruction-tuned release)
+note: this model has no chat template -- it is a base model, which continues text rather than answering.
+      To chat, convert its instruction-tuned release (often named '-it' or '-Instruct'); a base model is what fine-tuning starts from.
+
+chat with one:  apogee chat -m Llama3.2-1B-Instruct-Q4KM

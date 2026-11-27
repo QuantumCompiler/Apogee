@@ -1,0 +1,5 @@
+already quantized:
+  /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf
+
+Use it by adding a backend:
+  apogee config add-backend <name> --type llamacpp --model-path /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27/Llama3.2-1B-Instruct-Q4KM.gguf

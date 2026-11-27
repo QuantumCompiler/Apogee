@@ -1,0 +1,9 @@
+will remove:
+  /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/3f0c2a9b7e41
+  /Users/someone/.apogee/models/Llama3.2-1B-Instruct/gguf/8d51e6c04a27
+  /Users/someone/.apogee/models/Llama3.2-1B-Instruct/safetensors/edaba290ce7f
+
+backend 'llama3.2-1b-Q4KM' points into this and will stop working until it is repointed.
+the backend entry stays unless you say -- --and-backends removes it with the weights.
+
+re-run with --yes to remove.

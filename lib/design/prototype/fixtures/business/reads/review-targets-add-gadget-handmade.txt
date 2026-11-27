@@ -1,0 +1,2 @@
+added review target 'gadget' to /Users/someone/.apogee/config/config.json
+It is swept by: apogee review sweep (it posts only under --allow-post: post is not granted)

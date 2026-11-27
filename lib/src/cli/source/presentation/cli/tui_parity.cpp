@@ -49,7 +49,10 @@ constexpr std::array kSurfaces{
     ShellSurface{"datasets", View, "Datasets", ShellDoor{.view = "Datasets"}},
     ShellSurface{"agents", View, "Agents (edit stays the $EDITOR's, refused below)",
                  ShellDoor{.view = "Agents"}},
-    ShellSurface{"mcp", View, "MCP", ShellDoor{.view = "MCP"}},
+    // `mcp serve` (54a) is a protocol another MCP host spawns: on the exec
+    // line its stdin is closed, so it ends at once, as a script's would.
+    ShellSurface{"mcp", View, "MCP (serve is the stdio server another host spawns)",
+                 ShellDoor{.view = "MCP"}},
     ShellSurface{"auth", View,
                  "Auth, metadata only (a key is stored at a real prompt: add's secret input "
                  "never enters the shell)",
@@ -80,11 +83,21 @@ constexpr std::array kSurfaces{
                  "the shell stubs' completion protocol -- the exec line's Tab asks the same "
                  "core in-process"},
     ShellSurface{"__mcp-tools", RunnerCovered,
-                 "the MCP stdio server a client spawns -- a protocol, not a page"},
+                 "the hidden alias of mcp serve (54a), kept for hosts registered with it -- a "
+                 "protocol, not a page"},
     ShellSurface{"__machine-schema", RunnerCovered,
                  "the machine protocol's JSON Schema, for a driver to read"},
+    ShellSurface{"__quantize", RunnerCovered,
+                 "one quantization run as a child of models quantize and the register chain "
+                 "(57i), its progress a protocol the parent reads -- the Models view's command "
+                 "is models quantize"},
     // --- carved out: no surface, refused by the exec line ----------------------
     ShellSurface{"serve", CarvedOut, "a server deployment's daemon"},
+    // `acp` (56a) is the agent an ACP host runs over its own stdio; its
+    // registration (56d) is the fields pasted into that host, refused with it.
+    ShellSurface{"acp", CarvedOut,
+                 "run by an agent host such as Xcode over its stdio, never from the shell -- "
+                 "acp registration prints the fields its Add an Agent takes, at a prompt"},
     ShellSurface{"uninstall", CarvedOut, "removes Apogee and its data directory"},
     ShellSurface{"reset", CarvedOut, "resets the data directory to a fresh install"},
 };
@@ -113,6 +126,14 @@ constexpr std::array kRefusals{
     ShellRefusal{"serve",
                  "a daemon the shell would orphan when it closes -- run it at a prompt, or "
                  "under a service manager"},
+    // An agent host's own stdio protocol (56a): the exec line refuses by
+    // word prefix, so a verb added under it is refused with it -- `acp
+    // registration` (56d) among them: its fields are pasted into Xcode, never
+    // used inside the shell.
+    ShellRefusal{"acp",
+                 "speaks the Agent Client Protocol to the host that started it, such as Xcode "
+                 "-- add it there; the fields Xcode's Add an Agent takes print at a prompt "
+                 "(apogee acp registration) and show in the macOS app's Settings › Xcode"},
 };
 
 /// The words a command answers to: each subcommand, and each subcommand with

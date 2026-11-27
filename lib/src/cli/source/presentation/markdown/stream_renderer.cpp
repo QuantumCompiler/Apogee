@@ -3,6 +3,7 @@
 #include <array>
 #include <utility>
 
+#include "ansi/inert.h"
 #include "markdown/inline.h"
 #include "markdown/layout.h"
 
@@ -11,54 +12,11 @@ namespace {
 
 /// Bullets by nesting depth, cycling past the third.
 constexpr std::array<std::string_view, 3> kBullets{"•", "◦", "▪"};
-constexpr std::string_view kReplacement = "\xEF\xBF\xBD";  // U+FFFD
 
 [[nodiscard]] ansi::TextAttributes dim_attributes() {
     ansi::TextAttributes attributes;
     attributes.dim = true;
     return attributes;
-}
-
-/// Tabs expanded to four-column stops, carriage returns dropped, and every
-/// control character -- C0, DEL, C1 -- replaced. A model's output is shown,
-/// never obeyed: an escape sequence in an answer would otherwise drive the
-/// terminal, and a character the width table cannot count breaks the erase
-/// arithmetic the open area depends on.
-[[nodiscard]] std::string clean(std::string_view raw) {
-    std::string out;
-    out.reserve(raw.size());
-    std::size_t column = 0;
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        const auto byte = static_cast<unsigned char>(raw[i]);
-        if (byte == '\r') {
-            continue;
-        }
-        if (byte == '\t') {
-            const std::size_t spaces = 4 - (column % 4);
-            out.append(spaces, ' ');
-            column += spaces;
-            continue;
-        }
-        if (byte < 0x20 || byte == 0x7F) {
-            out += kReplacement;
-            ++column;
-            continue;
-        }
-        if (byte == 0xC2 && i + 1 < raw.size()) {
-            const auto next = static_cast<unsigned char>(raw[i + 1]);
-            if (next >= 0x80 && next <= 0x9F) {
-                out += kReplacement;
-                ++column;
-                ++i;
-                continue;
-            }
-        }
-        out += raw[i];
-        if ((byte & 0xC0U) != 0x80U) {
-            ++column;
-        }
-    }
-    return out;
 }
 
 /// `text` without a UTF-8 sequence cut off at its end. A chunk can end
@@ -414,7 +372,13 @@ bool StreamRenderer::began() const noexcept {
 
 void StreamRenderer::process(State& state, std::string_view raw, std::size_t width,
                              std::vector<Row>& out) const {
-    const std::string text = clean(raw);
+    // Tabs expanded, carriage returns dropped, every other control character
+    // drawn as U+FFFD: a model's output is shown, never obeyed -- an escape
+    // sequence in an answer would otherwise drive the terminal, and a
+    // character the width table cannot count breaks the erase arithmetic the
+    // open area depends on. The one neutraliser (57p), which every other
+    // surface draws through too.
+    const std::string text = ansi::inert_text(raw);
 
     if (state.fence.has_value()) {
         const Fence fence = *state.fence;

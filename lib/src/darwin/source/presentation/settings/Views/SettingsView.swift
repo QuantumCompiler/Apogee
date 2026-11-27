@@ -3,9 +3,14 @@ import PresentationShell
 import PresentationStyles
 import SwiftUI
 
-/// The Settings window: its panes beside their list.
+/// The Settings window: its panes beside their list, and its own toast
+/// (GUI M19) -- every line Settings says while this window is in front.
 public struct SettingsView: View {
     @Bindable private var model: SettingsViewModel
+    /// Whether this window is the active one, the window in front that takes
+    /// the keyboard: told to the view-model on every change, the first
+    /// included, so its lines show here only while the person is here.
+    @Environment(\.appearsActive) private var appearsActive
 
     public init(model: SettingsViewModel) {
         self.model = model
@@ -48,6 +53,7 @@ public struct SettingsView: View {
                     case .backends: BackendsPane(model: model)
                     case .media: MediaPane(model: model)
                     case .permissions: PermissionsPane(model: model)
+                    case .xcode: XcodePane(xcode: model.xcode)
                     }
                 }
                 .padding(Spacing.xl)
@@ -56,6 +62,18 @@ public struct SettingsView: View {
             .background(Palette.window)
         }
         .frame(minWidth: 860, minHeight: 600)
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                ToastView(text: toast.text)
+                    .padding(.bottom, Spacing.xl)
+                    .task(id: toast.id) {
+                        try? await Task.sleep(for: Toast.lifetime)
+                        model.dismissToast(toast.id)
+                    }
+            }
+        }
+        .onChange(of: appearsActive, initial: true) { _, active in model.windowActive(active) }
+        .onDisappear { model.windowClosed() }
         .task { await model.refresh() }
         .task { await model.readChildPath() }
     }
@@ -268,8 +286,15 @@ struct BackendsPane: View {
                 Button("Install runtimes and register providers (bootstrap)") { model.fix(["bootstrap"]) }
             }
             .disabled(model.fixing != nil)
+            // The running fix's busy line, and Stop as the media install
+            // cards stop theirs (GUI 6c); every end gives both buttons back.
             if let fixing = model.fixing {
-                Text(fixing.busy ?? fixing.notices.last ?? "working").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                HStack(spacing: Spacing.s) {
+                    Text(fixing.busy ?? fixing.notices.last ?? "working").font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
+                    Button("Stop") { Task { await model.stopFix() } }
+                        .controlSize(.small)
+                        .disabled(!model.canStopFix)
+                }
             }
         }
     }
@@ -476,7 +501,10 @@ struct PermissionsPane: View {
             } else {
                 HStack {
                     TextField("http://localhost:8888", text: $webSearch).textFieldStyle(.roundedBorder)
+                    // Never an empty address (GUI 6c): clearing it stays a
+                    // console command.
                     Button("Set") { Task { await model.setConfig("tools.search.url", webSearch) } }
+                        .disabled(!SettingsViewModel.canSet(webSearch))
                 }
             }
         }
@@ -542,6 +570,20 @@ struct RecalledList: View {
     let model = SettingsPreview.settings(.backends)
     SettingsView(model: model)
         .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Settings › Xcode after Copy: Copied to the clipboard at the bottom of the window") {
+    let model = SettingsPreview.settings(.xcode, runner: SettingsPreview.xcodeRunner())
+    SettingsView(model: model)
+        .frame(width: 980, height: 760)
+        .task {
+            await SettingsPreview.read(model)
+            await model.xcode.read()
+            // A canvas may not appear active: the preview says it is, as the
+            // window in front would, before the Copy's word.
+            model.windowActive(true)
+            model.xcode.copied()
+        }
 }
 
 #Preview("Apogee not installed") {
@@ -631,11 +673,21 @@ struct RecalledList: View {
     .task { await SettingsPreview.read(model) }
 }
 
-#Preview("Backends: check --fix running") {
+#Preview("Backends: check --fix running, with Stop") {
     let model = SettingsPreview.settings(.backends)
     VStack(alignment: .leading, spacing: Spacing.xl) { BackendsPane(model: model) }
         .padding(Spacing.xl)
         .frame(width: 680)
+        .task {
+            await SettingsPreview.read(model)
+            model.fix(["check", "--fix"])
+        }
+}
+
+#Preview("Backends after a failed check --fix: both buttons back, the CLI's words in red") {
+    let model = SettingsPreview.settings(.backends, jobs: PreviewFailingJobs())
+    SettingsView(model: model)
+        .frame(width: 900, height: 900)
         .task {
             await SettingsPreview.read(model)
             model.fix(["check", "--fix"])
@@ -806,6 +858,14 @@ struct RecalledList: View {
 
 #Preview("Permissions, before 52e: set in the config file") {
     let model = SettingsPreview.settings(.permissions)
+    VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
+        .padding(Spacing.xl)
+        .frame(width: 680)
+        .task { await SettingsPreview.read(model) }
+}
+
+#Preview("Permissions: no web search address yet, said not set, Set off while the field is empty") {
+    let model = SettingsPreview.settings(.permissions, track52: true, runner: SettingsPreview.unsetAddressRunner)
     VStack(alignment: .leading, spacing: Spacing.xl) { PermissionsPane(model: model) }
         .padding(Spacing.xl)
         .frame(width: 680)

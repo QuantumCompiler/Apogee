@@ -7,6 +7,7 @@
 
 #include "agentloop/rag.h"
 #include "agentloop/recall.h"
+#include "ansi/inert.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -136,7 +137,9 @@ void CliReporter::on_tool_status(std::string_view detail) {
     settle_answer();
     thinking_.finish();
     status_.stop_spinner();
-    status_.set(options_.style.tag(ansi::Role::Tool) + " " + std::string{detail});
+    // A line (57p): it can carry what a model chose -- an MCP server's tool
+    // name, the query of a search a vendor ran.
+    status_.set(options_.style.tag(ansi::Role::Tool) + " " + ansi::inert_line(detail));
 }
 
 void CliReporter::on_notice(std::string_view text) {
@@ -201,7 +204,8 @@ void CliReporter::on_todo(const harness::TodoList& todo) {
         return;
     }
     for (const std::string& line : lines) {
-        keep_line(options_.style.dim(line));
+        // The model's own words, each a line (57p).
+        keep_line(options_.style.dim(ansi::inert_line(line)));
     }
 }
 
@@ -240,6 +244,7 @@ void CliReporter::on_answer_start() {
     }
     answer_began_ = false;
     held_.clear();
+    answer_column_ = 0;
 }
 
 void CliReporter::on_answer_token(std::string_view chunk) {
@@ -273,7 +278,12 @@ void CliReporter::on_answer_token(std::string_view chunk) {
     held_ = text.substr(keep);
     text.resize(keep);
     // Straight to stdout, not through the status writer: the answer is the one
-    // thing a pipe must receive, and it must receive nothing else.
+    // thing a pipe must receive, and it must receive nothing else -- as
+    // written. A terminal draws it as text, shown and never obeyed (57p):
+    // an OSC 52 would write the clipboard, a CSI erase what was just shown.
+    if (options_.answer_is_terminal) {
+        text = ansi::inert_text(text, answer_column_);
+    }
     options_.answer_stream->write(text.data(), static_cast<std::streamsize>(text.size()));
     options_.answer_stream->flush();
     emitted_ = true;

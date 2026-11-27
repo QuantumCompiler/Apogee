@@ -71,7 +71,8 @@ private func kinds(of language: String) -> Set<CodeKind> {
 }
 
 /// The recorded fences' spans, every one pinned. The Python is coloured as
-/// the design colours its own (`main.html`'s `.k`, `.s`, `.c`, `.n`, `.f`).
+/// the design colours its own (the design prototype's `styles` code colours,
+/// `.k`, `.s`, `.c`, `.n`, `.f`).
 private let recordedTokens: [(language: String, tokens: [Token])] = [
     ("python", [
         k("async"), k("def"), f("fetch"), n("3"), k("None"), s(#""""Fetch url, retrying a timeout.""""#), k("for"), k("in"),
@@ -261,7 +262,7 @@ private func drawnColours(_ view: some View) -> Set<UInt32> {
 
 @Suite("Code lexer")
 struct CodeLexerTests {
-    @Test("the design's own code -- M8's recorded Python, main.html's answer -- coloured as the design marks it, nothing else")
+    @Test("the design's own code -- M8's recorded Python, the session's answer -- coloured as the design's styles mark it, nothing else")
     func designsAnswer() throws {
         let python = try #require(codeBlocks(MarkdownDocument(parsing: deltas("data/protocol/Fixtures/markdown-answer.jsonl").joined()).blocks).first)
         #expect(python.language == "python")

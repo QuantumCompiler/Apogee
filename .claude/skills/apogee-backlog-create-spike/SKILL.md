@@ -9,13 +9,15 @@ A spike ends as a report: walls with evidence, measurements, a proposed split, a
 
 ## 0. Which application?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md), the GUI's [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md), and the mod's (the Claude plugin) [`lib/documentation/mod/`](../../../lib/documentation/mod/README.md). Resolve which queue this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
-Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
+Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
+
+**Superpowers** ([Superpowers fits the docs-first lifecycle](../../../lib/documentation/assistant/cli/CLAUDE.md#superpowers-fits-the-docs-first-lifecycle)): a spike's conversation may have run through `superpowers:brainstorming`. Its decisions are the user's answers here, and these documents are its written design: nothing goes to `docs/superpowers/specs/`. The brainstorm ends when the documents are placed. Planning and building wait for `/apogee-backlog-execute-item`.
 
 ## 1. Gather the findings
 
@@ -36,23 +38,24 @@ Either way, extract before writing: the wall list with each wall's evidence, eve
 
 Every document follows the backlog README's format and `/apogee-backlog-create-item`'s per-section bar (ground in README/CLAUDE/SPEC/ROADMAP first; kebab-case filename in the target table's subdirectory; link depths per the standing rules). On top of that:
 
-- **Evidence is baked in, with its numbers.** Each document's What/why cites the spike's concrete measurements and `file:line` evidence for the walls *it* closes — "measured, not guessed (date, method)" — so the item builds without this conversation. A measurement that shaped the design appears where it did the shaping.
+- **Evidence is baked in, with its numbers.** Each document's **Evidence** cites the spike's concrete measurements and `file:line` evidence for the walls *it* closes — "measured, not guessed (date, method)" — so the item builds without this conversation. A measurement that shaped the design appears where it did the shaping.
 - **Walls map to items, visibly.** Each document says which walls it removes; a wall one root-cause fix collapses is claimed by exactly one document, and siblings reference it rather than re-owning it.
-- **The user's answers become dated decisions**; recommendations they let stand become `[default: …]` with the recommendation recorded; genuinely user-owned questions still open become `[user]` calls that block that item's build. Nothing the spike settled is reopened — mark it `(consumed decision)` where a sibling owns it.
-- **Gates wire the siblings**: the split's build order becomes 🔒 gates among the new items (name real items, no cycles); an item useful on its own carries no gate just to mirror the narrative.
-- **One Reference pass for the set** — the spike usually found the precedents already (in-house items and seams, external prior art); cite what it found per document, and leave the section out where there is none.
+- **The user's answers become dated Decision-log rows**; recommendations they let stand become `[default]` rows in Open questions with the recommendation in the Answer; genuinely user-owned questions still open become `[user]` rows that block that item's build. Nothing the spike settled is reopened — mark it `(consumed decision)` where a sibling owns it.
+- **Gates wire the siblings**: the split's build order becomes 🔒 gates among the new items (name real items, no cycles), restated in each header's **Blocked by** and **Blocks**; an item useful on its own carries no gate just to mirror the narrative.
+- **One Reference pass for the set** — the spike usually found the precedents already (in-house items and seams, external prior art); cite what it found per document in Technical approach's **Reference.** paragraph, and leave it out where there is none.
 
 ## 4. Place the set and update the docs
 
-1. **Index** (backlog README (`<home>/backlog/README.md`)): one row per document in its table (creating a table and its directory for a first item), ids ascending, gates in the Status cells — and **the track preamble tells the spike's story**: when it ran, what it measured (the headline numbers), how it split, and which calls are recorded where. That paragraph is what lets a future agent trust the documents without the chat.
-2. **ROADMAP.md (`<home>/assistant/ROADMAP.md`)**: the release's section (or Maintenance/Architecture) gains one line per item; a new release section is introduced with the spike summarized the way the existing sections do it.
+1. **Index** (backlog README (`lib/documentation/backlog/<app>/README.md`)): one row per document in its table (creating a table and its directory for a first item), ids ascending, gates in the Status cells — and **the track preamble tells the spike's story**: when it ran, what it measured (the headline numbers), how it split, and which calls are recorded where. That paragraph is what lets a future agent trust the documents without the chat.
+   - **The overview**: [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) gains the set: its rows in the release's section when it is the release in progress, otherwise one Later releases track line, with the counts updated.
+2. **ROADMAP.md (`lib/documentation/assistant/<app>/ROADMAP.md`)**: the release's section (or Maintenance/Architecture) gains one line per item; a new release section is introduced with the spike summarized the way the existing sections do it.
 3. **SPEC.md** only per step 2's rule — the dated revision agreed with the user, nothing else.
 4. **MILESTONES.md is never touched** — unless the spike itself shipped a kept probe or a milestone-recorded run, in which case that record already exists and is only cited, never written here.
 
 ## 5. Validate before reporting
 
-The standard scripted routine, never by eye: rows ↔ documents both ways; Version cells match directories where the table carries them; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
+The standard scripted routine, never by eye: rows ↔ documents both ways; the release overview's rows (or its Later releases line) match the index; Version cells match directories where the table carries them; each document's header (KEY-id H1, Status, Fix version, Blocked by, Blocks, Epic) agrees with its row; every sequence ascends; every gate (including the new sibling gates) names a real pending id; the full relative-link sweep (the two illustrative MILESTONES lines are known false positives); every measurement quoted in a document appears with the same number the report gave.
 
 ## 6. Report
 
-Tell the user: every document's path, id, table position and gate; which walls each one closes; which answers were recorded as decisions, which as defaults; **every `[user]` call across the set** — those are the questions that will block builds later; which docs were updated (index, ROADMAP, SPEC if revised); and the validation results.
+Tell the user: every document's path, id, table position and gate; which walls each one closes; which answers were recorded as decisions, which as defaults; **every `[user]` question across the set** — those are the questions that will block builds later; which docs were updated (index, ROADMAP, SPEC if revised); and the validation results.

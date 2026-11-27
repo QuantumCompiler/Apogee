@@ -661,6 +661,46 @@ TEST_CASE("the longest matching prefix wins in the window table", "[harness][con
     CHECK(apogee::harness::context_window_for("gpt-4.1") == 1047576);
 }
 
+TEST_CASE("the GPT-4 family's windows are each member's own, and an unlisted one is unknown",
+          "[harness][context][57q]") {
+    using apogee::harness::context_window_for;
+    // The bare `gpt-4` row was a prefix: it gave every `gpt-4-…` id 8,192
+    // tokens, gpt-4-turbo's 128,000 among them.
+    for (const char* id :
+         {"gpt-4-turbo", "gpt-4-turbo-2024-04-09", "gpt-4-turbo-preview", "gpt-4-0125-preview",
+          "gpt-4-1106-preview", "gpt-4.5-preview", "GPT-4-Turbo"}) {
+        INFO(id);
+        CHECK(context_window_for(id) == 128000);
+    }
+    CHECK(context_window_for("gpt-4-32k") == 32768);
+    CHECK(context_window_for("gpt-4-32k-0613") == 32768);
+    for (const char* id : {"gpt-4", "gpt-4-0613", "gpt-4-0314"}) {
+        INFO(id);
+        CHECK(context_window_for(id) == 8192);
+    }
+    // Unknown, never 8k: 0 is unknown, never unlimited.
+    CHECK(context_window_for("gpt-4-vision-preview") == 0);
+    CHECK(context_window_for("gpt-4-0613-custom") == 0);
+    CHECK(context_window_for("gpt-4-") == 0);
+    // The rest of the family stands.
+    CHECK(context_window_for("gpt-4o-mini") == 128000);
+    CHECK(context_window_for("gpt-4.1-mini") == 1047576);
+
+    // An entry with no context_size is budgeted at the table's window.
+    const apogee::harness::Config config = apogee::harness::parse_config(R"(
+backends:
+  gpt:
+    type: mock
+    model: gpt-4-turbo
+)",
+                                                                         "<test>");
+    apogee::harness::Harness harness{config};
+    harness.register_provider("gpt", std::make_shared<apogee::backends::MockProvider>(
+                                         apogee::backends::MockProvider::Options{}));
+    harness.use_default_router();
+    CHECK(harness.context_window_for_model("gpt") == 128000);
+}
+
 // ---------------------------------------------------------------------------
 // Preload
 // ---------------------------------------------------------------------------

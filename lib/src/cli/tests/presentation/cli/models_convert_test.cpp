@@ -1,5 +1,8 @@
+#include <CLI/CLI.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
+#include <csignal>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "cli/helpers.h"
+#include "cli/job_stream.h"
 #include "cli/models_pull.h"
 #include "cli/registry.h"
 #include "cli/root.h"
@@ -267,7 +272,8 @@ struct FakeQuantizer {
 
     [[nodiscard]] apogee::commands::Quantizer get() {
         return [this](const std::filesystem::path& input, const std::filesystem::path& output,
-                      std::string_view level, const apogee::models::QuantizeProgress& progress) {
+                      std::string_view level, const apogee::models::QuantizeProgress& progress,
+                      const apogee::harness::CancellationToken& /*cancellation*/) {
             asked.emplace_back(level);
             apogee::models::QuantizeResult result;
             if (level == refuse) {
@@ -709,10 +715,17 @@ TEST_CASE("the chain's flags are checked before anything is fetched or made",
     }
 }
 
-TEST_CASE("the whole chain through the command line, llama.cpp quantizing for real",
+TEST_CASE("the whole chain, llama.cpp quantizing for real in a child of the built binary",
           "[commands][models][convert][register][llama]") {
     if (!apogee::models::quantize_supported()) {
         SKIP("this build has no llama.cpp to quantize with");
+    }
+    // The quantizer runs as a child of the binary's own (57i): here the
+    // built `apogee`, since this test binary has no `__quantize` of its own.
+    const std::filesystem::path binary{APOGEE_EXECUTABLE};
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(binary, missing)) {
+        SKIP("this build made no apogee executable to quantize in");
     }
     // The converter's output is a model llama.cpp can quantize: 2 KiB, built
     // here -- the real quantizer, and nothing downloaded.
@@ -721,7 +734,30 @@ TEST_CASE("the whole chain through the command line, llama.cpp quantizing for re
     write_file(home.home / "fixtures" / "model.gguf", apogee::testing::quantizable_gguf());
     const std::string pristine = read_file(home.config_path);
     std::string out;
-    REQUIRE(home.run({"models", "convert", "org--text", "--register-with", "q4_k_m"}, &out) == 0);
+    {
+        const std::ostringstream captured;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        bool ok = true;
+        try {
+            apogee::commands::run_register_chain(
+                RegisterChainRequest{.roots = home.roots,
+                                     .config_path = home.config_path,
+                                     .pull_ref = {},
+                                     .snapshot = "org--text",
+                                     .snapshot_from = {},
+                                     .levels = apogee::commands::register_levels({"q4_k_m"}),
+                                     .base_name = {}},
+                ChainTools{.quantize = apogee::commands::child_quantizer(binary)});
+        } catch (...) {
+            ok = false;
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        out = captured.str();
+        INFO(out);
+        REQUIRE(ok);
+    }
     INFO(out);
     CHECK(out.find("[2/3] quantize to Q4_K_M") != std::string::npos);
     CHECK(out.find("llama_model_loader") == std::string::npos);
@@ -733,4 +769,326 @@ TEST_CASE("the whole chain through the command line, llama.cpp quantizing for re
                      {{"text-F16", "--type", "llamacpp", "--model-path", f16.file.string()},
                       {"text-Q4KM", "--type", "llamacpp", "--model-path", q4.file.string()}}));
 }
+
+// ---- a stop in any stage, the quantizer's above all (57i) --------------------
+
+namespace {
+
+using apogee::commands::JobStream;
+
+/// A quantizer met by a Ctrl-C halfway through its tensors -- the SIGINT a
+/// person's terminal or the GUI's Stop sends, raised in this process -- that
+/// then honors its token as the child-run quantizer does: stopped, its
+/// partial output left for the caller to remove.
+[[nodiscard]] apogee::commands::Quantizer interrupted_quantizer() {
+    return [](const std::filesystem::path& /*input*/, const std::filesystem::path& output,
+              std::string_view /*level*/, const apogee::models::QuantizeProgress& progress,
+              const apogee::harness::CancellationToken& cancellation) {
+        write_file(output, "half a quantized model");
+        if (progress) {
+            progress(1, 2);
+        }
+        (void)std::raise(SIGINT);
+        apogee::models::QuantizeResult result;
+        if (cancellation.stop_requested()) {
+            result.stopped = true;
+            result.error = "stopped";
+            return result;
+        }
+        result.ok = true;  // reached only if the SIGINT went unheard
+        return result;
+    };
+}
+
+/// A stdout that raises SIGINT the first time `trigger` is written to it:
+/// a stop arriving inside a stage that runs no closure of the test's.
+class RaisingBuffer final : public std::stringbuf {
+public:
+    explicit RaisingBuffer(std::string trigger) : trigger_{std::move(trigger)} {}
+
+protected:
+    std::streamsize xsputn(const char* text, std::streamsize count) override {
+        const std::streamsize wrote = std::stringbuf::xsputn(text, count);
+        check();
+        return wrote;
+    }
+
+    int_type overflow(int_type c) override {
+        const int_type wrote = std::stringbuf::overflow(c);
+        check();
+        return wrote;
+    }
+
+private:
+    void check() {
+        if (!raised_ && str().find(trigger_) != std::string::npos) {
+            raised_ = true;
+            (void)std::raise(SIGINT);
+        }
+    }
+
+    std::string trigger_;
+    bool raised_ = false;
+};
+
+/// What a chain ended with: its exit code, stdout and stderr.
+struct ChainEnd {
+    int code = 0;
+    std::string out{};
+    std::string err{};
+
+    /// stdout's events, one a line, when the chain streamed.
+    [[nodiscard]] std::vector<nlohmann::json> events() const {
+        std::vector<nlohmann::json> found;
+        std::istringstream in{out};
+        for (std::string line; std::getline(in, line);) {
+            const nlohmann::json event = nlohmann::json::parse(line, nullptr, false);
+            INFO(line);
+            REQUIRE(event.is_object());
+            found.push_back(event);
+        }
+        return found;
+    }
+
+    /// The stream's notices, in order.
+    [[nodiscard]] std::vector<std::string> notices() const {
+        std::vector<std::string> said;
+        for (const nlohmann::json& event : events()) {
+            if (event.at("type") == "notice") {
+                said.push_back(event.at("text").get<std::string>());
+            }
+        }
+        return said;
+    }
+};
+
+/// `convert <snapshot> --register-with <levels>` run with `quantizer`, its
+/// stdout written to `out_buffer` -- under `models pull`'s stream when
+/// `stream`, as `run_pull` frames a chain (52b).
+[[nodiscard]] ChainEnd run_chain_on(const Home& home, const std::vector<std::string>& levels,
+                                    const apogee::commands::Quantizer& quantizer, bool stream,
+                                    std::stringbuf& out_buffer) {
+    const std::ostringstream err;
+    std::streambuf* const old_out = std::cout.rdbuf(&out_buffer);
+    std::streambuf* const old_err = std::cerr.rdbuf(err.rdbuf());
+    ChainEnd ended;
+    const auto chain = [&] {
+        apogee::commands::run_register_chain(RegisterChainRequest{.roots = home.roots,
+                                                                  .config_path = home.config_path,
+                                                                  .pull_ref = {},
+                                                                  .snapshot = "org--text",
+                                                                  .snapshot_from = {},
+                                                                  .levels = levels,
+                                                                  .base_name = {}},
+                                             ChainTools{.quantize = quantizer});
+    };
+    try {
+        if (stream) {
+            JobStream job{"models pull"};
+            try {
+                chain();
+            } catch (const CLI::RuntimeError&) {
+                job.failed("the pull failed; stderr says why");
+                throw;
+            }
+        } else {
+            chain();
+        }
+    } catch (const CLI::RuntimeError& e) {
+        ended.code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    ended.out = out_buffer.str();
+    ended.err = err.str();
+    return ended;
+}
+
+/// Every `.incoming-*` the store holds: none, once a stop has cleaned up.
+[[nodiscard]] std::vector<std::string> staging_left(const Home& home) {
+    std::vector<std::string> out;
+    std::error_code code;
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(home.roots.models, code)) {
+        if (entry.path().filename().string().starts_with(".incoming-")) {
+            out.push_back(entry.path().string());
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("a chain Ctrl-C'd mid-quantize exits 130, leaves no staging, and its stream ends on it",
+          "[commands][models][convert][register][interrupt][chain]") {
+    // 57i, finding 1: the quantize stage had no scope, so the SIGINT took the
+    // default action -- no `error`, no `stopped at`, the partial GGUF left
+    // under `.incoming-*` for `check` to call abandoned.
+    const Home home;
+    home.add_snapshot("org--text", false);
+    const std::string pristine = read_file(home.config_path);
+    std::stringbuf buffer;
+    const ChainEnd ended =
+        run_chain_on(home, {"Q4_K_M"}, interrupted_quantizer(), /*stream=*/true, buffer);
+    INFO(ended.out);
+    INFO(ended.err);
+    CHECK(ended.code == apogee::commands::kCancelled);
+    CHECK(ended.err.find("apogee models: cancelled -- nothing was written") != std::string::npos);
+    const std::vector<nlohmann::json> events = ended.events();
+    REQUIRE(events.size() >= 2);
+    CHECK(events.front().at("type") == "job");
+    // The stream's last line is its `error`; where the chain stopped and the
+    // command that resumes it are said before it.
+    CHECK(events.back() ==
+          nlohmann::json{{"type", "error"}, {"message", "cancelled -- nothing was written"}});
+    const std::vector<std::string> notices = ended.notices();
+    REQUIRE(notices.size() >= 3);
+    CHECK(notices[notices.size() - 3] ==
+          "stopped at [2/3] quantize to Q4_K_M -- what the stages before it made is kept.");
+    CHECK(notices[notices.size() - 2] == "resume with:");
+    CHECK(notices.back() ==
+          "  apogee models convert org--text/safetensors/aaaaaaaaaaaa --register-with Q4_K_M");
+    // The F16 the stage before it made is kept; nothing is staged, nothing
+    // registered.
+    (void)stored_at(home, "org--text", "text-F16.gguf");
+    CHECK(staging_left(home).empty());
+    CHECK(apogee::models::find_abandoned_staging(home.roots).empty());
+    CHECK(read_file(home.config_path) == pristine);
+
+    // As text: the same exit and words on a terminal.
+    const Home text_home;
+    text_home.add_snapshot("org--text", false);
+    std::stringbuf text_buffer;
+    const ChainEnd text =
+        run_chain_on(text_home, {"Q4_K_M"}, interrupted_quantizer(), /*stream=*/false, text_buffer);
+    INFO(text.out);
+    CHECK(text.code == apogee::commands::kCancelled);
+    CHECK(text.err == "apogee models: cancelled -- nothing was written\n");
+    CHECK(text.out.find("stopped at [2/3] quantize to Q4_K_M -- what the stages before it made "
+                        "is kept.\nresume with:\n  apogee models convert "
+                        "org--text/safetensors/aaaaaaaaaaaa --register-with Q4_K_M\n") !=
+          std::string::npos);
+    CHECK(staging_left(text_home).empty());
+}
+
+TEST_CASE("a Ctrl-C inside the register stage stops it there, what it registered said",
+          "[commands][models][convert][register][interrupt][chain]") {
+    // The stop arrives as the first backend is registered: the second is
+    // never added, the chain says where it stopped, and the stream ends on
+    // the cancel. The resume registers the rest and nothing twice.
+    const Home home;
+    home.add_snapshot("org--text", false);
+    FakeQuantizer quantizer;
+    RaisingBuffer buffer{"registered text-F16"};
+    const ChainEnd ended = run_chain_on(home, {"Q4_K_M"}, quantizer.get(), /*stream=*/true, buffer);
+    INFO(ended.out);
+    INFO(ended.err);
+    CHECK(ended.code == apogee::commands::kCancelled);
+    const std::string said = "cancelled -- registered text-F16, nothing more";
+    CHECK(ended.err == "apogee models: " + said + "\n");
+    CHECK(ended.events().back() == nlohmann::json{{"type", "error"}, {"message", said}});
+    const std::vector<std::string> notices = ended.notices();
+    REQUIRE(notices.size() >= 3);
+    CHECK(notices[notices.size() - 3] ==
+          "stopped at [3/3] register 2 backends -- what the stages before it made is kept.");
+    const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
+    CHECK(config.backends.contains("text-F16"));
+    CHECK_FALSE(config.backends.contains("text-Q4KM"));
+    CHECK(staging_left(home).empty());
+
+    std::string out;
+    REQUIRE(chain(home, "org--text/safetensors/aaaaaaaaaaaa", {"Q4_K_M"}, quantizer, &out));
+    CHECK(out.find("already registered: text-F16") != std::string::npos);
+    CHECK(out.find("registered text-Q4KM") != std::string::npos);
+}
+
+TEST_CASE("a Ctrl-C between two stages is the next stage's stop, never lost",
+          "[commands][models][convert][register][interrupt][chain]") {
+    // The gap the chain's one scope covers: the SIGINT lands as the register
+    // stage is announced, before it runs. Nothing of it begins, and the stop
+    // is said where it landed.
+    const Home home;
+    home.add_snapshot("org--text", false);
+    const std::string pristine = read_file(home.config_path);
+    FakeQuantizer quantizer;
+    RaisingBuffer buffer{"[3/3] register 2 backends"};
+    const ChainEnd ended =
+        run_chain_on(home, {"Q4_K_M"}, quantizer.get(), /*stream=*/false, buffer);
+    INFO(ended.out);
+    INFO(ended.err);
+    CHECK(ended.code == apogee::commands::kCancelled);
+    CHECK(ended.err == "apogee models: cancelled -- nothing was written\n");
+    CHECK(ended.out.find("stopped at [3/3] register 2 backends") != std::string::npos);
+    CHECK(read_file(home.config_path) == pristine);
+    (void)stored_at(home, "org--text", "text-Q4_K_M.gguf");
+
+    // A SIGINT as the quantizer returns: the stage's hash sees it, and the
+    // finished file is not committed.
+    const Home late_home;
+    late_home.add_snapshot("org--text", false);
+    FakeQuantizer finishing;
+    const apogee::commands::Quantizer inner = finishing.get();
+    const apogee::commands::Quantizer late =
+        [&inner](const std::filesystem::path& input, const std::filesystem::path& output,
+                 std::string_view level, const apogee::models::QuantizeProgress& progress,
+                 const apogee::harness::CancellationToken& cancellation) {
+            apogee::models::QuantizeResult result =
+                inner(input, output, level, progress, cancellation);
+            (void)std::raise(SIGINT);
+            return result;
+        };
+    std::stringbuf late_buffer;
+    const ChainEnd stopped =
+        run_chain_on(late_home, {"Q4_K_M"}, late, /*stream=*/false, late_buffer);
+    INFO(stopped.out);
+    CHECK(stopped.code == apogee::commands::kCancelled);
+    CHECK(stopped.err == "apogee models: cancelled -- nothing was written\n");
+    CHECK(stopped.out.find("stopped at [2/3] quantize to Q4_K_M") != std::string::npos);
+    CHECK(staging_left(late_home).empty());
+    CHECK(apogee::models::list_store_ggufs(late_home.roots, "org--text").size() == 1);
+}
+
+TEST_CASE("models quantize Ctrl-C'd mid-run exits 130 and leaves nothing staged",
+          "[commands][models][quantize][interrupt]") {
+    // The standalone verb reaches the same quantizer (finding 1's second
+    // door): its run under one scope, the stop said as a stopped hash's is.
+    const Home home;
+    home.add_snapshot("org--text", false);
+    FakeQuantizer quantizer;
+    std::string out;
+    REQUIRE(chain(home, "org--text", {}, quantizer, &out));  // the F16 alone
+    const auto f16 = stored_at(home, "org--text", "text-F16.gguf");
+    const std::ostringstream captured_out;
+    const std::ostringstream captured_err;
+    std::streambuf* const old_out = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* const old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    int code = 0;
+    try {
+        apogee::commands::run_quantize({.roots = home.roots,
+                                        .model = "org--text/gguf/" + f16.id,
+                                        .from = {},
+                                        .type = "Q4_K_M"},
+                                       interrupted_quantizer());
+    } catch (const CLI::RuntimeError& e) {
+        code = e.get_exit_code();
+    }
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    INFO(captured_out.str());
+    CHECK(code == apogee::commands::kCancelled);
+    CHECK(captured_err.str() == "apogee models: cancelled -- nothing was written\n");
+    CHECK(staging_left(home).empty());
+    CHECK(apogee::models::list_store_ggufs(home.roots, "org--text").size() == 1);
+
+    // Run again unstopped, the same verb makes it.
+    std::streambuf* const again_out = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* const again_err = std::cerr.rdbuf(captured_err.rdbuf());
+    CHECK_NOTHROW(apogee::commands::run_quantize(
+        {.roots = home.roots, .model = "org--text/gguf/" + f16.id, .from = {}, .type = "Q4_K_M"},
+        quantizer.get()));
+    std::cout.rdbuf(again_out);
+    std::cerr.rdbuf(again_err);
+    (void)stored_at(home, "org--text", "text-Q4_K_M.gguf");
+}
+
 #endif

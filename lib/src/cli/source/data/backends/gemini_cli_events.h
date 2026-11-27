@@ -45,6 +45,27 @@
 /// single field and inventing a second vocabulary for it would leak this CLI's
 /// routing into the harness.
 ///
+/// ## How it fails (57b, read from 0.46.0's own source)
+///
+/// ```jsonl
+/// {"type":"result","status":"error","error":{"type":"QuotaError","message":"…"},"stats":{…}}
+/// {"type":"error","severity":"warning","message":"Loop detected, stopping execution"}
+/// {"type":"error","severity":"error","message":"Maximum session turns exceeded"}
+/// ```
+///
+/// **A fatal error is a result.** Every fatal error under stream-json ends in
+/// a `result` whose `status` is `error` and whose `error` object says why;
+/// the failure's detail is that message, its `type` only when there is no
+/// message (and in `describe` either way), so a quota, a login or a turn limit
+/// reads in the CLI's own words, never `reported an error: error`. A result
+/// with neither leaves the detail empty, for the exit status and stderr.
+///
+/// **An `error` event may be a warning.** `severity: "warning"` (a loop
+/// stopped, an agent's execution blocked) comes before a result that
+/// succeeded: it is a `Notice` of kind `warning`, said to the person, and the
+/// turn stands on its result. `severity: "error"`, or none (the older shape),
+/// fails the turn.
+///
 /// The two family survival rules hold as everywhere: an unknown `type` is
 /// dropped rather than fatal, so a CLI upgrade is not an outage; and a
 /// malformed line costs one event, not the turn.

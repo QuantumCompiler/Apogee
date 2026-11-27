@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -57,16 +58,24 @@ enum ExitCode : int {
     kBackendError = 2,
     /// Interrupted. 130 is the shell convention for SIGINT.
     kCancelled = 130,
+    /// Stopped by SIGTERM (57g) -- a scheduler's stop, launchd unloading a
+    /// job: 128 + 15, as a shell reports a process SIGTERM ended, and the
+    /// full-screen shell's convention. A command cancels on it as on Ctrl-C.
+    kTerminated = 143,
 };
 
 /// The built-in tool set behind `--tools` on every surface.
 ///
-/// `fetch_url` only, for now. Web search comes from the provider's own
-/// server-side tool (`--search`), not a local one -- see the decision recorded
-/// on the complete item. Native filesystem toolsets and MCP register here
-/// later. **One function, three callers**: `complete`, `chat`, and `serve`
-/// build the same registry, so a tool added here reaches every surface at
-/// once rather than the one someone remembered to edit.
+/// `fetch_url`; `web_search` where `tools.search` names an instance (25e);
+/// every native toolset `tools.disabled` leaves on (files under
+/// `tools.fs_root`, shell, git, notes, rag, graph -- shell and git only where
+/// this build can start programs, 57k); then every enabled MCP server,
+/// dialled and namespaced; all under the agent's tool policy. A surface adds
+/// its own beside them (the session todo, `delegate`). **One function, three
+/// callers**: `complete`, `chat`, and `serve` build the same registry, so a
+/// tool added here reaches every surface at once rather than the one someone
+/// remembered to edit -- and `serve` says the registry it built on startup
+/// (57n), never a narrower set.
 /// What the built-in registry is built from.
 struct BuiltInToolOptions {
     /// `permissions:` and `tools:`; null means every default.
@@ -83,7 +92,8 @@ struct BuiltInToolOptions {
     /// declare no `writes` -- MCP tools included, which are read-only exactly
     /// when their server said so. An `outbound` tool stays, gated per
     /// website: with nobody to ask it reaches only `tools.allowed_hosts`, so a
-    /// non-interactive run still never blocks. `None` builds nothing and
+    /// non-interactive run still never blocks -- as do the git tools, whose
+    /// review fetch asks about the website it would reach (57x). `None` builds nothing and
     /// dials no server. `All` is every tool, under the gate, as `chat` has it.
     harness::AgentToolPolicy policy = harness::AgentToolPolicy::All;
     /// Which `mcp_servers:` entries to connect: null means every enabled one
@@ -107,7 +117,40 @@ struct BuiltInToolOptions {
     std::function<std::unique_ptr<mcp::Transport>(const mcp::ServerSpec&, mcp::StderrTail::Sink,
                                                   std::string&)>
         mcp_spawn{};
+
+    /// The stdio servers an ACP host handed this session (56b), as the host
+    /// named them: this session's alone, never written to the config. They
+    /// join the config's entries in the one `connect_all` -- after them, on
+    /// `mcp`, under the same bound -- through `session_mcp_specs`'s rules,
+    /// so a host's server connects even when the config lists none.
+    std::vector<mcp::ServerSpec> session_mcp_servers{};
+    /// The bound on each server's connect and handshake; unset, the
+    /// registry's own (20 s).
+    std::optional<std::chrono::milliseconds> mcp_connect_timeout{};
 };
+
+/// The servers a session connects (56b): `configured` -- the config's
+/// entries, as the agent's list chose them -- then `hosted`, the ACP host's.
+///
+/// - **Names.** Each host name is made a server name by `mcp create`'s rule
+///   (`scaffold::sanitize_server_name`: `.` and `:` become `-`; anything but
+///   letters, digits, `_` and `-`, or a `__`, refused): one it refuses is
+///   skipped, and so is a second host server of one name.
+/// - **Displacement.** A host server displaces, for this session only, every
+///   config entry that shares its name (case-insensitively, as config
+///   compares names) or its command and arguments -- a bare command found on
+///   PATH by `find_on_path` first, and both commands compared in one form
+///   (`lexically_normal`, generic separators): the host's copy carries the
+///   session's own binding (Xcode's `MCP_XCODE_SESSION_ID`), and two of one
+///   server would offer the model every tool twice.
+///
+/// So no two servers share a name, and no tool is registered twice. What it
+/// skipped or displaced goes to `said`, one `[mcp] warning:` line each --
+/// naming servers, never an env value.
+[[nodiscard]] std::vector<mcp::ServerSpec> session_mcp_specs(
+    std::vector<mcp::ServerSpec> configured, const std::vector<mcp::ServerSpec>& hosted,
+    const std::function<std::string(std::string_view)>& find_on_path,
+    std::vector<std::string>& said);
 
 /// The status callback for an interactive surface: progress repaints the one
 /// transient line, a warning stays -- a server that failed to connect is
@@ -181,19 +224,6 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 /// The suites `config` has, joined for a message: "a, b", or a pointer to
 /// `config add-suite` when it has none.
 [[nodiscard]] std::string known_suites(const harness::Config& config);
-
-/// Why the backend a run names with `-m` cannot answer it, or empty when it
-/// can or none was named (M29) -- asked by `complete`, `chat` and `execute`
-/// before anything is routed. `name` is as the router will be asked it: a
-/// backend key or an entry's `model:` (`configured_backend_key`). A name the
-/// config defines nowhere is refused by name, with the ones it does; one it
-/// defines that did not start, with that backend's own reason in the router's
-/// words (M26) and the backends that did start -- never every backend's
-/// problem. Asked first because the router answers an explicit name it cannot
-/// serve from the default: the wrong model, under the name asked for.
-[[nodiscard]] std::string named_backend_refusal(const harness::Config& config,
-                                                const backends::BuildResult& built,
-                                                std::string_view name);
 
 /// `registry` narrowed to the tools of `toolset` -- words of
 /// `harness::suite_toolset_names()` (27d). An empty list keeps none.
@@ -280,6 +310,13 @@ void add_read_format(CLI::App* command, const std::shared_ptr<ReadFormat>& forma
 /// assertions -- which is exactly what the first version of that test did.
 [[nodiscard]] std::string media_refusal_message(const std::string& model, harness::Medium medium,
                                                 std::string_view helper = {});
+
+/// A model's answer as a command prints it to stdout (57p): at a terminal,
+/// drawn as text -- an escape sequence in it shown, never obeyed -- and to a
+/// pipe or a file, the bytes as written. `analyze`'s report and `symphonies
+/// play`'s output print through it; what a command saves keeps the true
+/// bytes either way.
+[[nodiscard]] std::string answer_for_stdout(std::string_view answer, bool stdout_is_terminal);
 
 /// Builds the message list for a one-shot turn.
 ///

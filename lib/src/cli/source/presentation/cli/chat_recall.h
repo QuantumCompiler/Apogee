@@ -82,7 +82,9 @@ RecallHoldings forget_all_recall();
                                             std::string_view conversation, std::string& reason);
 
 /// Summarises `session` into the index and removes its marker. Returns the
-/// line to say: what was kept, or why nothing was.
+/// line to say: what was kept, or why nothing was -- or nothing at all for a
+/// chat deleted while it was summarised (57a), whose summary is never left in
+/// the index.
 [[nodiscard]] std::string summarise_for_recall(const harness::Harness& harness,
                                                const harness::Config& config,
                                                const logger::Session& session,
@@ -130,8 +132,11 @@ public:
     /// (`share_used`): past chats first, then recorded decisions from the
     /// knowledge collection -- unless that is the collection `auto_rag`
     /// already searched -- at most `agentloop::kRecallItems` in all.
+    /// `cancellation` is the turn's (57r): it reaches both searches'
+    /// embedding, and a cancel goes on up as `CancelledError`.
     [[nodiscard]] Recalled for_turn(const std::string& query, const agentloop::TurnBudget& budget,
                                     std::int64_t share_used, std::string_view rag_collection,
+                                    const harness::CancellationToken& cancellation,
                                     const agentloop::SideCallSink& on_side_call = {});
 
     /// After each turn: a chat that has become due is marked as this

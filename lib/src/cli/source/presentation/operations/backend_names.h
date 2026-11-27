@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/factory.h"
 #include "contracts/config.h"
 #include "harness/roles.h"
 
@@ -47,6 +48,24 @@ namespace apogee::commands {
 /// it serves is a set of keys.
 [[nodiscard]] std::string configured_backend_key(const harness::Config& config,
                                                  std::string_view model);
+
+/// Why the backend a session or a run opens on cannot answer it, or empty when
+/// it can or none was named (M29) -- asked before anything is routed, because
+/// the router answers a name it cannot serve from the default: the wrong
+/// model, under the name asked for. `name` is as the router will be asked it:
+/// a backend key or an entry's `model:` (`configured_backend_key`). A name the
+/// config defines nowhere is refused by name, with the ones it does; one it
+/// defines that did not start (`built`, the factory's result), with that
+/// backend's own reason in the router's words (M26) and the backends that did
+/// start -- never every backend's problem. One message, whoever asks: `-m` at
+/// `complete`, `chat`, `execute` and `task run`; the backend a resumed chat or
+/// task was left on (`task resume`, and since 57d `chat`/`execute --resume`
+/// and `--continue`, each prefixing `<id> cannot resume: `); `/model` and a
+/// driver's `set` mid-session (56a); a served `complete` (54b); and a member
+/// of the active suite (`validate_active_suite` with the build result, 57d).
+[[nodiscard]] std::string named_backend_refusal(const harness::Config& config,
+                                                const backends::BuildResult& built,
+                                                std::string_view name);
 
 /// The roster resolution (M13): what a model name that is neither a backend
 /// key nor an entry's `model:` field means, read from the cached vendor

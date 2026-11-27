@@ -4,15 +4,22 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -21,6 +28,7 @@
 #include "cli/chat_attachments.h"
 #include "cli/chat_history.h"
 #include "cli/chat_recall.h"
+#include "cli/chat_session.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config.h"
@@ -29,7 +37,9 @@
 #include "logger/operational.h"
 #include "logger/session.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
+#include "tools/toolsets.h"
 
 using apogee::commands::ChatAttachments;
 using apogee::commands::format_session_info;
@@ -538,8 +548,10 @@ TEST_CASE("a follow-up's tools are ranked for it restated by the utility model",
     INFO(chat.err);
     CHECK(chat.err.find("tools ranked for, by helper: show the commit history") !=
           std::string::npos);
-    // And the turn's tools are ranked for that restatement.
-    CHECK(chat.err.find("for this question: git_") != std::string::npos);
+    // And the turn's tools are ranked for that restatement -- the git ones,
+    // where this build can start git at all (57k: elsewhere none is offered).
+    CHECK((chat.err.find("for this question: git_") != std::string::npos) ==
+          apogee::tools::ToolsetOptions{}.child_processes);
 }
 
 TEST_CASE("complete with many tools offers the ones its question needs",
@@ -865,6 +877,52 @@ TEST_CASE("compaction moves an inlined attachment to retrieval", "[chat][cli][at
     const apogee::logger::Session session = HelperChat::only_session();
     REQUIRE(session.attachments.size() == 1);
     CHECK_FALSE(session.attachments[0].inline_at.has_value());
+}
+
+namespace {
+
+/// The user text of the turn `chats show` lists `name` on, or empty.
+[[nodiscard]] std::string shown_on(HelperChat& chat, const std::string& chat_id,
+                                   const std::string& name) {
+    if (chat.run({"chats", "show", chat_id, "--output-format", "json"}) != 0) {
+        return {};
+    }
+    const nlohmann::json shown = nlohmann::json::parse(chat.out);
+    for (const nlohmann::json& turn : shown.at("turns")) {
+        for (const nlohmann::json& attachment : turn.at("user").at("attachments")) {
+            if (attachment.at("name") == name) {
+                return turn.at("user").at("text").get<std::string>();
+            }
+        }
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST_CASE("a system prompt added moves the attachments with the messages they ride",
+          "[chat][cli][attachments][doors][57q]") {
+    // The prompt is added at the head (52d), so every message after it moves
+    // by one; the anchors did not, and the file inlined on turn one was
+    // dropped as gone -- "no longer fits" on a 32k window -- and retrieved
+    // for good.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Prompted"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat"}, "/attach " + notes.string() + "\none\n/system Be terse.\ntwo\n") ==
+            0);
+    CHECK(chat.err.find("-- inlined whole") != std::string::npos);
+    CHECK(chat.err.find("no longer fits") == std::string::npos);
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE(session.messages.front().content.plain_text() == "Be terse.");
+    REQUIRE(session.attachments.size() == 1);
+    REQUIRE(session.attachments[0].inline_at.has_value());
+    CHECK(session.messages.at(*session.attachments[0].inline_at).content.plain_text() == "one");
+    // Turn two's request still carried the file on turn one's message.
+    CHECK(replies(session).back().find("The launch code is 7731.") != std::string::npos);
+    CHECK(shown_on(chat, session.chat_id, session.attachments[0].name) == "one");
 }
 
 TEST_CASE("a collection gets what the attachments leave of the retrieval share",
@@ -1405,19 +1463,31 @@ TEST_CASE("complete --allow is the user answering at invocation; without it, den
     CHECK(chat.run({"complete", "--allow", "write_file", "write it"}) != 0);
 }
 
+namespace {
+
+/// A gated tool every chat holds, eleven letters wide as the permission
+/// table's longest names are: `run_command` where this build can start a
+/// program, `delete_note` where it cannot and the shell is not offered (57k).
+[[nodiscard]] std::string_view denied_tool() {
+    return apogee::tools::ToolsetOptions{}.child_processes ? "run_command" : "delete_note";
+}
+
+}  // namespace
+
 TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat and complete",
           "[chat][cli][permissions][presets]") {
     // Each flag is repeatable for real: a second use was refused by the
     // parser ("At Most 1 required but received 2") until 27i.
     HelperChat chat{texts({"fine"}), {"Title"}};
+    const std::string denied{denied_tool()};
     REQUIRE(chat.run({"chat", "--tools", "--allow", "write_file", "--allow", "edit_file", "--deny",
-                      "run_command", "--deny", "example.org", "--allow-host", "docs.python.org",
+                      denied, "--deny", "example.org", "--allow-host", "docs.python.org",
                       "--allow-host", "en.wikipedia.org"},
                      "/permissions\n") == 0);
     const std::string said = chat.out + chat.err;
     CHECK(said.find("write_file   allow  (this session)") != std::string::npos);
     CHECK(said.find("edit_file    allow  (this session)") != std::string::npos);
-    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find(denied + "  deny   (this session)") != std::string::npos);
     CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
     CHECK(said.find("website docs.python.org: allow (this session)") != std::string::npos);
     CHECK(said.find("website en.wikipedia.org: allow (this session)") != std::string::npos);
@@ -1425,8 +1495,8 @@ TEST_CASE("a repeated --allow, --deny or --allow-host is taken whole, on chat an
     HelperChat once{writes_a_file(), {"unused"}};
     sandboxed(once);
     REQUIRE(once.run({"complete", "--tools", "--allow", "edit_file", "--allow", "write_file",
-                      "--deny", "run_command", "--deny", "delete_file", "--allow-host",
-                      "docs.python.org", "--allow-host", "en.wikipedia.org", "write it"}) == 0);
+                      "--deny", denied, "--deny", "delete_file", "--allow-host", "docs.python.org",
+                      "--allow-host", "en.wikipedia.org", "write it"}) == 0);
     CHECK(std::filesystem::exists(once.home.path() / "work" / "out.txt"));
 }
 
@@ -1536,23 +1606,70 @@ TEST_CASE("machine mode takes the permission mode at launch, asking nothing it c
     CHECK_FALSE(std::filesystem::exists(chat.home.path() / "work" / "out.txt"));
 }
 
+TEST_CASE("a chat's --deny, /deny and /revoke take every host --allow-host takes, IPv6 too",
+          "[chat][cli][permissions][presets][57o]") {
+    // The sweep (57o): `--deny localhost`, `[::1]`, `::1` and `intranet` were
+    // refused as "not a tool this chat asks about" while `--allow-host`
+    // took them, so a bypass session could not keep the model off a local
+    // service, and a localhost yes could not be taken back.
+    const nlohmann::json fetches_localhost = nlohmann::json::array(
+        {{{"tool_calls",
+           {{{"name", "fetch_url"}, {"arguments", {{"url", "http://localhost:9/status"}}}}}}},
+         {{"text", "{{last_tool_result}}"}}});
+    HelperChat chat{fetches_localhost, {"Title"}};
+    for (const auto& [given, canonical] :
+         std::vector<std::pair<std::string, std::string>>{{"localhost", "localhost"},
+                                                          {"[::1]", "::1"},
+                                                          {"::1", "::1"},
+                                                          {"intranet", "intranet"}}) {
+        INFO(given);
+        REQUIRE(chat.run({"chat", "--tools", "--deny", given}, "/permissions\n") == 0);
+        CHECK((chat.out + chat.err).find("website " + canonical + ": deny (this session)") !=
+              std::string::npos);
+    }
+
+    // In bypass mode, where nothing asks, the session's no still refuses --
+    // unrun, the model told so.
+    REQUIRE(chat.run({"chat", "--tools", "--allow-bypass", "--deny", "localhost"},
+                     "/permission-mode bypass\nfetch it\n") == 0);
+    CHECK((chat.out + chat.err).find("permission to reach localhost was not given") !=
+          std::string::npos);
+
+    // A yes for localhost -- `--allow-host`, as the prompt's `s` gives one --
+    // is taken back by /deny and forgotten by /revoke.
+    REQUIRE(chat.run({"chat", "--tools", "--allow-host", "localhost"},
+                     "/deny localhost\n/permissions\n/allow localhost\n/revoke localhost\n"
+                     "/permissions\n") == 0);
+    const std::string said = chat.out + chat.err;
+    CHECK(said.find("website localhost denied for this chat") != std::string::npos);
+    CHECK(said.find("website localhost: deny (this session)") != std::string::npos);
+    CHECK(said.find("website localhost: asked again from now on") != std::string::npos);
+    CHECK(said.find("is not a tool this chat asks about") == std::string::npos);
+
+    // A tool-shaped typo is still caught as one.
+    CHECK(chat.run({"chat", "--tools", "--deny", "write_flie"}, "") != 0);
+    CHECK((chat.out + chat.err).find("'write_flie' is not a tool this chat asks about") !=
+          std::string::npos);
+}
+
 TEST_CASE("the slash verbs answer for the chat, and /permissions says from where",
           "[chat][cli][permissions][presets]") {
     HelperChat chat{texts({"fine"}), {"Title"}, "", "permissions:\n  delete_file: allow\n"};
+    const std::string denied{denied_tool()};
     // A turn last, so the chat is written to be resumed (M28).
     REQUIRE(chat.run({"chat", "--tools", "--deny", "example.org"},
-                     "/allow write_file\n/deny run_command\n/permissions\n/revoke run_command\n"
-                     "/revoke delete_file\n/allow wrte_file\n/permissions\nhello\n") == 0);
+                     "/allow write_file\n/deny " + denied + "\n/permissions\n/revoke " + denied +
+                         "\n/revoke delete_file\n/allow wrte_file\n/permissions\nhello\n") == 0);
     const std::string said = chat.out + chat.err;
     CHECK(said.find("write_file allowed for this chat") != std::string::npos);
-    CHECK(said.find("run_command denied for this chat") != std::string::npos);
-    CHECK(said.find("run_command  deny   (this session)") != std::string::npos);
+    CHECK(said.find(denied + " denied for this chat") != std::string::npos);
+    CHECK(said.find(denied + "  deny   (this session)") != std::string::npos);
     CHECK(said.find("delete_file  allow  (config)") != std::string::npos);
     CHECK(said.find("website example.org: deny (this session)") != std::string::npos);
-    CHECK(said.find("run_command: asked again from now on") != std::string::npos);
+    CHECK(said.find(denied + ": asked again from now on") != std::string::npos);
     CHECK(said.find("delete_file is the config's answer") != std::string::npos);
     CHECK(said.find("'wrte_file' is not a tool this chat asks about") != std::string::npos);
-    CHECK(said.find("run_command  ask    (default)") != std::string::npos);
+    CHECK(said.find(denied + "  ask    (default)") != std::string::npos);
 
     // Resumed, it starts clean: nothing a session answered survives it.
     const std::string id = HelperChat::only_session().chat_id;
@@ -2179,6 +2296,76 @@ TEST_CASE("a set line moves the run settings from the next turn, as the slash co
     CHECK(typed.params.thinking == driven.params.thinking);
 }
 
+TEST_CASE("the probe's four lines: after a set system line, turn two still sends the file",
+          "[chat][cli][attachments][machine][doors][57q]") {
+    // What the macOS app sends from its settings: an attach, a question, a
+    // `set` line, a question. Turn two once said the file no longer fit.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Driven"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                         R"({"type":"user","text":"one"})" + "\n" +
+                         R"({"type":"set","system":"Be terse."})" + "\n" +
+                         R"({"type":"user","text":"two"})" + "\n") == 0);
+    INFO(chat.out);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(said(notices, "system prompt updated -- from the next turn"));
+    CHECK(std::ranges::none_of(notices, [](const std::string& line) {
+        return line.find("no longer fits") != std::string::npos;
+    }));
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(replies(session).back().find("The launch code is 7731.") != std::string::npos);
+    REQUIRE(session.attachments.size() == 1);
+    CHECK(shown_on(chat, session.chat_id, session.attachments[0].name) == "one");
+}
+
+TEST_CASE("a system prompt cleared moves a file and a folder's map back with their messages",
+          "[chat][cli][attachments][machine][doors][map][57q]") {
+    // The other head edit: a prompt taken out moves every message after it
+    // back by one, and the anchors with them.
+    HelperChat chat{
+        texts({"one", "two sent: {{first_user}}"}), {"Cleared"}, "    context_size: 32768\n"};
+    const std::filesystem::path notes = chat.home.path() / "notes.txt";
+    std::ofstream{notes, std::ios::binary} << "The launch code is 7731.\n";
+    const std::filesystem::path proj = chat.home.path() / "proj";
+    std::filesystem::create_directories(proj / "docs");
+    std::filesystem::create_directories(proj / "notes");
+    std::ofstream{proj / "docs" / "guide.md"} << "the guide\n";
+    std::ofstream{proj / "notes" / "todo.md"} << "the list\n";
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--system", "Be terse.", "--input-format", "stream-json",
+                      "--output-format", "stream-json"},
+                     R"({"type":"attach","path":")" + notes.generic_string() + "\"}\n" +
+                         R"({"type":"attach","path":")" + proj.generic_string() + "\"}\n" +
+                         R"({"type":"user","text":"one"})" + "\n" +
+                         R"({"type":"set","system":""})" + "\n" +
+                         R"({"type":"user","text":"two"})" + "\n") == 0);
+    INFO(chat.out);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(said(notices, "system prompt updated -- from the next turn"));
+    CHECK(std::ranges::none_of(notices, [](const std::string& line) {
+        return line.find("no longer fits") != std::string::npos;
+    }));
+    const apogee::logger::Session session = HelperChat::only_session();
+    REQUIRE_FALSE(session.messages.empty());
+    CHECK(session.messages.front().role == apogee::harness::Role::User);
+    REQUIRE(session.attachments.size() == 2);
+    for (const apogee::logger::Attachment& attachment : session.attachments) {
+        INFO(attachment.name);
+        const std::optional<std::size_t> at =
+            attachment.inline_at.has_value() ? attachment.inline_at : attachment.map_at;
+        REQUIRE(at.has_value());
+        CHECK(session.messages.at(*at).content.plain_text() == "one");
+        CHECK(shown_on(chat, session.chat_id, attachment.name) == "one");
+    }
+    const std::string sent = replies(session).back();
+    CHECK(sent.find("The launch code is 7731.") != std::string::npos);
+    CHECK(sent.find("--- map of attachment: ") != std::string::npos);
+}
+
 TEST_CASE("a set line names what it refuses and sets nothing; a model moves the next turn",
           "[chat][cli][machine][doors]") {
     HelperChat chat{texts({"chatty answers"}), {"Title", "helper answers"}};
@@ -2191,15 +2378,48 @@ TEST_CASE("a set line names what it refuses and sets nothing; a model moves the 
     const std::vector<std::string> notices = notices_of(driven_events(chat.out));
     CHECK(said(notices,
                "set: 'max_tokens' is not a setting a session moves, as text -- model, system, "
-               "think, effort or temperature; nothing was set"));
+               "think, effort, temperature or permission_mode; nothing was set"));
     CHECK(std::ranges::any_of(notices, [](const std::string& line) {
         return line.starts_with("set effort: not an effort level: 'loud'");
     }));
-    CHECK(said(notices, "set: nothing to set -- model, system, think, effort or temperature"));
+    CHECK(said(notices,
+               "set: nothing to set -- model, system, think, effort, temperature or "
+               "permission_mode"));
     CHECK(said(notices, "switched to helper -- from the next turn"));
     const apogee::logger::Session session = HelperChat::only_session();
     CHECK(session.params.system_prompt.empty());  // the refused line set nothing
     CHECK(session.backend == "helper");
+}
+
+TEST_CASE("a set line moves the permission mode, bypass only where the launch allowed it",
+          "[chat][cli][machine][doors][modes]") {
+    // 56a: `/permission-mode`'s setting through the driver's door -- what an
+    // ACP host's mode menu sends -- in the words --permission-mode takes.
+    HelperChat chat{texts({"one"}), {"Title"}};
+    INFO(chat.err);
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json"},
+                     std::string{R"({"type":"set","permission_mode":"plan"})"} + "\n" +
+                         R"({"type":"set","permission_mode":"bypass"})" + "\n" +
+                         R"({"type":"set","permission_mode":"reckless"})" + "\n") == 0);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    CHECK(std::ranges::any_of(notices, [](const std::string& line) {
+        return line.starts_with("permission mode: plan -- ") &&
+               line.ends_with(" -- from the next turn");
+    }));
+    CHECK(said(notices,
+               "set permission_mode: bypass needs --allow-bypass (or --permission-mode bypass) at "
+               "launch -- permission mode: plan"));
+    CHECK(said(notices,
+               "set permission_mode: not a permission mode: 'reckless' (manual, accept-edits, "
+               "plan, dont-ask or bypass)"));
+
+    REQUIRE(chat.run({"chat", "--input-format", "stream-json", "--output-format", "stream-json",
+                      "--allow-bypass"},
+                     std::string{R"({"type":"set","permission_mode":"bypass"})"} + "\n") == 0);
+    const std::vector<std::string> allowed = notices_of(driven_events(chat.out));
+    CHECK(std::ranges::any_of(allowed, [](const std::string& line) {
+        return line.starts_with("permission mode: bypass -- ");
+    }));
 }
 
 TEST_CASE("detach and compact lines reach the chat's own detach and compaction",
@@ -2434,6 +2654,54 @@ TEST_CASE("chats compact folds a saved chat's history, asked first or --yes",
                                std::to_string(saved.messages.size()) + " messages into " +
                                std::to_string(compacted.messages.size()) + ", by helper"));
     CHECK(chat.run({"chats", "compact", "no-such-chat", "--yes"}) != 0);
+}
+
+TEST_CASE(
+    "chats compact never leaves a tool call without its result, and a chat that has one "
+    "answers",
+    "[chat][cli][doors][history][compaction][57q]") {
+    // The state a failed or cancelled step leaves: a finished tool phase at
+    // the end of history. Compaction kept the call and folded its result,
+    // and every later Anthropic request was refused with a 400.
+    using apogee::harness::ChatMessage;
+    HelperChat chat{texts({"calls sent: [{{tool_call_ids}}]"}), {"what was said, in short"}};
+    INFO(chat.err);
+    ChatMessage listing = ChatMessage::assistant("");
+    listing.tool_calls = {apogee::harness::ToolCall{
+        .id = "call-A", .name = "list_directory", .arguments = R"({"path":"."})"}};
+    apogee::harness::ToolResult listed;
+    listed.tool_call_id = "call-A";
+    listed.name = "list_directory";
+    listed.content = "a.txt";
+    apogee::logger::Session probe;
+    probe.chat_id = "20261108-120000-a57c";
+    probe.backend = "chatty";
+    probe.turns = 1;
+    probe.messages = {ChatMessage::user("q1"), ChatMessage::assistant("done"),
+                      ChatMessage::user("list it"), listing, ChatMessage::from_tool_result(listed)};
+    apogee::logger::save(probe);
+
+    REQUIRE(chat.run({"chats", "compact", probe.chat_id, "--yes"}) == 0);
+    CHECK(chat.out.starts_with("compacted " + probe.chat_id + ": 5 messages into 2"));
+    const apogee::logger::Session compacted = apogee::logger::load(probe.chat_id, {}).session;
+    for (const ChatMessage& message : compacted.messages) {
+        CHECK(message.tool_calls.empty());
+    }
+    CHECK(compacted.messages.back().content.plain_text() == "done");
+
+    // A chat an older compaction already saved this way: its next turn is
+    // sent without the call, and answers -- the file itself untouched.
+    apogee::logger::Session stuck;
+    stuck.chat_id = "20261108-120001-b57c";
+    stuck.backend = "chatty";
+    stuck.turns = 1;
+    stuck.messages = {
+        ChatMessage::system(std::string{apogee::logger::kCompactionPreamble} + "SUMMARY"), listing};
+    apogee::logger::save(stuck);
+    REQUIRE(chat.run({"chat", "--resume", stuck.chat_id}, "next?\n") == 0);
+    const apogee::logger::Session answered = apogee::logger::load(stuck.chat_id, {}).session;
+    CHECK(replies(answered).back() == "calls sent: []");
+    CHECK(answered.messages.at(1).tool_calls.size() == 1);
 }
 
 TEST_CASE("chats recall shows what recall holds, and forgets it with consent, transcripts kept",
@@ -2957,4 +3225,794 @@ TEST_CASE("a resumed chat says what it could not carry over, as notices to a dri
           std::string::npos);
     CHECK((chat.out + chat.err).find("[resume] backend 'gone-backend' is no longer configured") !=
           std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// A deleted chat stays deleted, and a private one leaves nothing (57a)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// An input a test feeds as it goes, as `machine_mode_test`'s: a read waits
+/// for what was pushed, and ends once the buffer is closed. `wait_reading`
+/// returns once a read waits on it with nothing left to take -- how a test
+/// knows the session has opened, or has finished the line it was handed,
+/// before it acts on the chat from outside.
+class FeedBuffer final : public std::streambuf {
+public:
+    void push(const std::string& text) {
+        const std::lock_guard lock{mutex_};
+        pending_ += text;
+        waiting_ = false;
+        ready_.notify_all();
+    }
+
+    void close() {
+        const std::lock_guard lock{mutex_};
+        closed_ = true;
+        ready_.notify_all();
+    }
+
+    /// False when no read came within half a minute.
+    [[nodiscard]] bool wait_reading() {
+        std::unique_lock lock{mutex_};
+        return ready_.wait_for(lock, std::chrono::seconds{30}, [this] { return waiting_; });
+    }
+
+protected:
+    int_type underflow() override {
+        std::unique_lock lock{mutex_};
+        if (pending_.empty() && !closed_) {
+            waiting_ = true;
+            ready_.notify_all();
+        }
+        ready_.wait(lock, [this] { return !pending_.empty() || closed_; });
+        if (pending_.empty()) {
+            return traits_type::eof();
+        }
+        waiting_ = false;
+        current_ = std::move(pending_);
+        pending_.clear();
+        setg(current_.data(), current_.data(), current_.data() + current_.size());
+        return traits_type::to_int_type(current_.front());
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::string pending_;
+    std::string current_;
+    bool waiting_ = false;
+    bool closed_ = false;
+};
+
+/// `apogee <args>` on `chat`'s config with `feed` on stdin, run on a thread
+/// of its own; once it first waits for a line, `meanwhile` acts from outside
+/// -- as another terminal, or the app's Delete, would -- and the input is
+/// then closed. Its exit code; stdout and stderr kept on `chat`.
+int run_fed(HelperChat& chat, const std::vector<std::string>& args,
+            const std::function<void(FeedBuffer&)>& meanwhile) {
+    FeedBuffer feed;
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+    std::streambuf* const old_out = std::cout.rdbuf(captured_out.rdbuf());
+    std::streambuf* const old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    std::streambuf* const old_in = std::cin.rdbuf(&feed);
+    int code = -1;
+    std::thread session{[&chat, &args, &code]() {
+        apogee::commands::RootCommand root{apogee::commands::default_registry()};
+        const std::string path = chat.config_path.string();
+        std::vector<const char*> argv{"apogee", "--config", path.c_str()};
+        for (const std::string& arg : args) {
+            argv.push_back(arg.c_str());
+        }
+        code = root.run(static_cast<int>(argv.size()), argv.data());
+    }};
+    const auto finish = [&]() {
+        feed.close();
+        session.join();
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        chat.out = captured_out.str();
+        chat.err = captured_err.str();
+    };
+    bool opened = false;
+    try {
+        opened = feed.wait_reading();
+        if (opened) {
+            meanwhile(feed);
+        }
+    } catch (...) {
+        finish();
+        throw;
+    }
+    finish();
+    REQUIRE(opened);
+    return code;
+}
+
+/// A saved chat of two exchanges on `chatty`, written as a session writes
+/// one, with `extra` merged in; its id.
+std::string write_saved_chat(const std::string& id, const nlohmann::json& extra = {}) {
+    nlohmann::json chat = {{"schema_version", apogee::logger::kCurrentSchemaVersion},
+                           {"chat_id", id},
+                           {"backend", "chatty"},
+                           {"title", "Zebra chat"},
+                           {"turns", 2},
+                           {"started_at", "2026-10-31T20:00:00Z"},
+                           {"updated_at", "2026-10-31T20:00:00Z"},
+                           {"messages",
+                            {{{"role", "user"}, {"content", "first q about the zebra"}},
+                             {{"role", "assistant"}, {"content", "first a"}},
+                             {{"role", "user"}, {"content", "second q"}},
+                             {{"role", "assistant"}, {"content", "second a"}}}}};
+    if (extra.is_object()) {
+        chat.update(extra);
+    }
+    std::filesystem::create_directories(apogee::logger::sessions_dir());
+    std::ofstream{apogee::logger::session_path(id), std::ios::binary | std::ios::trunc}
+        << chat.dump();
+    return id;
+}
+
+/// How many times `needle` occurs in `text`.
+[[nodiscard]] std::size_t times(std::string_view text, std::string_view needle) {
+    std::size_t count = 0;
+    for (std::size_t at = text.find(needle); at != std::string_view::npos;
+         at = text.find(needle, at + needle.size())) {
+        ++count;
+    }
+    return count;
+}
+
+/// What a session says, once, of a chat deleted while it ran (55b).
+[[nodiscard]] std::string deleted_said(const std::string& id) {
+    return "chat " + id +
+           " was deleted while this session ran -- it stays deleted, and nothing more of it is "
+           "saved";
+}
+
+/// Every file under `dir` with its bytes, by path relative to it.
+[[nodiscard]] std::map<std::string, std::string> tree_of(const std::filesystem::path& dir) {
+    std::map<std::string, std::string> out;
+    std::error_code code;
+    for (std::filesystem::recursive_directory_iterator it{dir, code}, end; !code && it != end;
+         it.increment(code)) {
+        const std::string name = std::filesystem::relative(it->path(), dir).generic_string();
+        if (it->is_directory(code)) {
+            out[name + "/"] = "";
+        } else {
+            std::ifstream in{it->path(), std::ios::binary};
+            out[name] =
+                std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+        }
+    }
+    return out;
+}
+
+/// The private folders left in `dir`.
+[[nodiscard]] std::vector<std::string> private_folders(const std::filesystem::path& dir) {
+    std::vector<std::string> out;
+    std::error_code code;
+    for (std::filesystem::directory_iterator it{dir, code}, end; !code && it != end;
+         it.increment(code)) {
+        const std::string name = it->path().filename().string();
+        if (name.starts_with(apogee::commands::kPrivateFolderPrefix)) {
+            out.push_back(name);
+        }
+    }
+    std::ranges::sort(out);
+    return out;
+}
+
+constexpr std::string_view kCaptureRecord =
+    R"({"intent": "Zebra deleted chat intent.", "decision": "Keep the zebra.", "status": "shipped", "discipline": "ux", "downstream_link": "", "provenance": {"source": "chat", "attribution": "test"}})";
+
+}  // namespace
+
+TEST_CASE("a chat deleted while its session runs and closed with no turn is never kept or saved",
+          "[chat][cli][record-truth][deleted]") {
+    // The sweep's probe (57a, finding 1): a resumed chat deleted from
+    // another terminal, then left with no new turn, wrote nothing -- so its
+    // close never learned of the delete, distilled the deleted conversation
+    // into a knowledge record, archived its transcript, saved the backend's
+    // state for it and called it saved.
+    HelperChat chat{
+        texts({"unused"}), {std::string{kCaptureRecord}}, {}, "knowledge:\n  auto_capture: true\n"};
+    const std::filesystem::path raw = chat.home.path() / "knowledge" / "raw";
+
+    // At the REPL -- on a pipe here, as the terminal closes the same way.
+    const std::string repl = write_saved_chat("20261031-201806-2f51");
+    REQUIRE(run_fed(chat, {"chat", "--verbose", "--resume", repl}, [&repl](FeedBuffer&) {
+                CHECK(apogee::commands::delete_chat(repl) == "deleted " + repl);
+            }) == 0);
+    INFO(chat.out + chat.err);
+    CHECK(times(chat.out + chat.err, deleted_said(repl)) == 1);
+    CHECK((chat.out + chat.err).find("captured") == std::string::npos);
+    CHECK((chat.out + chat.err).find("nothing saved for " + repl) == std::string::npos);
+    CHECK(files_under(raw) == 0);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(repl)));
+
+    // Driven: the deleted `notice`, said once, and nothing kept -- no model
+    // state saved either, which machine mode shows nothing of, so the mock's
+    // own count says it.
+    const std::string driven = write_saved_chat("20261031-201806-3a62");
+    const std::size_t states_before = apogee::backends::MockProvider::conversations_saved();
+    REQUIRE(run_fed(chat, driven_args({"--resume", driven}), [&driven](FeedBuffer&) {
+                CHECK(apogee::commands::delete_chat(driven) == "deleted " + driven);
+            }) == 0);
+    CHECK(notices_of(driven_events(chat.out)) == std::vector<std::string>{deleted_said(driven)});
+    CHECK(apogee::backends::MockProvider::conversations_saved() == states_before);
+    CHECK(files_under(raw) == 0);
+    CHECK(apogee::logger::list_sessions().empty());
+    CHECK(apogee::commands::recall_summaries().empty());
+
+    // The control: a resumed chat left as it was, not deleted, is still
+    // captured at its clean exit, and its state saved -- at the REPL and
+    // driven.
+    const std::string kept = write_saved_chat("20261031-201806-4b73");
+    REQUIRE(chat.run({"chat", "--verbose", "--resume", kept}, "") == 0);
+    CHECK((chat.out + chat.err).find("captured") != std::string::npos);
+    CHECK((chat.out + chat.err).find("nothing saved for " + kept) != std::string::npos);
+    const std::size_t kept_before = apogee::backends::MockProvider::conversations_saved();
+    REQUIRE(chat.run(driven_args({"--resume", kept}), "") == 0);
+    CHECK(apogee::backends::MockProvider::conversations_saved() == kept_before + 1);
+}
+
+TEST_CASE("/title says when an outside name won, and a second /title replaces it",
+          "[chat][cli][record-truth][title]") {
+    // The sweep's probe (57a, finding 6): `/title` said "renamed" while the
+    // name `chats title` gave the chat from outside won (55b's rule) -- and
+    // said it over a chat deleted meanwhile, where nothing was written.
+    HelperChat chat{texts({"unused"}), {"unused"}};
+    const std::string id = write_saved_chat("20261031-202000-5c84");
+    const auto filed_name = [&id]() {
+        return apogee::logger::load(id, apogee::logger::KnownDependencies{}).session.custom_name;
+    };
+    REQUIRE(run_fed(chat, {"chat", "--no-recall", "--resume", id}, [&](FeedBuffer& feed) {
+                // Renamed from outside, as the app's Rename does it.
+                std::ifstream in{apogee::logger::session_path(id), std::ios::binary};
+                nlohmann::json record = nlohmann::json::parse(in);
+                in.close();
+                record["custom_name"] = "Outside Name";
+                std::ofstream{apogee::logger::session_path(id), std::ios::binary | std::ios::trunc}
+                    << record.dump();
+                feed.push("/title Mine Later\n");
+                REQUIRE(feed.wait_reading());
+                CHECK(filed_name() == "Outside Name");
+                feed.push("/title Mine Later\n");
+                REQUIRE(feed.wait_reading());
+            }) == 0);
+    INFO(chat.out + chat.err);
+    CHECK(times(chat.out + chat.err,
+                "not renamed -- " + id +
+                    " was renamed outside to 'Outside Name' meanwhile; /title again to replace "
+                    "it") == 1);
+    CHECK(times(chat.out + chat.err, " renamed\n") == 1);
+    CHECK(filed_name() == "Mine Later");
+
+    // Over a chat deleted meanwhile: the deleted line, once, and no file.
+    const std::string gone = write_saved_chat("20261031-202000-6d95");
+    REQUIRE(run_fed(chat, {"chat", "--no-recall", "--resume", gone}, [&gone](FeedBuffer& feed) {
+                REQUIRE(apogee::commands::delete_chat(gone) == "deleted " + gone);
+                feed.push("/title Too Late\n");
+                REQUIRE(feed.wait_reading());
+            }) == 0);
+    CHECK(times(chat.out + chat.err, "not renamed -- " + deleted_said(gone)) == 1);
+    CHECK(times(chat.out + chat.err, deleted_said(gone)) == 1);
+    CHECK(times(chat.out + chat.err, " renamed\n") == 0);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(gone)));
+}
+
+TEST_CASE("a cancelled driven turn keeps the title settled before it",
+          "[chat][cli][machine][title][record-truth]") {
+    // The sweep's probe (57a, finding 5): the turn's snapshot was taken
+    // before the title asked after the last turn was settled, so Stop put
+    // the chat back to its bare id -- in the file and in `chats list`.
+    HelperChat chat{texts({"first answer", "second answer"}), {"Cool Title Here"}};
+    INFO(chat.err);
+    // The cancel is read as soon as it is sent, so it reaches the second
+    // turn before it starts: settled, then stopped.
+    REQUIRE(
+        chat.run(driven_args({"--no-recall"}), line_of({{"type", "user"}, {"text", "first"}}) +
+                                                   line_of({{"type", "user"}, {"text", "second"}}) +
+                                                   line_of({{"type", "cancel"}})) == 0);
+    const std::vector<nlohmann::json> events = driven_events(chat.out);
+    std::vector<std::string> finishes;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            finishes.push_back(event.at("finish_reason").get<std::string>());
+        }
+    }
+    REQUIRE(finishes.size() == 2);
+    CHECK(finishes.back() == "cancelled");
+    const apogee::logger::Session session = HelperChat::only_session();
+    CHECK(session.title == "Cool Title Here");
+    CHECK(session.turns == 1);
+    REQUIRE(chat.run({"chats", "list", "--output-format", "json"}) == 0);
+    CHECK(nlohmann::json::parse(chat.out).at("data")[0].at("name") == "Cool Title Here");
+}
+
+TEST_CASE("a private chat leaves the data directory as it was, its log included, and no folder",
+          "[chat][cli][private][record-truth]") {
+    // The sweep's probes (57a, findings 4 and 8): a private chat logged its
+    // id, time and backend -- and a driver's `hello` -- to the data
+    // directory's log; and its attachments' folder, left by a run that did
+    // not end cleanly, was found by nothing.
+    HelperChat chat{texts({"an answer"}), {"unused"}};
+    const apogee::testing::TempDir temporary{"chat-private-tmp-" +
+                                             std::to_string(std::random_device{}())};
+    // The system's temporary directory, as each platform's library reads it.
+    const apogee::testing::EnvGuard tmpdir{"TMPDIR", temporary.path().string()};
+    const apogee::testing::EnvGuard tmp{"TMP", temporary.path().string()};
+    const apogee::testing::EnvGuard temp{"TEMP", temporary.path().string()};
+    REQUIRE(std::filesystem::equivalent(std::filesystem::temp_directory_path(), temporary.path()));
+    apogee::logger::set_enabled(true);
+
+    struct Restore {
+        Restore() = default;
+
+        ~Restore() {
+            apogee::logger::set_enabled(false);
+        }
+
+        Restore(const Restore&) = delete;
+        Restore& operator=(const Restore&) = delete;
+        Restore(Restore&&) = delete;
+        Restore& operator=(Restore&&) = delete;
+    } const restore;
+
+    // Left by runs that did not end: one whose owner is gone, one named for
+    // this very process that no chat of it holds -- a killed run's whose id
+    // this process was given again -- and an older run's, named by a random
+    // number. (One whose other owner runs is `cli.machine_mode`'s.)
+    const std::string gone = "apogee-private-999999999-1";
+    const std::string reused =
+        "apogee-private-" + std::to_string(apogee::platform::current_process_id()) + "-77";
+    const std::string older = "apogee-private-3123456789";
+    for (const std::string& name : {gone, reused, older}) {
+        std::filesystem::create_directories(temporary.path() / name);
+        std::ofstream{temporary.path() / name / "index.db"} << "zebra private attachment text";
+    }
+    const std::filesystem::path note = chat.home.path() / "work" / "note.txt";
+    std::filesystem::create_directories(note.parent_path());
+    std::ofstream{note} << "zebra private attachment text\n";
+
+    // Written while the chat runs (the turn, the attach): nothing of the home.
+    const std::map<std::string, std::string> before = tree_of(chat.home.path());
+    REQUIRE(chat.run({"chat", "--private"},
+                     "/attach " + note.generic_string() + "\nfirst question\n/exit\n") == 0);
+    INFO(chat.out + chat.err);
+    REQUIRE(chat.run(driven_args({"--private"}),
+                     line_of({{"type", "hello"}, {"client", {{"name", "e2e-host"}}}}) +
+                         line_of({{"type", "attach"}, {"path", note.generic_string()}}) +
+                         line_of({{"type", "user"}, {"text", "first question"}}) +
+                         line_of({{"type", "compact"}})) == 0);
+    CHECK(tree_of(chat.home.path()) == before);
+    CHECK_FALSE(std::filesystem::exists(chat.home.path() / "logs"));
+
+    // The gone owner's folder and the reused id's swept as the first opened;
+    // the older run's left; and each private chat's own gone with it.
+    CHECK(private_folders(temporary.path()) == std::vector<std::string>{older});
+
+    // The control: a written chat logs its session, as ever.
+    REQUIRE(chat.run({"chat"}, "first question\n") == 0);
+    CHECK(files_under(chat.home.path() / "logs") == 1);
+}
+
+TEST_CASE("a private chat's folder is made by its run, never one found under its name",
+          "[chat][cli][private][record-truth]") {
+    // 57a's review: the folder, named `<pid>-<n>`, was used as it was found.
+    // A run killed outright left its index there, attachment text and all;
+    // a private chat given that pid again -- a restarted container's apogee
+    // always is -- indexed into it, and the dead chat's excerpts reached the
+    // new one's prompt (`cli.machine_mode` drives that on the real binary).
+    const apogee::testing::TempDir temporary{"chat-private-claim-" +
+                                             std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard tmpdir{"TMPDIR", temporary.path().string()};
+    const apogee::testing::EnvGuard tmp{"TMP", temporary.path().string()};
+    const apogee::testing::EnvGuard temp{"TEMP", temporary.path().string()};
+    REQUIRE(std::filesystem::equivalent(std::filesystem::temp_directory_path(), temporary.path()));
+
+    // A killed run's index under this process's id, at the names a chat of
+    // it takes first.
+    const std::string own =
+        "apogee-private-" + std::to_string(apogee::platform::current_process_id()) + "-";
+    for (int n = 1; n <= 8; ++n) {
+        const std::filesystem::path left = temporary.path() / (own + std::to_string(n));
+        std::filesystem::create_directories(left);
+        std::ofstream{left / "index.db"} << "the zebra launch code is 7741";
+    }
+    {
+        const apogee::commands::PrivateFolder first{true};
+        REQUIRE_FALSE(first.path().empty());
+        CHECK(std::filesystem::is_directory(first.path()));
+        CHECK(std::filesystem::is_empty(first.path()));
+#if !defined(_WIN32)
+        CHECK((std::filesystem::status(first.path()).permissions() & std::filesystem::perms::all) ==
+              std::filesystem::perms::owner_all);
+#endif
+        // Every leftover gone: the chat's own is the one folder.
+        const std::vector<std::string> only{first.path().filename().string()};
+        CHECK(private_folders(temporary.path()) == only);
+
+        // A second private chat of this process, opened meanwhile -- the
+        // shell's next conversation -- never takes the first's.
+        std::ofstream{first.path() / "index.db"} << "the first chat's own";
+        {
+            const apogee::commands::PrivateFolder second{true};
+            CHECK(second.path() != first.path());
+            CHECK(std::filesystem::is_empty(second.path()));
+            CHECK(private_folders(temporary.path()).size() == 2);
+        }
+        CHECK(std::filesystem::exists(first.path() / "index.db"));
+        CHECK(private_folders(temporary.path()) == only);
+    }
+    CHECK(private_folders(temporary.path()).empty());
+
+    // Not private: nothing made.
+    const apogee::commands::PrivateFolder unused{false};
+    CHECK(unused.path().empty());
+    CHECK(private_folders(temporary.path()).empty());
+}
+
+#if !defined(_WIN32)
+namespace {
+
+/// The utility made a claude-cli entry whose binary is a script: a title
+/// asked for is answered `title`; any other call -- an exit summary, a
+/// compaction's -- first deletes every chat file in the home, as `chats
+/// delete` from another terminal while the model was writing would, then
+/// answers `summary`.
+void deleting_utility(HelperChat& chat, const std::string& title, const std::string& summary) {
+    const std::filesystem::path script = chat.home.path() / "bin" / "claude";
+    std::filesystem::create_directories(script.parent_path());
+    const auto result = [](const std::string& text) {
+        return nlohmann::json{
+            {"type", "result"}, {"subtype", "success"}, {"is_error", false}, {"result", text}}
+            .dump();
+    };
+    std::ofstream{script, std::ios::binary}
+        << "#!/bin/sh\n"
+           "for last in \"$@\"; do :; done\n"
+           "case \"$last\" in *\"The conversation's questions\"*)\n"
+           "  printf '%s\\n' '"
+        << result(title)
+        << "'; exit 0 ;;\nesac\n"
+           "rm -f '"
+        << (chat.home.path() / "sessions").string()
+        << "'/*.json\n"
+           "printf '%s\\n' '"
+        << result(summary) << "'\n";
+    std::filesystem::permissions(script, std::filesystem::perms::owner_all);
+    REQUIRE(chat.run({"config", "add-backend", "util", "--type", "claude-cli"}) == 0);
+    REQUIRE(chat.run({"config", "set-backend", "util", "--binary", script.string()}) == 0);
+    REQUIRE(chat.run({"config", "set-default-utility", "util"}) == 0);
+}
+
+}  // namespace
+
+TEST_CASE("a chat deleted during its exit summary is never put back into recall",
+          "[chat][cli][recall][record-truth][deleted]") {
+    // The sweep's probe (57a, finding 2): `chats delete` landing while the
+    // close summarised the chat for recall -- its `forget_recall` first,
+    // then the summary written back -- left the deleted chat recalled into
+    // every later one.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform spawns no child processes");
+    }
+    // Auto-capture on: what follows the summary -- the state's save, the
+    // capture -- follows none of it for a chat deleted meanwhile.
+    HelperChat chat{texts({"one", "two"}), {"unused"}, {}, "knowledge:\n  auto_capture: true\n"};
+    deleting_utility(chat, "A Title", "A slow but fine summary of the talk");
+    const std::filesystem::path raw = chat.home.path() / "knowledge" / "raw";
+
+    // At the REPL, with its state's save said, and the capture's clerk --
+    // the utility -- never called.
+    REQUIRE(chat.run({"chat", "--verbose"}, "first question\nsecond question\n") == 0);
+    INFO(chat.out + chat.err);
+    CHECK(times(chat.out + chat.err, "was deleted while this session ran") == 1);
+    CHECK((chat.out + chat.err).find("nothing saved for") == std::string::npos);
+    CHECK((chat.out + chat.err).find("summarised for recall") == std::string::npos);
+    CHECK((chat.out + chat.err).find("captur") == std::string::npos);
+    CHECK((chat.out + chat.err).find("distilling") == std::string::npos);
+    CHECK(files_under(raw) == 0);
+    CHECK(apogee::commands::recall_summaries().empty());
+
+    // Driven: the deleted notice, once, and no state saved.
+    const std::size_t states_before = apogee::backends::MockProvider::conversations_saved();
+    REQUIRE(chat.run(driven_args(), line_of({{"type", "user"}, {"text", "first question"}}) +
+                                        line_of({{"type", "user"}, {"text", "second question"}})) ==
+            0);
+    const std::vector<std::string> notices = notices_of(driven_events(chat.out));
+    REQUIRE(notices.size() == 1);
+    CHECK(
+        notices.front().ends_with(" was deleted while this session ran -- it stays deleted, and "
+                                  "nothing more of it is saved"));
+    CHECK(apogee::backends::MockProvider::conversations_saved() == states_before);
+    CHECK(apogee::commands::recall_summaries().empty());
+    REQUIRE(chat.run({"chats", "recall", "--output-format", "json"}) == 0);
+    CHECK(nlohmann::json::parse(chat.out).at("data") == nlohmann::json::array());
+
+    // A later chat recalls neither.
+    REQUIRE(chat.run(driven_args(), line_of({{"type", "user"}, {"text", "what was the talk?"}})) ==
+            0);
+    for (const nlohmann::json& event : driven_events(chat.out)) {
+        CHECK(event.at("type") != "memory");
+    }
+}
+
+TEST_CASE("chats compact refuses a chat deleted while it was compacted, attachments or not",
+          "[chat][cli][compaction][record-truth][deleted]") {
+    // The sweep's probe (57a, finding 3): with an attachment inlined into or
+    // mapped onto a folded message, the attachments' own save found the
+    // file gone and threw that away, and `chats compact` exited 0 over a
+    // chat that no longer existed.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform spawns no child processes");
+    }
+    HelperChat chat{texts({"unused"}), {"unused"}};
+    deleting_utility(chat, "A Title", "what was said, in short");
+    const nlohmann::json file = {{"name", "note.txt"}, {"sha256", std::string(64, '0')}};
+    const std::vector<std::pair<std::string, nlohmann::json>> chats{
+        {"20261031-201449-5a07", {}},
+        {"20261031-201452-3210",
+         {{"attachments", {{{"name", "note.txt"}, {"files", {file}}, {"inline_at", 0}}}}}},
+        {"20261031-201455-4321",
+         {{"attachments", {{{"name", "note.txt"}, {"files", {file}}, {"map_at", 0}}}}}}};
+    for (const auto& [id, extra] : chats) {
+        INFO(id);
+        (void)write_saved_chat(id, extra);
+        CHECK(chat.run({"chats", "compact", id, "--yes"}) == 1);
+        CHECK(chat.out.empty());
+        CHECK(chat.err ==
+              "apogee chats: " + id + " was deleted while it was compacted -- it stays deleted\n");
+        CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(id)));
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Retrieval and the calls a turn makes before its loop (57r)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// `lines`, one file each, ingested lexical as the collection `notes`.
+void ingest_notes(HelperChat& chat, const std::vector<std::string>& lines) {
+    const std::filesystem::path docs = chat.home.path() / "docs";
+    std::filesystem::create_directories(docs);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        std::ofstream{docs / ("note-" + std::to_string(i + 1) + ".md"), std::ios::binary}
+            << lines[i] << "\n";
+    }
+    REQUIRE(chat.run({"embed", "ingest", "notes", docs.string()}) == 0);
+}
+
+/// Each driven turn's `finish_reason`, in order.
+[[nodiscard]] std::vector<std::string> finishes_of(const std::vector<nlohmann::json>& events) {
+    std::vector<std::string> out;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            out.push_back(event.at("finish_reason").get<std::string>());
+        }
+    }
+    return out;
+}
+
+/// The saved chat, one line per message.
+[[nodiscard]] std::vector<std::string> saved_lines(const apogee::logger::Session& session) {
+    std::vector<std::string> lines;
+    for (const ChatMessage& message : session.messages) {
+        lines.push_back(std::string{apogee::harness::to_string(message.role)} + ": " +
+                        message.content.plain_text());
+    }
+    return lines;
+}
+
+/// Waits, at most ten seconds, for `ready`.
+[[nodiscard]] bool within_ten_seconds(const std::function<bool()>& ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (!ready() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    return ready();
+}
+
+}  // namespace
+
+TEST_CASE("complete keeps the chunks when the judge's reply is not a ranking, and says why",
+          "[chat][rag][rerank][cli][57r]") {
+    // The second sweep's probe (57r): `["2", "1"]` and a reply naming a
+    // passage before its ranking each ended in `no matching context` with
+    // nothing injected -- the judge's misread reply taken as "none help".
+    struct Case {
+        std::string reply{};
+        bool reranked = false;
+        std::string why{};
+    };
+
+    const std::vector<Case> cases{
+        {.reply = "[2, 1]", .reranked = true, .why = {}},
+        // A whole number in quotes is that id (the recorded default).
+        {.reply = R"(["2", "1"])", .reranked = true, .why = {}},
+        {.reply = R"(["two", "one"])",
+         .reranked = false,
+         .why = "returned a ranking with no usable passage number"},
+        {.reply = "Passage [3] is off-topic; the ranking is [2, 1]",
+         .reranked = false,
+         .why = "returned 2 bracketed lists, so which one ranks is a guess"},
+    };
+    for (const Case& c : cases) {
+        INFO(c.reply);
+        HelperChat chat{texts({"ANSWER sys=[{{system}}]"}), {c.reply}};
+        ingest_notes(chat, {"Pelicans nest on the coast of Peru.",
+                            "Brown pelicans nest in colonies on islands."});
+        REQUIRE(chat.run({"complete", "--rag", "notes", "--rerank", "helper", "--rag-limit", "2",
+                          "where do pelicans nest"}) == 0);
+        const std::string said = chat.out + chat.err;
+        INFO(said);
+        CHECK(said.find("no matching context") == std::string::npos);
+        CHECK(said.find("2 chunk(s) from 'notes'") != std::string::npos);
+        CHECK((said.find(", reranked]") != std::string::npos) == c.reranked);
+        if (!c.why.empty()) {
+            CHECK(said.find("rerank via 'helper' " + c.why) != std::string::npos);
+            CHECK(said.find("using raw retrieval order") != std::string::npos);
+        }
+        // Both excerpts reached the model.
+        CHECK(chat.out.find("Pelicans nest on the coast of Peru.") != std::string::npos);
+        CHECK(chat.out.find("Brown pelicans nest in colonies on islands.") != std::string::npos);
+    }
+}
+
+TEST_CASE("a follow-up's rewrite that opens with a lead-in searches with the query after it",
+          "[chat][rag][cli][helpers][machine][57r]") {
+    // The second sweep's probe (57r): the lead-in was searched, the floor
+    // rejected the one chunk, and turn 2 got no excerpt.
+    HelperChat chat{
+        texts({"ANSWER sys=[{{system}}]"}),
+        {"Pelican Notes",
+         "Sure! Here is the standalone search query:\n\nwhere do pelicans nest in Peru"}};
+    ingest_notes(chat, {"Pelicans nest on the coast of Peru, on rocky islands."});
+    REQUIRE(chat.run(driven_args({"--no-recall", "--rag", "notes"}),
+                     line_of({{"type", "user"}, {"text", "tell me about pelicans"}}) +
+                         line_of({{"type", "user"}, {"text", "and where do they do that?"}})) == 0);
+    INFO(chat.err);
+    const std::vector<nlohmann::json> events = driven_events(chat.out);
+    std::vector<std::string> answers;
+    for (const nlohmann::json& event : events) {
+        if (event.at("type") == "result") {
+            answers.push_back(event.at("text").get<std::string>());
+        }
+    }
+    REQUIRE(answers.size() == 2);
+    CHECK(answers[1].find("Pelicans nest on the coast of Peru") != std::string::npos);
+    CHECK(chat.err.find("nothing relevant in 'notes'") == std::string::npos);
+    CHECK(chat.err.find("the rewrite was not a query") == std::string::npos);
+}
+
+TEST_CASE("a driven cancel while a side call runs ends the turn in a cancelled result at once",
+          "[chat][cli][machine][cancel][57r]") {
+    // The second sweep (57r): every call a chat turn made before its loop
+    // was handed an empty token, so Stop waited for a whole compaction, a
+    // rewrite or a judge -- and a cancel the judge did see was said as
+    // "using raw retrieval order". Each is held here until the cancel comes;
+    // a cancel that never reached it would hold it ten seconds and then let
+    // the turn answer.
+    const nlohmann::json held = {{"text", "never said"}, {"until_cancelled", true}};
+    const std::string user = R"({"type":"user","text":")";
+
+    struct Case {
+        std::string name{};
+        nlohmann::json chatty{};
+        nlohmann::json helper{};
+        std::string chatty_extra{};
+        std::vector<std::string> args{};
+        std::vector<std::string> lines{};
+        std::vector<std::string> finishes{};
+        std::vector<std::string> kept{};
+        bool attach = false;
+    };
+
+    const std::string long_answer(1200, 'a');
+    const std::vector<Case> cases{
+        {.name = "compaction",
+         .chatty = texts({long_answer, "never"}),
+         .helper = nlohmann::json::array({{{"text", "Bird Talk"}}, held}),
+         .chatty_extra = "    context_size: 300\n",
+         .args = {},
+         .lines = {"first question", "second question"},
+         .finishes = {"stop", "cancelled"},
+         .kept = {"user: first question", "assistant: " + long_answer}},
+        {.name = "the follow-up's rewrite",
+         .chatty = texts({"Pelicans are birds.", "never"}),
+         .helper = nlohmann::json::array({{{"text", "Bird Talk"}}, held}),
+         .chatty_extra = {},
+         .args = {"--rag", "notes"},
+         .lines = {"tell me about pelicans", "where do they nest?"},
+         .finishes = {"stop", "cancelled"},
+         .kept = {"user: tell me about pelicans", "assistant: Pelicans are birds."}},
+        {.name = "the rerank judge",
+         .chatty = texts({"They nest in Peru."}),
+         .helper = nlohmann::json::array({held, {{"text", "[2, 1]"}}, {{"text", "Bird Talk"}}}),
+         .chatty_extra = {},
+         .args = {"--rag", "notes", "--rerank", "helper"},
+         .lines = {"where do pelicans nest"},
+         // The next line is served, judged and answered.
+         .finishes = {"cancelled", "stop"},
+         .kept = {"user: where do pelicans nest", "assistant: They nest in Peru."}},
+        // An attachment too large to inline is searched, and judged, the
+        // same way.
+        {.name = "the attachments' judge",
+         .chatty = texts({"They nest in Peru."}),
+         .helper = nlohmann::json::array({held, {{"text", "[2, 1]"}}, {{"text", "Bird Talk"}}}),
+         .chatty_extra = "    context_size: 7000\n",
+         .args = {"--rerank", "helper"},
+         .lines = {"where do pelicans nest"},
+         .finishes = {"cancelled", "stop"},
+         .kept = {"user: where do pelicans nest", "assistant: They nest in Peru."},
+         .attach = true},
+    };
+    // Twelve chunks' worth, every third naming the pelicans' nests.
+    std::string manual;
+    for (int chunk = 0; chunk < 12; ++chunk) {
+        std::string piece(448, 'x');
+        for (std::size_t at = 63; at < piece.size(); at += 64) {
+            piece[at] = ' ';
+        }
+        if (chunk % 3 == 0) {
+            piece.replace(200, 21, " where pelicans nest ");
+        }
+        manual += piece;
+    }
+    for (const Case& c : cases) {
+        INFO(c.name);
+        HelperChat chat{c.chatty, {"unused"}, c.chatty_extra};
+        (void)chat.script("helper", c.helper);
+        ingest_notes(chat, {"Pelicans nest on the coast of Peru.",
+                            "Brown pelicans nest in colonies on islands."});
+        const std::size_t cancelled_before = apogee::backends::MockProvider::holds_cancelled();
+        std::vector<std::string> args{"--no-recall"};
+        args.insert(args.end(), c.args.begin(), c.args.end());
+        const std::filesystem::path attached = chat.home.path() / "manual.txt";
+        std::ofstream{attached, std::ios::binary} << manual;
+        REQUIRE(run_fed(chat, driven_args(args), [&](FeedBuffer& feed) {
+                    if (c.attach) {
+                        feed.push(
+                            line_of({{"type", "attach"}, {"path", attached.generic_string()}}));
+                    }
+                    for (const std::string& line : c.lines) {
+                        feed.push(user + line + "\"}\n");
+                    }
+                    REQUIRE(within_ten_seconds(
+                        [] { return apogee::backends::MockProvider::calls_held() > 0; }));
+                    feed.push(R"({"type":"cancel"})"
+                              "\n");
+                    // Well inside the hold's own ten seconds.
+                    const auto sent = std::chrono::steady_clock::now();
+                    REQUIRE(within_ten_seconds([cancelled_before] {
+                        return apogee::backends::MockProvider::holds_cancelled() > cancelled_before;
+                    }));
+                    CHECK(std::chrono::steady_clock::now() - sent < std::chrono::seconds{3});
+                    if (c.finishes.back() == "stop") {
+                        feed.push(user + c.lines.back() + "\"}\n");
+                    }
+                }) == 0);
+        INFO(chat.err);
+        CHECK(finishes_of(driven_events(chat.out)) == c.finishes);
+        CHECK(apogee::backends::MockProvider::holds_cancelled() == cancelled_before + 1);
+        // Said as a cancel, never as the side call failing.
+        CHECK(chat.err.find("apogee: cancelled") != std::string::npos);
+        for (const std::string_view degraded :
+             {"failed", "could not be rewritten", "raw retrieval order", "lexical only"}) {
+            CHECK(chat.err.find(degraded) == std::string::npos);
+        }
+        // The session as the last finished turn left it.
+        const apogee::logger::Session session = HelperChat::only_session();
+        CHECK(saved_lines(session) == c.kept);
+        CHECK(session.turns == 1);
+        CHECK(session.compactions == 0);
+    }
 }

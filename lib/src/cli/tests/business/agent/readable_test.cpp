@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -10,7 +11,7 @@
 
 /// The page reader (25f): the fixture corpus above all -- each page's own
 /// text present, its furniture absent -- then the parser's edge cases, the
-/// characters, and paging.
+/// characters, a hostile page's cost (57v), and paging.
 namespace {
 
 using apogee::agent::extract_readable;
@@ -334,6 +335,312 @@ TEST_CASE("characters: entities, charsets and stray bytes all end as UTF-8",
               "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=iso-8859-1\">") ==
           "iso-8859-1");
     CHECK(apogee::agent::meta_charset("<p>no meta</p>").empty());
+}
+
+namespace {
+
+/// `fetch_url`'s body cap, `kFetchMaxBodyBytes` (presentation/cli/helpers.h):
+/// the most a hostile page can hand the reader in one fetch.
+constexpr std::size_t kMiB = std::size_t{1024} * 1024;
+constexpr std::size_t kFetchCap = 5 * kMiB;
+
+/// `unit` repeated until it fills at least `bytes`.
+std::string filled(std::string_view unit, std::size_t bytes) {
+    std::string out;
+    out.reserve(bytes + unit.size());
+    while (out.size() < bytes) {
+        out += unit;
+    }
+    return out;
+}
+
+/// `html` read, failing the test when the read takes `ceiling` or longer.
+/// The ceilings are wide (57v): the old reader missed each by minutes, so a
+/// slow CI row never flakes them and a super-linear path never passes them.
+ReadablePage read_within(const std::string& html, std::chrono::milliseconds ceiling) {
+    const auto started = std::chrono::steady_clock::now();
+    ReadablePage page = read(html);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    INFO(html.size() << " bytes read in " << elapsed.count() << " ms");
+    CHECK(elapsed < ceiling);
+    return page;
+}
+
+constexpr std::chrono::milliseconds kCeiling{2000};
+constexpr std::chrono::milliseconds kCapCeiling{5000};
+
+}  // namespace
+
+TEST_CASE("a hostile page reads in time linear in its size, its text as before (57v)",
+          "[agent][fetch][readable][hostile]") {
+    SECTION("nested tables: a cell that holds a table is read once, not twice per level") {
+        std::string deep;
+        for (int i = 0; i < 25; ++i) {
+            deep += "<table><tr><td>x";
+        }
+        deep += "inner";
+        std::string expected;
+        for (int i = 0; i < 24; ++i) {
+            expected += "x\n";
+        }
+        expected += "xinner";
+        CHECK(read_within(deep, kCeiling).text == expected);
+
+        // Old-style layout: ten two-cell tables around a page of posts.
+        std::string posts;
+        for (int i = 0; posts.size() < std::size_t{229} * 1024; ++i) {
+            posts += "<p>post " + std::to_string(i) + " " + std::string(80, 'w') + "</p>";
+        }
+        const auto wrapped = [](std::string page) {
+            for (int i = 0; i < 10; ++i) {
+                page = "<table><tr><td>" + page + "</td><td>side " + std::to_string(i) +
+                       "</td></tr></table>";
+            }
+            return page;
+        };
+        const std::string layout = read_within(wrapped(posts), kCeiling).text;
+        CHECK(layout.starts_with("post 0 "));
+        CHECK(layout.ends_with("side 9"));
+
+        // At the fetch cap: as deep as the parser keeps, and as much text.
+        std::string capped_posts;
+        for (int i = 0; capped_posts.size() < kFetchCap; ++i) {
+            capped_posts += "<p>post " + std::to_string(i) + " " + std::string(80, 'w') + "</p>";
+        }
+        CHECK(read_within(wrapped(capped_posts), kCapCeiling).text.ends_with("side 9"));
+        const std::string capped =
+            read_within(filled("<table><tr><td>x", kFetchCap) + "inner", kCapCeiling).text;
+        CHECK(capped.starts_with("x\nx\n"));
+        CHECK(capped.ends_with("xinner"));
+    }
+    SECTION("bare ampersands: each `&` looks no further than an entity can be long") {
+        const std::string amps(1000000, '&');
+        CHECK(read_within(amps, kCeiling).text == amps);
+        CHECK(read_within("<p><a href=\"/x\"><img alt=\"" + amps + "\"></a></p>", kCeiling).text ==
+              "[" + amps + "](https://example.test/x)");
+        CHECK(read_within("<title>" + amps + "</title><p>body</p>", kCeiling).title == amps);
+
+        const std::string capped(kFetchCap, '&');
+        CHECK(read_within(capped, kCapCeiling).text == capped);
+        CHECK(read_within("<p><a href=\"/x\"><img alt=\"" + capped + "\"></a></p>", kCapCeiling)
+                  .text.size() == capped.size() + std::string{"[](https://example.test/x)"}.size());
+        CHECK(read_within("<title>" + capped + "</title><p>body</p>", kCapCeiling).title == capped);
+    }
+    SECTION("nested empty links: an image link's alt text is found without a scan") {
+        std::string links;
+        for (int i = 0; i < 250; ++i) {
+            links += "<a href=x>";
+        }
+        CHECK(read_within(links + filled("<i></i>", 2 * kMiB), kCeiling).text.empty());
+        CHECK(
+            read_within(links + filled("<i></i>", kFetchCap) + "<img alt=pic>", kCapCeiling).text ==
+            "[pic](https://example.test/a/x)");
+
+        // Where links may still nest -- a link inside a caption, or a table
+        // cell, inside a link -- every level finds its image at once.
+        std::string captioned;
+        for (int i = 0; i < 125; ++i) {
+            captioned += "<a href=x><caption>";
+        }
+        std::string celled;
+        for (int i = 0; i < 60; ++i) {
+            celled += "<a href=x><table><tr><td>";
+        }
+        // Through a block, which a link start looks back no further than;
+        // and through phrasing, which each link start closes and opens again.
+        std::string blocked;
+        std::string spanned;
+        for (int i = 0; i < 250; ++i) {
+            blocked += "<a href=x><div>";
+            spanned += "<a href=x><span>";
+        }
+        for (const std::string& nested : {captioned, celled, blocked, spanned}) {
+            CHECK(read_within(nested + filled("<i></i>", 2 * kMiB), kCeiling).text.empty());
+            CHECK(read_within(nested + filled("<i></i>", kFetchCap), kCapCeiling).text.empty());
+        }
+    }
+    SECTION("a link start finds the open link in reach without looking back") {
+        // Every start tag under 254 open elements (one short of the cap, so
+        // the links open): a look back through them for an open link, at
+        // each of a million starts, is depth x size.
+        const std::string open_spans = filled("<span>", std::size_t{254} * 6);
+        CHECK(read_within(open_spans + filled("<a/>", 2 * kMiB), kCeiling).text.empty());
+        CHECK(read_within(open_spans + filled("<a/>", kFetchCap), kCapCeiling).text.empty());
+        CHECK(read_within(open_spans + filled("<a href=x>w</a>", kFetchCap), kCapCeiling)
+                  .text.starts_with("[w](https://example.test/a/x)"));
+    }
+}
+
+TEST_CASE("what the cost fixes leave as it was (57v)", "[agent][fetch][readable]") {
+    SECTION("tables: data as rows, a table in a cell and a single column as paragraphs") {
+        CHECK(read("<table><tr><td>outer<table><tr><td>a</td><td>b</td></tr></table></td>"
+                   "<td>side</td></tr></table>")
+                  .text == "outer\n\n| a | b |\n\nside");
+        CHECK(read("<table><tr><td>one</td></tr><tr><td>two</td></tr></table>").text == "one\ntwo");
+        // A table anywhere below a cell, not only directly in it.
+        CHECK(read("<table><tr><td><div><p>x</p><table><tr><td>a</td><td>b</td></tr></table></div>"
+                   "</td><td>side</td></tr></table>")
+                  .text == "x\n\n| a | b |\n\nside");
+        CHECK(read("<table><caption>cap</caption><tr><td>a</td><td>b</td></tr></table>").text ==
+              "cap\n\n| a | b |");
+        CHECK(read("<table><caption>cap</caption><tr><td>a<table><tr><td>c</td></tr></table></td>"
+                   "<td>b</td></tr></table>")
+                  .text == "cap\na\nc\nb");
+        // A layout table decided by a long cell in one row and a table in another.
+        CHECK(read("<table><tr><td>a</td><td>b</td></tr><tr><td>" + std::string(400, 'w') +
+                   "</td><td>c</td></tr><tr><td>d<table><tr><td>e</td><td>f</td></tr></table>"
+                   "</td></tr></table>")
+                  .text == "ab\n" + std::string(400, 'w') + "c\nd\n\n| e | f |");
+    }
+    SECTION("an image link reads as its first image's alt text, however deep") {
+        CHECK(read("<p><a href=/x><span><b><img alt=deep></b></span></a></p>").text ==
+              "[deep](https://example.test/x)");
+        CHECK(read("<p><a href=/x><img alt=\"\"><img alt=second></a></p>").text.empty());
+        CHECK(read("<p><a href=/x><span>  </span><b><i><img alt=\"first\"></i></b>"
+                   "<img alt=second></a></p>")
+                  .text == "[first](https://example.test/x)");
+    }
+    SECTION("an entity is looked for in the 12 bytes after its `&`, and no further") {
+        CHECK(read("<p>&#x0000000E9; &#x00000000E9; AT&T &amp &abcdefghijk; &abcdefghijkl;</p>")
+                  .text == "é &#x00000000E9; AT&T &amp &abcdefghijk; &abcdefghijkl;");
+    }
+    SECTION("a link start tag closes an open link; one in a table cell stays in its cell") {
+        CHECK(read("<p><a href=a>one<a href=b>two</a></p>").text ==
+              "[one](https://example.test/a/a) [two](https://example.test/a/b)");
+        CHECK(read("<p><a href=a>one <b>bold<a href=b>two</a> after</b></p>").text ==
+              "[one bold](https://example.test/a/a) [two](https://example.test/a/b) after");
+        CHECK(read("<p><a href=a>outer<table><tr><td><a href=b>cell</a></td><td>2</td></tr>"
+                   "</table></a></p>")
+                  .text ==
+              "[outer | (cell)(https://example.test/a/b) | 2 |](https://example.test/a/a)");
+    }
+    SECTION("a link across a block nests as before, and a split link keeps the story whole") {
+        std::string story;
+        for (int i = 0; i < 6; ++i) {
+            story += "The opening paragraph of the story says a good deal. ";
+        }
+        const std::string opening =
+            "<nav><a href=\"/\">Home</a></nav><div role=\"main\">"
+            "<h1>The headline</h1><p>" +
+            story + "</p>";
+        const std::string rest =
+            "<p>The rest of the story.</p><p>And its last paragraph.</p></div>";
+        const std::string comments = "<div><p>Comments and other site text.</p></div>";
+        const std::string read_opening = "# The headline\n\n" + story.substr(0, story.size() - 1);
+        const std::string read_rest = "The rest of the story.\n\nAnd its last paragraph.";
+
+        // A link over a block holding a link: the inner start tag looks back
+        // no further than the block, so the block stays open and the
+        // story's end stays in the story. (Closing back through the block,
+        // the block's own end tag closed the story's element instead.)
+        CHECK(read(opening +
+                   "<a href=\"/related\"><div class=\"teaser\">Related: <a href=\"/topic\">Topic"
+                   "</a></div></a>" +
+                   rest + comments)
+                  .text == read_opening +
+                               "\n\n[Related: (Topic)(https://example.test/topic)]"
+                               "(https://example.test/related)\n\n" +
+                               read_rest);
+        // The same in an article: its body stays in it, the site's text out.
+        std::string body;
+        for (int i = 0; i < 8; ++i) {
+            body += "The long body of the story, with many words in it. ";
+        }
+        CHECK(read("<nav><a href=\"/\">Home</a> <a href=\"/news\">News</a></nav>"
+                   "<div class=\"content\"><article><h1>The headline</h1><a href=\"/post/1\" "
+                   "class=\"card\"><div class=\"card-body\"><h2>Related story</h2><p>By <a "
+                   "href=\"/author/x\">Author X</a></p></div></a><p>" +
+                   body +
+                   "</p><p>Its second paragraph.</p></article><div class=\"footer-links\"><p>"
+                   "Other site text.</p></div></div>")
+                  .text ==
+              "# The headline\n\n[## Related story By (Author X)"
+              "(https://example.test/author/x)](https://example.test/post/1)\n\n" +
+                  body.substr(0, body.size() - 1) + "\n\nIts second paragraph.");
+        // Two links nested in a card link's paragraph split; the second end
+        // tag is the first link's own and closes nothing, not the card link
+        // and the blocks in it.
+        CHECK(read(opening +
+                   "<a href=\"/card\"><div class=\"body\"><h2>Card</h2><p>Blurb <a href=\"/x\">"
+                   "one<a href=\"/y\">two</a></a> after.</p></div></a>" +
+                   rest + comments)
+                  .text == read_opening +
+                               "\n\n[## Card Blurb (one)(https://example.test/x) "
+                               "(two)(https://example.test/y) after.](https://example.test/card)"
+                               "\n\n" +
+                               read_rest);
+        // A link split through a `span` opens the span again, so its end tag
+        // closes that span and not the one around the story.
+        CHECK(read("<span class=\"wrap\">" + opening +
+                   "<p><a href=\"/x\"><span>one <a href=\"/y\">two</a> three</span> four</a></p>" +
+                   rest + "</span>" + comments)
+                  .text == read_opening +
+                               "\n\n[one](https://example.test/x) [two](https://example.test/y) "
+                               "three four\n\n" +
+                               read_rest);
+    }
+    SECTION("an owed end tag never keeps a later link open over the story") {
+        std::string story;
+        for (int i = 0; i < 6; ++i) {
+            story += "The opening paragraph of the story says a good deal. ";
+        }
+        const std::string main_open = "<div role=\"main\"><h1>The headline</h1>";
+        const std::string rest =
+            "<p>The rest of the story.</p><p>And its last paragraph.</p></div>"
+            "<div><p>Comments and other site text.</p></div>";
+        const std::string read_story = story.substr(0, story.size() - 1);
+        const std::string read_rest = "The rest of the story.\n\nAnd its last paragraph.";
+
+        // A link left open in the nav, split by the next one, owes an end tag
+        // that never comes. A later promo link over an unclosed paragraph
+        // is a link opened after it: its `</a>` closes it, the promo is
+        // dropped as furniture, and the story's end is read. (Taken as the
+        // owed one, it closed nothing, and the promo held the story's end.)
+        CHECK(read("<nav><a href=\"/\">Home <a href=\"/news\">News</a></nav>" + main_open + "<p>" +
+                   story + "</p><a href=\"/subscribe\" class=\"promo-box\"><p>Subscribe today</a>" +
+                   rest)
+                  .text == "# The headline\n\n" + read_story + "\n\n" + read_rest);
+        // The same where the split link's end tag is still owed: left open
+        // in the story's own element, which is open still.
+        CHECK(read("<nav><a href=\"/\">Home</a></nav>" + main_open + "<p>" + story +
+                   "</p>See <a href=\"/one\">one <a href=\"/two\">two</a> here. <a "
+                   "href=\"/subscribe\" class=\"promo-box\"><p>Subscribe today</a>" +
+                   rest)
+                  .text == "# The headline\n\n" + read_story +
+                               "\n\nSee [one](https://example.test/one) "
+                               "[two](https://example.test/two) here.\n\n" +
+                               read_rest);
+        // The same in the story's own intro: the card's text is its own.
+        CHECK(read("<nav><a href=\"/\">Home</a></nav>" + main_open +
+                   "<p>Intro with a sloppy <a href=\"/one\">first link <a href=\"/two\">second "
+                   "link</a> and words after.</p><p>" +
+                   story + "</p><a href=\"/card\"><p>Card teaser text</a>" + rest)
+                  .text ==
+              "# The headline\n\nIntro with a sloppy [first link](https://example.test/one) "
+              "[second link](https://example.test/two) and words after.\n\n" +
+                  read_story + "\n\n[Card teaser text](https://example.test/card)\n\n" + read_rest);
+        // A card link whose paragraph splits two links: the end tag is owed
+        // only while that paragraph is open, so the card's own `</a>`, after
+        // a later unclosed paragraph, closes the card.
+        const std::string card_open = "<nav><a href=\"/\">Home</a></nav>" + main_open + "<p>" +
+                                      story + "</p><a href=\"/card\"";
+        const std::string card_body =
+            R"(><p>Blurb <a href="/x">one<a href="/y">two</a></p><p>Teaser</a>)";
+        CHECK(read(card_open + " class=\"promo-card\"" + card_body + rest).text ==
+              "# The headline\n\n" + read_story + "\n\n" + read_rest);
+        CHECK(read(card_open + card_body + rest).text ==
+              "# The headline\n\n" + read_story +
+                  "\n\n[Blurb (one)(https://example.test/x) (two)(https://example.test/y) "
+                  "Teaser](https://example.test/card)\n\n" +
+                  read_rest);
+    }
+    SECTION("<base href=\"#x\"> is the page itself: its links stay where they were") {
+        CHECK(read("<head><base href=\"#x\"></head><body><a href=\"c.html\">c</a> "
+                   "<a href=\"?page=2\">next</a></body>")
+                  .text ==
+              "[c](https://example.test/a/c.html) [next](https://example.test/a/b.html?page=2)");
+    }
 }
 
 TEST_CASE("paging walks the whole text with no gap, no overlap, and never inside a character",

@@ -5,12 +5,15 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <random>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "platform/pid_lock.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
 #include "training/manifest.h"
 #include "training/mock_trainer.h"
@@ -134,7 +137,8 @@ TEST_CASE(
     CHECK(m.stages[1].status == "passed");
     CHECK(m.last_passed() == 1);
     CHECK(m.promote_run_id() == "pipe-1-s1");
-    CHECK(m.first_unpassed() == 2);
+    CHECK(m.resume_from() == 2);
+    CHECK(m.kept_failed().empty());
 
     const apogee::training::RunManifest s0 = fixture.stage_run("pipe-1", 0);
     CHECK(s0.parent_run.empty());
@@ -170,7 +174,10 @@ TEST_CASE(
     CHECK_FALSE(first.ok);
     CHECK_FALSE(first.cancelled);
     CHECK(first.error.find("cumulative eval gate") != std::string::npos);
-    CHECK(first.error.find("pipeline resume pipe-2") != std::string::npos);
+    // Why it stopped and nothing more (57h): the door is the verb's.
+    CHECK(first.gate_failed);
+    CHECK(first.error.find("pipeline resume") == std::string::npos);
+    CHECK(first.error.find("--continue-on-fail") == std::string::npos);
     CHECK(first.manifest.status == "aborted");
     REQUIRE(first.manifest.stages.size() == 3);
     CHECK(first.manifest.stages[0].status == "passed");
@@ -183,7 +190,10 @@ TEST_CASE(
     CHECK(first.manifest.stages[1].eval->num_passed == 1);
     CHECK_FALSE(first.manifest.stages[1].cumulative_passed);
     CHECK(first.manifest.last_passed() == 0);
-    CHECK(first.manifest.first_unpassed() == 1);
+    // Under the hard gate the resume point is the first stage that has not
+    // passed.
+    CHECK(first.manifest.resume_from() == 1);
+    CHECK(first.manifest.kept_failed().empty());
     CHECK(first.manifest.promote_run_id() == "pipe-2-s0");
     // The failed stage's own run is complete with its eval recorded.
     CHECK(fixture.stage_run("pipe-2", 1).complete());
@@ -334,6 +344,132 @@ TEST_CASE(
     CHECK(outcome.manifest.stages[1].status == "pending");
     // Resumable: not complete, the spec unchanged.
     CHECK(apogee::training::resume_check(outcome.manifest, cancelled.spec).empty());
+}
+
+TEST_CASE(
+    "one process owns a pipeline: the run holds its lock and lets it go; a resume under a live "
+    "holder is refused naming it, the manifest untouched; a dead holder's lock is taken and the "
+    "resume runs",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    fixture.add_stage("b", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say nope", "nope"}});
+    const std::filesystem::path dir = fixture.training / "pipelines" / "pipe-30";
+    const std::filesystem::path lock_path = dir / "pipeline.lock";
+    const long self = apogee::platform::current_process_id();
+
+    // While it runs, this process holds it; once it ends, no one does.
+    std::vector<long> seen;
+    PipelineRequest request = fixture.request("pipe-30");
+    request.on_manifest = [&](const PipelineRunManifest& /*manifest*/) {
+        const auto holder = apogee::training::pipeline_holder(dir);
+        seen.push_back(holder.has_value() ? holder->pid : 0);
+    };
+    const PipelineOutcome first = apogee::training::run_pipeline(request);
+    REQUIRE_FALSE(first.ok);
+    CHECK(first.manifest.status == "aborted");
+    REQUIRE_FALSE(seen.empty());
+    for (const long pid : seen) {
+        CHECK(pid == self);
+    }
+    CHECK_FALSE(apogee::training::pipeline_holder(dir).has_value());
+    CHECK_FALSE(std::filesystem::exists(lock_path));
+
+    // A live holder -- this process's own lock, from a second acquire, as
+    // another `train pipeline run` or a cycle pass would hold it.
+    write(fixture.spec.stages[1].dataset, kPlain);
+    {
+        apogee::platform::PidLock::Refusal refusal;
+        const std::optional<apogee::platform::PidLock> held =
+            apogee::platform::PidLock::acquire(lock_path, "pipe-30", false, refusal);
+        REQUIRE(held.has_value());
+        const auto holder = apogee::training::pipeline_holder(dir);
+        REQUIRE(holder.has_value());
+        CHECK(holder->pid == self);
+        CHECK(apogee::training::pipeline_holder_text(*holder) ==
+              "running now (process " + std::to_string(self) + ")");
+        const std::string before = read(dir / "manifest.json");
+        const std::string refusal_text = apogee::training::resume_check(
+            fixture.on_disk("pipe-30"), fixture.spec, fixture.training);
+        CHECK(refusal_text.find("pipeline pipe-30 is running now (process " + std::to_string(self) +
+                                ")") != std::string::npos);
+        CHECK(refusal_text.find("cannot be resumed while it runs") != std::string::npos);
+        // The pure check knows nothing of holders.
+        CHECK(apogee::training::resume_check(fixture.on_disk("pipe-30"), fixture.spec).empty());
+        const PipelineOutcome refused = apogee::training::resume_pipeline(
+            fixture.request("pipe-30"), fixture.on_disk("pipe-30"));
+        CHECK_FALSE(refused.ok);
+        CHECK_FALSE(refused.cancelled);
+        CHECK(refused.error == refusal_text);
+        CHECK(read(dir / "manifest.json") == before);
+        CHECK(fixture.on_disk("pipe-30").status == "aborted");
+    }
+
+    // A holder that died -- a kill, a crash: nothing to delete by hand. The
+    // read says no one holds it, and the resume takes the lock and runs.
+    write(lock_path, "999999999\npipe-30\n");
+    CHECK_FALSE(apogee::training::pipeline_holder(dir).has_value());
+    CHECK(apogee::training::resume_check(fixture.on_disk("pipe-30"), fixture.spec, fixture.training)
+              .empty());
+    const PipelineOutcome resumed =
+        apogee::training::resume_pipeline(fixture.request("pipe-30"), fixture.on_disk("pipe-30"));
+    INFO(resumed.error);
+    REQUIRE(resumed.ok);
+    CHECK(resumed.manifest.complete());
+    CHECK_FALSE(std::filesystem::exists(lock_path));
+}
+
+TEST_CASE(
+    "a run whose snapshot is gone is refused whatever spec is named, after what its record and "
+    "its holder say",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    PipelineRunManifest run;
+    run.pipeline_run_id = "pipe-32";
+    run.status = std::string{apogee::training::kPipelineAborted};
+    run.base_model = fixture.snap.string();
+    CHECK(apogee::training::resume_refusal(run, fixture.training).empty());
+
+    // Deleted since the run began (`models delete`): no spec brings it back,
+    // so the refusal is the record's, before any spec is looked for.
+    std::filesystem::remove_all(fixture.snap);
+    const std::string gone = "the run's snapshot is gone: " + fixture.snap.string();
+    CHECK(apogee::training::resume_refusal(run, fixture.training) == gone);
+    CHECK(apogee::training::resume_check(run, fixture.spec, fixture.training) == gone);
+    // The pure checks read nothing on disk.
+    CHECK(apogee::training::resume_refusal(run).empty());
+    CHECK(apogee::training::resume_check(run, fixture.spec).empty());
+
+    // A complete run is said to be complete, and a held one held.
+    PipelineRunManifest complete = run;
+    complete.status = std::string{apogee::training::kPipelineComplete};
+    CHECK(apogee::training::resume_refusal(complete, fixture.training).find("already complete") !=
+          std::string::npos);
+    apogee::platform::PidLock::Refusal refusal;
+    const std::optional<apogee::platform::PidLock> held = apogee::platform::PidLock::acquire(
+        fixture.training / "pipelines" / "pipe-32" / "pipeline.lock", "pipe-32", false, refusal);
+    REQUIRE(held.has_value());
+    CHECK(apogee::training::resume_refusal(run, fixture.training).find("running now") !=
+          std::string::npos);
+}
+
+TEST_CASE(
+    "a resume reads the manifest again once it holds the lock: a holder that finished "
+    "meanwhile is not run over",
+    "[training][pipeline][lock]") {
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    const PipelineOutcome done = apogee::training::run_pipeline(fixture.request("pipe-31"));
+    REQUIRE(done.ok);
+    // A copy read while the run was still going says `running`.
+    PipelineRunManifest stale = done.manifest;
+    stale.status = "running";
+    stale.stages[0].status = "training";
+    const PipelineOutcome again =
+        apogee::training::resume_pipeline(fixture.request("pipe-31"), stale);
+    CHECK_FALSE(again.ok);
+    CHECK(again.error.find("already complete") != std::string::npos);
+    CHECK(fixture.on_disk("pipe-31").complete());
 }
 
 TEST_CASE(
@@ -550,4 +686,197 @@ TEST_CASE(
     CHECK(retrained.front().adapter_dir.empty());
     CHECK_FALSE(retrained.front().eval.has_value());
     CHECK(retrained.front().cumulative_score == 0.0);
+}
+
+// --- 57h: where a resume starts, the spec it finds, the files it cannot read ----
+
+TEST_CASE(
+    "a resume starts after the last passed stage: an earlier failed stage stays as it is, the "
+    "runner trains only what follows, and the resume point is the one every surface reads",
+    "[training][pipeline][resume][57h]") {
+    // The sweep's pE: a fails its gate, b passes, c's training errors.
+    Fixture fixture;
+    fixture.add_stage("a", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say hello", "hello"}});
+    fixture.add_stage("b", "{\"mock\": {\"answer\": \"hello\"}}\n", {{"say hello", "hello"}});
+    fixture.add_stage("c", "{\"mock\": {\"error\": \"GPU on fire\"}}\n", {{"say hello", "hello"}});
+    PipelineRequest request = fixture.request("pipe-e");
+    request.continue_on_fail = true;
+    const PipelineOutcome first = apogee::training::run_pipeline(request);
+    CHECK_FALSE(first.ok);
+    CHECK_FALSE(first.gate_failed);  // a training failure, not a gate
+    REQUIRE(first.manifest.stages.size() == 3);
+    CHECK(first.manifest.stages[0].status == "failed");
+    CHECK(first.manifest.stages[1].status == "passed");
+    CHECK(first.manifest.stages[2].status == "failed");
+    CHECK(first.manifest.resume_from() == 2);
+    CHECK(first.manifest.kept_failed() == std::vector<std::size_t>{0});
+
+    const std::string a_started = fixture.stage_run("pipe-e", 0).started_at;
+    const std::string b_started = fixture.stage_run("pipe-e", 1).started_at;
+    write(fixture.spec.stages[2].dataset, "{\"mock\": {\"answer\": \"hello\"}}\n");
+    std::vector<int> trained;
+    PipelineRequest again = fixture.request("pipe-e");
+    again.on_progress = [&trained](const apogee::training::PipelineProgress& progress) {
+        if (progress.phase == "training" && !progress.message.empty()) {
+            trained.push_back(progress.stage_index);
+        }
+    };
+    const PipelineOutcome resumed =
+        apogee::training::resume_pipeline(again, fixture.on_disk("pipe-e"));
+    INFO(resumed.error);
+    REQUIRE(resumed.ok);
+    CHECK(trained == std::vector<int>{2});
+    CHECK(resumed.manifest.stages[0].status == "failed");  // stays as it is
+    CHECK(resumed.manifest.stages[2].status == "passed");
+    CHECK(fixture.stage_run("pipe-e", 0).started_at == a_started);
+    CHECK(fixture.stage_run("pipe-e", 1).started_at == b_started);
+    // c trained from b's fused checkpoint, the last passed stage's.
+    CHECK(resumed.manifest.stages[2].base_model ==
+          (fixture.training / "runs" / "pipe-e-s1" / "fused").string());
+
+    // No stage passed: from the start; every stage passed: nothing left.
+    PipelineRunManifest none;
+    none.stages.resize(2);
+    CHECK(none.resume_from() == 0);
+    none.stages[0].status = "passed";
+    none.stages[1].status = "passed";
+    CHECK(none.resume_from() == 2);
+}
+
+TEST_CASE(
+    "the manifest records the spec reference the run took, and an older manifest without one "
+    "reads and writes as it did",
+    "[training][pipeline][spec_ref][57h]") {
+    Fixture fixture;
+    fixture.add_stage("a", kPlain, {{"say hello", "hello"}});
+    PipelineRequest request = fixture.request("pipe-r");
+    request.spec_ref = "skills";
+    REQUIRE(apogee::training::run_pipeline(request).ok);
+    CHECK(fixture.on_disk("pipe-r").spec_ref == "skills");
+    CHECK(apogee::training::pipeline_manifest_to_json(fixture.on_disk("pipe-r"))["spec_ref"] ==
+          "skills");
+    PipelineRunManifest older = fixture.on_disk("pipe-r");
+    older.spec_ref.clear();
+    CHECK_FALSE(apogee::training::pipeline_manifest_to_json(older).contains("spec_ref"));
+    CHECK(apogee::training::pipeline_manifest_from_json(
+              apogee::training::pipeline_manifest_to_json(older))
+              .spec_ref.empty());
+
+    // A resume that names a spec records it in place of the run's.
+    Fixture aborted;
+    aborted.add_stage("a", kPlain, {{"say hello", "hello"}});
+    aborted.add_stage("b", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say nope", "nope"}});
+    PipelineRequest first = aborted.request("pipe-s");
+    first.spec_ref = "/old/spec.yaml";
+    REQUIRE_FALSE(apogee::training::run_pipeline(first).ok);
+    write(aborted.spec.stages[1].dataset, kPlain);
+    PipelineRequest named = aborted.request("pipe-s");
+    named.spec_ref = "skills";
+    REQUIRE(apogee::training::resume_pipeline(named, aborted.on_disk("pipe-s")).ok);
+    CHECK(aborted.on_disk("pipe-s").spec_ref == "skills");
+}
+
+TEST_CASE(
+    "a resume without --pipeline finds the spec by the reference the run recorded, its key, or "
+    "the one entry whose name it carries; an ambiguous name and a gone spec file are refused",
+    "[training][pipeline][spec_ref][57h]") {
+    const apogee::testing::TempDir root{"resume-spec-" + std::to_string(std::random_device{}())};
+    std::map<std::string, apogee::harness::PipelineSpec, std::less<>> pipelines;
+    apogee::harness::PipelineSpec nightly;
+    nightly.name = "Nightly SFT";
+    pipelines["nightly"] = nightly;
+    PipelineRunManifest run;
+    run.pipeline_run_id = "pipe-1";
+    run.spec_name = "Nightly SFT";
+
+    // An older manifest, no reference: the one entry of that name.
+    CHECK(apogee::training::find_resume_spec(run, pipelines).ref == "nightly");
+    // Its key as recorded.
+    run.spec_ref = "nightly";
+    CHECK(apogee::training::find_resume_spec(run, pipelines).ref == "nightly");
+    // The name as a key wins over a name: match.
+    apogee::harness::PipelineSpec keyed;
+    keyed.name = "other";
+    pipelines["Nightly SFT"] = keyed;
+    run.spec_ref.clear();
+    CHECK(apogee::training::find_resume_spec(run, pipelines).ref == "Nightly SFT");
+    pipelines.erase("Nightly SFT");
+
+    // Two entries of one name: refused, naming both.
+    pipelines["second"] = nightly;
+    const apogee::training::ResumeSpec two = apogee::training::find_resume_spec(run, pipelines);
+    CHECK(two.ref.empty());
+    CHECK(two.problem.find("'nightly'") != std::string::npos);
+    CHECK(two.problem.find("'second'") != std::string::npos);
+    pipelines.erase("second");
+
+    // A spec file, by its absolute path, while it is there.
+    const std::filesystem::path file = root.path() / "two.yaml";
+    write(file, "stages: []\n");
+    run.spec_ref = file.string();
+    CHECK(apogee::training::find_resume_spec(run, pipelines).ref == file.string());
+    // Gone: refused, never another entry of the same name.
+    std::filesystem::remove(file);
+    const apogee::training::ResumeSpec gone = apogee::training::find_resume_spec(run, pipelines);
+    CHECK(gone.ref.empty());
+    CHECK(gone.problem.find(file.string()) != std::string::npos);
+    CHECK(gone.problem.find("not there any more") != std::string::npos);
+
+    // Nothing of the name at all.
+    run.spec_ref.clear();
+    run.spec_name = "gone";
+    const apogee::training::ResumeSpec none = apogee::training::find_resume_spec(run, pipelines);
+    CHECK(none.ref.empty());
+    CHECK(none.problem.find("'gone' is not under training.pipelines") != std::string::npos);
+}
+
+TEST_CASE(
+    "a cycle pass's pipeline is never resumed: the check refuses it naming the cycle's own "
+    "verb, and the runner leaves its candidate as it was",
+    "[training][pipeline][cycle][57h]") {
+    Fixture fixture;
+    fixture.add_stage("a", "{\"mock\": {\"answer\": \"nope\"}}\n", {{"say hello", "hello"}});
+    const PipelineOutcome pass = apogee::training::run_pipeline(fixture.request("cycle-1"));
+    REQUIRE_FALSE(pass.ok);
+    CHECK(apogee::training::is_cycle_pass("cycle-1"));
+    CHECK_FALSE(apogee::training::is_cycle_pass("pipe-1"));
+    const std::string refusal = apogee::training::resume_refusal(pass.manifest);
+    CHECK(refusal.find("is a cycle pass") != std::string::npos);
+    CHECK(refusal.find("'apogee train cycle run'") != std::string::npos);
+    CHECK(apogee::training::resume_check(pass.manifest, fixture.spec) == refusal);
+    CHECK(apogee::training::resume_check(pass.manifest, fixture.spec, fixture.training) == refusal);
+
+    const std::filesystem::path adapter =
+        fixture.training / "runs" / "cycle-1-s0" / "adapters" / "adapter_config.json";
+    REQUIRE(std::filesystem::exists(adapter));
+    const std::string before = read(adapter);
+    write(fixture.spec.stages[0].dataset, kPlain);
+    const PipelineOutcome resumed =
+        apogee::training::resume_pipeline(fixture.request("cycle-1"), fixture.on_disk("cycle-1"));
+    CHECK_FALSE(resumed.ok);
+    CHECK(resumed.error == refusal);
+    CHECK(read(adapter) == before);
+    CHECK(fixture.on_disk("cycle-1").status == "aborted");
+    // A complete one says so first.
+    PipelineRunManifest complete = pass.manifest;
+    complete.status = "complete";
+    CHECK(apogee::training::resume_refusal(complete).find("already complete") != std::string::npos);
+}
+
+TEST_CASE(
+    "a pipeline manifest with a field of the wrong type is named with its file, never the "
+    "library's bare message",
+    "[training][pipeline][manifest][57h]") {
+    Fixture fixture;
+    const std::filesystem::path dir = fixture.training / "pipelines" / "pipe-t";
+    write(dir / "manifest.json",
+          R"({"pipeline_run_id": "pipe-t", "stages": [{"index": "one", "name": "a"}]})");
+    std::string error;
+    CHECK_FALSE(apogee::training::read_pipeline_manifest(dir, error).has_value());
+    CHECK(error.starts_with((dir / "manifest.json").string() + ": "));
+    CHECK(error.find("type must be number") != std::string::npos);
+    write(dir / "manifest.json",
+          R"({"pipeline_run_id": "pipe-t", "stages": [{"eval_results": {"score": "high"}}]})");
+    CHECK_FALSE(apogee::training::read_pipeline_manifest(dir, error).has_value());
+    CHECK(error.starts_with((dir / "manifest.json").string() + ": "));
 }

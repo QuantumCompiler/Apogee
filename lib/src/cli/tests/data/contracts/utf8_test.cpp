@@ -17,6 +17,7 @@
 /// the bug this guards is a character cut at a byte boundary nobody chose.
 namespace {
 
+using apogee::harness::ill_formed_bytes;
 using apogee::harness::is_valid_utf8;
 using apogee::harness::Utf8Stream;
 using apogee::harness::valid_utf8;
@@ -182,4 +183,20 @@ TEST_CASE("each maximal subpart of an ill-formed sequence is one U+FFFD", "[cont
     CHECK(stream.feed("a\xFF") == "a" + replaced());
     CHECK(stream.feed("\xC0") == replaced());
     CHECK(stream.flush().empty());
+}
+
+TEST_CASE("ill_formed_bytes counts every byte a mend shows as U+FFFD", "[contracts][utf8][57t]") {
+    CHECK(ill_formed_bytes("") == 0);
+    CHECK(ill_formed_bytes("caf\xC3\xA9 \xEF\xBF\xBD") == 0);  // a U+FFFD written is text
+    CHECK(ill_formed_bytes("def caf\xE9_atlas():") == 1);
+    CHECK(ill_formed_bytes("caf\xE9 cr\xE8me") == 2);
+    CHECK(ill_formed_bytes("\xC0\x80") == 2);       // overlong: two subparts, two bytes
+    CHECK(ill_formed_bytes("\xED\xA0\x80") == 3);   // a surrogate: three
+    CHECK(ill_formed_bytes("a\xF0\x9F\x98") == 3);  // cut off at the end: one U+FFFD, three bytes
+    CHECK(ill_formed_bytes("\xE2\x82"
+                           "A") == 2);  // broken, the breaking byte read again
+    for (const std::string_view text : {"plain", "caf\xE9", "\xC0\x80", "\xF0\x9F\x98"}) {
+        INFO(text);
+        CHECK((ill_formed_bytes(text) == 0) == is_valid_utf8(text));
+    }
 }

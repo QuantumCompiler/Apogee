@@ -366,6 +366,18 @@ def check_side_calls(binary, home, env):
     return failures
 
 
+def asks_about(text, tool):
+    """Whether the permission prompt above the first `Allow?` is `tool`'s.
+    Its first line, `[perm] <tool> -> <target>`, is the last `[perm]` line
+    before the question: since 57p the call's detail -- `run_command`'s whole
+    command and its `cwd:` -- is drawn indented under it."""
+    before = text.split(b"Allow? [y]es")[0].splitlines()
+    for line in reversed(before[-6:]):
+        if b"[perm]" in line:
+            return tool in line
+    return False
+
+
 def check_presets(binary, home, env):
     """`chat --allow write_file` writes with no prompt and still asks for
     `run_command`; `/allow run_command` stops that ask (26o)."""
@@ -394,8 +406,7 @@ def check_presets(binary, home, env):
     asks = text.count(b"Allow? [y]es")
     if asks != 1:
         failures.append(f"expected one prompt -- for run_command -- saw {asks}: {text!r}")
-    elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
-            text.split(b"Allow? [y]es")[0].splitlines()[-1]:
+    elif not asks_about(text, b"run_command"):
         failures.append(f"the prompt was not run_command's: {text!r}")
     return failures
 
@@ -434,8 +445,7 @@ def check_task_attended(binary, home, env):
     asks = text.count(b"Allow? [y]es")
     if asks != 1:
         failures.append(f"expected one prompt -- for run_command -- saw {asks}: {text!r}")
-    elif b"run_command" not in text.split(b"Allow? [y]es")[0].splitlines()[-2] + \
-            text.split(b"Allow? [y]es")[0].splitlines()[-1]:
+    elif not asks_about(text, b"run_command"):
         failures.append(f"the prompt was not run_command's: {text!r}")
     tasks = os.path.join(home, "tasks")
     ledgers = [os.path.join(tasks, name, "task.json") for name in os.listdir(tasks)

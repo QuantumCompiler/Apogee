@@ -9,12 +9,14 @@
 #include <vector>
 
 #include "agent/web_search.h"
+#include "ansi/inert.h"
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/host.h"
 #include "contracts/text_diff.h"
 #include "machine/driver_input.h"
 #include "platform/platform.h"
+#include "tools/toolsets.h"
 
 namespace apogee::commands {
 namespace {
@@ -310,6 +312,41 @@ bool answer_permission(std::string_view text, const agent::GateRequest& request,
     return apply_answer(parse_answer(text), request, config_path, approvals, note);
 }
 
+std::string permission_prompt_line(const agent::GateRequest& request, const ansi::Style& style) {
+    // Each a line (57p): a CR and an erase in a command would otherwise draw a
+    // harmless one over the prompt, and the person approve what they never
+    // saw.
+    return style.tag(ansi::Role::Permission) + " " + ansi::inert_line(request.tool) +
+           (request.target.empty() ? "" : " -> " + ansi::inert_line(request.target));
+}
+
+std::vector<std::string> permission_prompt_lines(const agent::GateRequest& request,
+                                                 const ansi::Style& style) {
+    std::vector<std::string> lines{permission_prompt_line(request, style)};
+    if (request.detail.empty() || request.detail == request.target) {
+        return lines;  // a target already whole is not said twice
+    }
+    if (request.edits) {
+        // A file writer's diff is said by its counts (52a) -- the change's
+        // size at a glance; machine mode carries the diff itself.
+        lines.push_back(
+            style.dim("  " + harness::describe_diff_counts(harness::diff_counts(request.detail))));
+        return lines;
+    }
+    // The whole URL, the whole command and where it runs, the whole
+    // arguments: what this call does is in it. Shown as text, every line
+    // under the prompt, so nothing in it starts where a prompt line starts.
+    const std::string shown = ansi::inert_text(request.detail);
+    std::size_t start = 0;
+    while (start < shown.size()) {
+        const std::size_t newline = shown.find('\n', start);
+        const std::size_t end = newline == std::string::npos ? shown.size() : newline;
+        lines.push_back(style.dim("  " + shown.substr(start, end - start)));
+        start = end + 1;
+    }
+    return lines;
+}
+
 agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
                                      std::filesystem::path config_path,
                                      std::shared_ptr<SessionApprovals> approvals) {
@@ -321,16 +358,8 @@ agent::ConfirmFn terminal_confirm_fn(StatusLine& status, ansi::Style style,
             approvals = std::move(approvals)](const agent::GateRequest& request) {
         // Through the status line, so a spinner frame cannot land on top of
         // the prompt -- the same discipline the question prompt keeps.
-        status.print_line(style.tag(ansi::Role::Permission) + " " + std::string{request.tool} +
-                          (request.target.empty() ? "" : " -> " + std::string{request.target}));
-        if (!request.detail.empty()) {
-            // The whole URL: what would leave the machine is in it. A file
-            // writer's diff is said by its counts (52a) -- the change's size
-            // at a glance; machine mode carries the diff itself.
-            status.print_line(style.dim(
-                "  " + (request.edits
-                            ? harness::describe_diff_counts(harness::diff_counts(request.detail))
-                            : std::string{request.detail})));
+        for (const std::string& line : permission_prompt_lines(request, style)) {
+            status.print_line(line);
         }
         std::cerr << style.dim(request.outbound
                                    ? "Allow reaching this website? [y]es / [n]o / [a]lways / "
@@ -409,14 +438,34 @@ std::vector<std::string> edit_tools(const agent::ToolRegistry& registry) {
     return out;
 }
 
-GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites) {
+bool website_shaped(std::string_view name) noexcept {
+    const bool dotted = name.find('.') != std::string_view::npos;
+    const bool bracketed = name.starts_with('[');
+    const bool ipv6 = name.find(':') != std::string_view::npos;
+    const bool single_label = !dotted && name.find('_') == std::string_view::npos;
+    return dotted || bracketed || ipv6 || single_label;
+}
+
+GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites,
+                     bool child_processes) {
     GatedName out;
     if (std::ranges::find(gated, name) != gated.end()) {
         out.key = std::string{name};
         return out;
     }
-    // A website, by the host it names -- as a session's own answer keeps it.
-    if (websites && name.find('.') != std::string_view::npos) {
+    // A native tool this build never offers is no typo: say why it is not
+    // here (57k), not that the name is no tool.
+    if (std::string why = tools::why_not_offered(name, child_processes); !why.empty()) {
+        out.error = std::move(why);
+        out.unoffered = true;
+        return out;
+    }
+    // A website, by the host it names -- as a session's own answer keeps it,
+    // and as `--allow-host` takes it (57o): any name `canonical_host` accepts,
+    // `localhost`, an intranet name and an IPv6 literal included, except a
+    // dotless one with a `_`, which is shaped like a tool -- so a mistyped
+    // `write_flie` is still caught as one.
+    if (websites && website_shaped(name)) {
         if (const std::optional<std::string> host = harness::canonical_host(name);
             host.has_value()) {
             out.key = *host;
@@ -468,7 +517,8 @@ std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets&
         // `--allow` is for tools; a website has `--allow-host`.
         const GatedName name = name_gated(tool, gated, false);
         if (!name.error.empty()) {
-            return "--allow: " + name.error + " (a website takes --allow-host)";
+            return "--allow: " + name.error +
+                   (name.unoffered ? "" : " (a website takes --allow-host)");
         }
         allow_for_session(approvals, name);
     }

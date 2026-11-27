@@ -182,3 +182,163 @@ struct GraphViewModelTests {
         job.end()
     }
 }
+
+/// GUI 6h, finding 1: an explain's failure is the explain's, never the
+/// canvas's. The refusal is the branch's `apogee-dev` over a sandbox home --
+/// a three-file Python tree's graph `demo`, `helper` renamed, `graph update
+/// demo`, then `graph explain --graph demo -- ingest.runner.helper`: exit 1,
+/// its stderr `graph-explain-gone.err`.
+@Suite("Graph: a node gone after Rebuild never takes the canvas (GUI 6h)", .timeLimit(.minutes(1)))
+@MainActor
+struct GraphGoneNodeTests {
+    static let binary = URL(fileURLWithPath: "/Users/someone/.local/bin/apogee")
+    static let gone = "ingest.runner.helper"
+
+    /// The CLI's refusal, recorded: its line, and the read's outcome.
+    static var line: String { printedText("graph-explain-gone.err").trimmingCharacters(in: .newlines) }
+    static var refusal: ReadOutcome {
+        var tail = BoundedTail()
+        tail.append(Data(printedText("graph-explain-gone.err").utf8))
+        return .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail)
+    }
+
+    /// The code graph read, searched, and `helper` explained while the
+    /// graph still held it.
+    func explained(_ runner: ScriptedRunner, jobs: ScriptedJobs = ScriptedJobs([])) async -> GraphViewModel {
+        runner.saying(["__complete", "graph", "stats"], "demo\n")
+        runner.reading(["graph", "stats"], fixture("stats"))
+        runner.reading(["graph", "query"], fixture("query"))
+        runner.reading(["graph", "explain"], fixture("explain"))
+        let model = GraphViewModel(runner: runner, starter: jobs)
+        await model.connect(binary: Self.binary)
+        model.question = "runner fetch"
+        await model.search()
+        await model.select(Self.gone)
+        return model
+    }
+
+    @Test("a Rebuild that removes the explained node keeps the re-run search, drops the card, says the CLI's line once")
+    func rebuildDropsTheGoneNode() async throws {
+        #expect(Self.line.hasPrefix("apogee graph: no node named 'ingest.runner.helper' in graph 'demo' -- near matches: function:ingest.runner.helper_renamed"))
+        let runner = ScriptedRunner()
+        let job = ScriptedJob()
+        let model = await explained(runner, jobs: ScriptedJobs([job]))
+        var said: [String] = []
+        model.say = { said.append($0) }
+        #expect(model.explain != nil && model.selected == Self.gone)
+        runner.reading(["graph", "explain"], Self.refusal)
+        model.rebuild()
+        job.say(.said("Code graph:       8 node(s), 8 edge(s) (nodes +1 ~0 -1; edges +3 -3)"))
+        job.end()
+        #expect(await eventually { !model.isBuilding && said.count == 2 })
+        #expect(runner.calls.contains("read graph query --graph demo -- runner fetch"))
+        #expect(model.emptyText == nil, "the canvas is the search, never the explain's error")
+        #expect(model.failure == nil && model.problem == nil)
+        #expect(model.result?.nodes.count == 8, "the re-run search")
+        #expect(model.selected == nil && model.explain == nil, "the card is gone with its node")
+        #expect(said == ["Code graph:       8 node(s), 8 edge(s) (nodes +1 ~0 -1; edges +3 -3)", "\(Self.line) (exited with status 1)"],
+                "the rebuild's line, then why the card went -- last, so it is the toast that stays")
+        let explains = runner.calls.filter { $0.hasPrefix("read graph explain") }.count
+        await model.refresh()
+        await model.appeared()
+        #expect(runner.calls.filter { $0.hasPrefix("read graph explain") }.count == explains, "no refresh explains it again")
+        #expect(said.count == 2, "said once")
+        #expect(model.emptyText == nil)
+    }
+
+    @Test("coming back to the place after the node went says it once too, and the canvas stays the search")
+    func appearanceDropsTheGoneNode() async {
+        let runner = ScriptedRunner()
+        let model = await explained(runner)
+        var said: [String] = []
+        model.say = { said.append($0) }
+        runner.reading(["graph", "explain"], Self.refusal)
+        await model.appeared()
+        #expect(said == ["\(Self.line) (exited with status 1)"])
+        #expect(model.selected == nil && model.explain == nil && model.emptyText == nil && model.result != nil)
+        await model.appeared()
+        #expect(said.count == 1)
+    }
+
+    @Test("a click's failed explain is the problem alert, in the CLI's words; the canvas kept; Clear closes both")
+    func clickedExplainRefused() async {
+        let runner = ScriptedRunner()
+        let model = await explained(runner)
+        runner.reading(["graph", "explain"], Self.refusal)
+        await model.select(Self.gone)
+        #expect(model.problem == "\(Self.line) (exited with status 1)")
+        #expect(model.failure == nil && model.emptyText == nil, "never the canvas's failure")
+        #expect(model.result?.nodes.count == 8 && model.explain == nil)
+        model.clearSelection()
+        #expect(model.problem == nil && model.selected == nil && model.explain == nil)
+    }
+
+    @Test("the refusal alert's OK drops the refused node's selection; the canvas kept; no refresh asks it again")
+    func refusalsOKClearsTheSelection() async {
+        let runner = ScriptedRunner()
+        let model = await explained(runner)
+        var said: [String] = []
+        model.say = { said.append($0) }
+        runner.reading(["graph", "explain"], Self.refusal)
+        await model.select(Self.gone)
+        #expect(model.selected == Self.gone, "highlighted while its alert says why")
+        model.dismissProblem()
+        #expect(model.problem == nil)
+        #expect(model.selected == nil && model.explain == nil, "OK is the Clear: no highlight left without a card to close")
+        #expect(model.result?.nodes.count == 8 && model.emptyText == nil, "the search stays")
+        let explains = runner.calls.filter { $0.hasPrefix("read graph explain") }.count
+        await model.appeared()
+        await model.refresh()
+        #expect(runner.calls.filter { $0.hasPrefix("read graph explain") }.count == explains, "no refresh asks the refused node again")
+        #expect(said.isEmpty, "the alert said it; no toast says it again")
+    }
+
+    @Test("a Rebuild ending while the refusal's alert is up does not ask the refused node again")
+    func rebuildUnderTheRefusalAsksNothing() async {
+        let runner = ScriptedRunner()
+        let job = ScriptedJob()
+        let model = await explained(runner, jobs: ScriptedJobs([job]))
+        var said: [String] = []
+        model.say = { said.append($0) }
+        runner.reading(["graph", "explain"], Self.refusal)
+        await model.select(Self.gone)
+        let explains = runner.calls.filter { $0.hasPrefix("read graph explain") }.count
+        model.rebuild()
+        job.say(.said("Code graph:       8 node(s), 8 edge(s) (nodes +1 ~0 -1; edges +3 -3)"))
+        job.end()
+        #expect(await eventually { !model.isBuilding && !said.isEmpty })
+        #expect(runner.calls.filter { $0.hasPrefix("read graph explain") }.count == explains, "the alert already says why")
+        #expect(said == ["Code graph:       8 node(s), 8 edge(s) (nodes +1 ~0 -1; edges +3 -3)"], "the refusal is not toasted under its own alert")
+        #expect(model.problem == "\(Self.line) (exited with status 1)" && model.selected == Self.gone)
+        model.dismissProblem()
+        #expect(model.selected == nil && model.problem == nil)
+    }
+
+    @Test("another act's refusal taking the alert drops the refused node's selection with the refusal it replaced")
+    func anExportRefusalReplacesTheExplainRefusal() async {
+        let runner = ScriptedRunner()
+        let model = await explained(runner)
+        runner.reading(["graph", "explain"], Self.refusal)
+        await model.select(Self.gone)
+        runner.refusing(["graph", "export"], refusedWith("graph-export-deleted.err"))
+        await model.export(.html, to: URL(fileURLWithPath: "/Users/someone/demo.html"))
+        #expect(model.problem?.hasPrefix("apogee graph: graph 'spare' has not been built yet") == true)
+        #expect(model.selected == nil && model.explain == nil, "no OK is left that would clear it")
+        model.dismissProblem()
+        #expect(model.problem == nil && model.result?.nodes.count == 8)
+    }
+
+    @Test("clearing the selection leaves another act's refusal standing; its OK leaves the card")
+    func clearKeepsAnExportRefusal() async {
+        let runner = ScriptedRunner()
+        let model = await explained(runner)
+        runner.refusing(["graph", "export"], refusedWith("graph-export-deleted.err"))
+        await model.export(.html, to: URL(fileURLWithPath: "/Users/someone/demo.html"))
+        #expect(model.problem?.hasPrefix("apogee graph: graph 'spare' has not been built yet") == true)
+        model.dismissProblem()
+        #expect(model.selected == Self.gone && model.explain != nil, "OK on the export's refusal is not a Clear")
+        await model.export(.html, to: URL(fileURLWithPath: "/Users/someone/demo.html"))
+        model.clearSelection()
+        #expect(model.problem != nil, "the export's refusal is not the explain's to clear")
+    }
+}

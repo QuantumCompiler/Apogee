@@ -2,12 +2,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "agent/fetch_url.h"
 #include "agent/readable.h"
+#include "contracts/errors.h"
 
 using apogee::agent::dispatch;
 using apogee::agent::DispatchContext;
@@ -165,6 +167,128 @@ TEST_CASE("dispatch reports progress and clears it", "[agent][tool]") {
     CHECK(statuses[1].empty());  // back to rest
 }
 
+TEST_CASE("dispatch reports each call's state, keyed on its id, beside the status line",
+          "[agent][tool][calls]") {
+    // 56a: pending before the gate, running where `[tool] <name>` is said,
+    // then done or failed -- what an ACP host draws as the call's card.
+    using apogee::agent::ToolCallReport;
+    using apogee::agent::ToolCallState;
+
+    struct Seen {
+        std::string id;
+        std::string name;
+        ToolCallState state;
+        std::string target;
+    };
+
+    std::vector<Seen> seen;
+    std::vector<std::string> asked_for;
+    DispatchContext context;
+    context.on_call = [&seen](const ToolCallReport& report) {
+        seen.push_back({std::string{report.id}, std::string{report.name}, report.state,
+                        std::string{report.target}});
+    };
+    context.permission = [](const GateRequest&) { return Permission::Ask; };
+    bool answer = true;
+    context.confirm = [&answer, &asked_for](const GateRequest& request) {
+        asked_for.emplace_back(request.call_id);
+        return answer;
+    };
+
+    ToolRegistry registry;
+    Tool reader = simple_tool("read_file");
+    reader.describe_target = [](std::string_view) { return std::string{"notes.md"}; };
+    registry.add(reader);
+    Tool writer = simple_tool("write_file", true);
+    writer.describe_target = [](std::string_view) { return std::string{"out.txt"}; };
+    registry.add(writer);
+    Tool broken = simple_tool("broken");
+    broken.run = [](std::string_view) { return ToolOutcome{"Error: no", true}; };
+    registry.add(broken);
+
+    (void)dispatch(registry, ToolCall{"call-1", "read_file", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[0].id == "call-1");
+    CHECK(seen[0].name == "read_file");
+    CHECK(seen[0].target == "notes.md");
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Running);
+    CHECK(seen[2].state == ToolCallState::Done);
+    // A read asks nobody.
+    CHECK(asked_for.empty());
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-2", "write_file", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[2].state == ToolCallState::Done);
+    // The prompt is told which call it is asking about.
+    CHECK(asked_for == std::vector<std::string>{"call-2"});
+
+    seen.clear();
+    answer = false;
+    const ToolOutcome refused = dispatch(registry, ToolCall{"call-3", "write_file", "{}"}, context);
+    CHECK(refused.is_error);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].id == "call-3");
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-4", "broken", "{}"}, context);
+    REQUIRE(seen.size() == 3);
+    CHECK(seen[2].state == ToolCallState::Failed);
+
+    seen.clear();
+    (void)dispatch(registry, ToolCall{"call-5", "no_such_tool", "{}"}, context);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].name == "no_such_tool");
+
+    // A gate that throws -- the turn cancelled while its question was open,
+    // or a driver gone mid-question -- still ends the call, `failed`, before
+    // the throw goes on: no surface is left drawing it `pending`, and the
+    // tool never ran.
+    seen.clear();
+    bool ran = false;
+    Tool guarded = simple_tool("edit_file", true);
+    guarded.describe_target = [](std::string_view) { return std::string{"a.txt"}; };
+    guarded.run = [&ran](std::string_view) {
+        ran = true;
+        return ToolOutcome{"ran", false};
+    };
+    registry.add(guarded);
+    context.confirm = [](const GateRequest&) -> bool { throw apogee::harness::CancelledError(); };
+    CHECK_THROWS_AS(dispatch(registry, ToolCall{"call-6", "edit_file", "{}"}, context),
+                    apogee::harness::CancelledError);
+    CHECK_FALSE(ran);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].id == "call-6");
+    CHECK(seen[1].target == "a.txt");
+
+    seen.clear();
+    Tool fetcher = simple_tool("fetch_url");
+    fetcher.outbound = true;
+    fetcher.describe_target = [](std::string_view) { return std::string{"example.com"}; };
+    registry.add(fetcher);
+    context.confirm = [](const GateRequest&) -> bool {
+        throw std::runtime_error("the driver closed stdin with a permission prompt unanswered");
+    };
+    CHECK_THROWS_AS(dispatch(registry, ToolCall{"call-7", "fetch_url", "{}"}, context),
+                    std::runtime_error);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].state == ToolCallState::Pending);
+    CHECK(seen[1].state == ToolCallState::Failed);
+    CHECK(seen[1].target == "example.com");
+
+    CHECK(apogee::agent::to_string(ToolCallState::Pending) == "pending");
+    CHECK(apogee::agent::to_string(ToolCallState::Running) == "running");
+    CHECK(apogee::agent::to_string(ToolCallState::Done) == "done");
+    CHECK(apogee::agent::to_string(ToolCallState::Failed) == "failed");
+}
+
 TEST_CASE("a tool's output that is not UTF-8 leaves dispatch as UTF-8", "[agent][tool][utf8]") {
     // A Latin-1 file, a command's raw bytes, a stream cut mid-character: the
     // result reaches history, the session file, the next request and an MCP
@@ -301,4 +425,151 @@ TEST_CASE("fetch_url with no fetcher wired says so", "[agent][fetch]") {
     const auto outcome = run_fetch(tool, R"({"url":"https://x.test"})");
     CHECK(outcome.is_error);
     CHECK(outcome.content.find("not available") != std::string::npos);
+}
+
+TEST_CASE("a call its tool refuses for its target is refused unrun, before the gate asks",
+          "[agent][permission][57o]") {
+    // The file tools' twin of "an outbound tool must name its target" (57o):
+    // a writer whose path lands outside the root is never asked about.
+    using apogee::agent::ToolCallReport;
+    using apogee::agent::ToolCallState;
+    bool ran = false;
+    int checked = 0;
+    int asked = 0;
+    std::vector<ToolCallState> states;
+    Tool writer = simple_tool("write_file", true);
+    writer.run = [&ran](std::string_view) {
+        ran = true;
+        return ToolOutcome{"written", false};
+    };
+    writer.target_refusal = [](std::string_view arguments) -> std::string {
+        return arguments == R"({"path":"../out"})" ? "Error: '../out' is outside the allowed root"
+                                                   : std::string{};
+    };
+    ToolRegistry registry;
+    registry.add(writer);
+    DispatchContext context;
+    context.permission = [&checked](const GateRequest&) {
+        ++checked;
+        return Permission::Allow;
+    };
+    context.confirm = [&asked](const GateRequest&) {
+        ++asked;
+        return true;
+    };
+    context.on_call = [&states](const ToolCallReport& report) { states.push_back(report.state); };
+
+    const ToolOutcome refused =
+        dispatch(registry, ToolCall{"c1", "write_file", R"({"path":"../out"})"}, context);
+    CHECK(refused.is_error);
+    CHECK(refused.content == "Error: '../out' is outside the allowed root");
+    CHECK_FALSE(ran);
+    CHECK(checked == 0);
+    CHECK(asked == 0);
+    CHECK(states == std::vector<ToolCallState>{ToolCallState::Pending, ToolCallState::Failed});
+    CHECK_FALSE(permitted(writer, R"({"path":"../out"})", context));
+    CHECK(checked == 0);
+
+    // A target it takes goes on to the gate, as ever.
+    CHECK_FALSE(
+        dispatch(registry, ToolCall{"c2", "write_file", R"({"path":"in"})"}, context).is_error);
+    CHECK(ran);
+    CHECK(checked == 1);
+}
+
+TEST_CASE("a tool that reaches a host while it runs asks about it as a website, and nothing else",
+          "[agent][permission][57x]") {
+    // The git review fetch's mechanism (57x): its calls are not gated, but a
+    // host it puts through its gate is judged as an outbound tool's target
+    // is -- by host, with the website's prompt -- one rule here, never a
+    // case in the tool.
+    /// A request as the gate saw it, its views copied out.
+    struct Seen {
+        std::string tool;
+        std::string target;
+        std::string detail;
+        std::string call_id;
+        bool outbound = false;
+    };
+
+    const auto seen = [](const GateRequest& request) {
+        return Seen{std::string{request.tool}, std::string{request.target},
+                    std::string{request.detail}, std::string{request.call_id}, request.outbound};
+    };
+    std::vector<Seen> checked;
+    std::vector<Seen> asked;
+    std::vector<std::string> said;
+    Tool fetching = simple_tool("git_diff");
+    fetching.run = nullptr;
+    fetching.reaches_hosts = true;
+    fetching.run_gated = [&said](std::string_view arguments,
+                                 const apogee::agent::TargetGate& gate) {
+        if (arguments == "{}") {
+            return ToolOutcome{"local only", false};
+        }
+        const bool allowed = gate("github.com", "https://github.com/acme/widget.git");
+        said.emplace_back(allowed ? "fetched" : "refused");
+        return ToolOutcome{said.back(), !allowed};
+    };
+    ToolRegistry registry;
+    registry.add(fetching);
+    DispatchContext context;
+    Permission answer = Permission::Ask;
+    context.permission = [&](const GateRequest& request) {
+        checked.push_back(seen(request));
+        return answer;
+    };
+    context.confirm = [&](const GateRequest& request) {
+        asked.push_back(seen(request));
+        return true;
+    };
+
+    // A call that reaches nowhere asks nothing: the tool itself is not gated.
+    CHECK(permitted(fetching, "{}", context));
+    CHECK(dispatch(registry, ToolCall{"c0", "git_diff", "{}"}, context).content == "local only");
+    CHECK(checked.empty());
+    CHECK(asked.empty());
+
+    // The host it reaches is a website to the checker and to the prompt.
+    CHECK(dispatch(registry, ToolCall{"c1", "git_diff", R"({"head":"x"})"}, context).content ==
+          "fetched");
+    REQUIRE(checked.size() == 1);
+    CHECK(checked.front().tool == "git_diff");
+    CHECK(checked.front().target == "github.com");
+    CHECK(checked.front().outbound);
+    REQUIRE(asked.size() == 1);
+    CHECK(asked.front().outbound);
+    CHECK(asked.front().detail == "https://github.com/acme/widget.git");
+    CHECK(asked.front().call_id == "c1");
+
+    // Allowed by the checker, nobody is asked; denied, nothing goes.
+    answer = Permission::Allow;
+    CHECK(dispatch(registry, ToolCall{"c2", "git_diff", R"({"head":"x"})"}, context).content ==
+          "fetched");
+    answer = Permission::Deny;
+    CHECK(dispatch(registry, ToolCall{"c3", "git_diff", R"({"head":"x"})"}, context).is_error);
+    CHECK(asked.size() == 1);
+    // Nobody to ask: ask is a no.
+    answer = Permission::Ask;
+    context.confirm = nullptr;
+    CHECK(dispatch(registry, ToolCall{"c4", "git_diff", R"({"head":"x"})"}, context).is_error);
+    CHECK(said == std::vector<std::string>{"fetched", "fetched", "refused", "refused"});
+
+    // A tool with a gate that is not said to reach hosts asks as before:
+    // its targets are not websites.
+    Tool other = fetching;
+    other.name = "other";
+    other.reaches_hosts = false;
+    registry.add(other);
+    checked.clear();
+    context.confirm = [](const GateRequest&) { return true; };
+    (void)dispatch(registry, ToolCall{"c5", "other", R"({"head":"x"})"}, context);
+    REQUIRE(checked.size() == 1);
+    CHECK_FALSE(checked.front().outbound);
+
+    // One that reaches hosts must take the gate to ask with.
+    Tool gateless = simple_tool("gateless");
+    gateless.reaches_hosts = true;
+    ToolRegistry refusing;
+    CHECK_THROWS_AS(refusing.add(gateless), std::invalid_argument);
 }

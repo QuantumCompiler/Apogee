@@ -17,8 +17,12 @@
 /// filled in, before the collection is searched. The chat model's own
 /// question, and what it is shown, are unchanged; only the search is.
 ///
-/// Never fails a turn: any problem -- the model erring, answering nothing,
-/// answering at length -- searches with the question as asked.
+/// Never fails a turn: any problem -- the model erring, answering nothing or
+/// only lead-ins, answering at length -- searches with the question as asked.
+/// A reply that opens with a lead-in (`Sure! Here is the standalone search
+/// query:`) is read past it, to the query on the line after (57r). A cancel
+/// is not a problem of the rewrite's: `CancelledError` goes on up, so a
+/// stopped turn stops here too.
 namespace apogee::agentloop {
 
 /// What a rewrite produced.

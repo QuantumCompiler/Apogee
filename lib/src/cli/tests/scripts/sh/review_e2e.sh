@@ -8,8 +8,9 @@
 # document comes out on stdout alone, the narration on stderr. Then `review
 # sweep` (48d) over one target: a first sweep starting at now, `--since`
 # reviewing into the document without a grant, the watermark kept and
-# nothing reviewed twice, the lock refusing a second sweep, `--allow-post`
-# posting.
+# nothing reviewed twice, the lock refusing a second sweep, a dry run
+# (57w) -- first seen at now, then from a date under a grant -- reviewing and
+# saving no watermark, and the `--allow-post` sweep after it still posting.
 #
 # POSIX only, like the other shell checks. Skips (77) without python3.
 set -eu
@@ -142,10 +143,26 @@ if "$APOGEE_BIN" review sweep </dev/null >/dev/null 2>"$WORK_DIR/locked.err"; th
 fi
 grep -q "another review sweep is running (pid $$)" "$WORK_DIR/locked.err" || fail "the lock's refusal: $(cat "$WORK_DIR/locked.err")"
 rm "$APOGEE_HOME/review/sweep.lock"
-# --allow-post grants the run: one more batch posted.
+# A dry run moves no watermark (57w): first seen at now, said and not saved.
 rm "$MARKS"
+"$APOGEE_BIN" review sweep --dry-run </dev/null >"$WORK_DIR/dry-first.out" 2>"$WORK_DIR/dry-first.err" \
+    || fail "the dry first sweep failed: $(cat "$WORK_DIR/dry-first.err")"
+grep -q "^github.com/acme/widget: first sweep -- a posting sweep starts at now (--since reviews earlier ones); a dry run saves no watermark$" "$WORK_DIR/dry-first.out" \
+    || fail "the dry first sweep's line: $(cat "$WORK_DIR/dry-first.out")"
+[ ! -e "$MARKS" ] || fail "a dry first sweep saved a watermark: $(cat "$MARKS")"
+# From a date, under a grant: reviewed, nothing posted, nothing saved.
+sweep dry --dry-run --since 2026-10-01 --allow-post
+[ "$(field "$WORK_DIR/dry.json" '["dry_run"]')" = "True" ] || fail "the dry sweep's document: $(cat "$WORK_DIR/dry.json")"
+[ "$(field "$WORK_DIR/dry.json" '["reviewed"]')" = "1" ] || fail "the dry sweep did not review the pull request: $(cat "$WORK_DIR/dry.json")"
+[ "$(field "$WORK_DIR/dry.json" '["posted"]')" = "0" ] || fail "the dry sweep posted"
+[ "$(field "$WORK_DIR/dry.json" '["targets"][0]["projects"][0]["reviewed"][0]["posted"]["reason"]')" = "dry run: nothing posted" ] || fail "the dry sweep's review did not say why it posted nothing: $(cat "$WORK_DIR/dry.json")"
+[ "$(field "$WORK_DIR/dry.json" '["targets"][0]["projects"][0]["watermark_after"]')" = "2026-10-18T09:00:00Z" ] || fail "the dry sweep's watermark_after: $(cat "$WORK_DIR/dry.json")"
+[ ! -e "$MARKS" ] || fail "the dry sweep saved a watermark: $(cat "$MARKS")"
+[ "$(grep -c -- '--method POST' "$LOG")" = "1" ] || fail "the dry sweep posted"
+# --allow-post grants the run: what the dry run previewed is posted, once.
 sweep posting --since 2026-10-01 --allow-post
 [ "$(field "$WORK_DIR/posting.json" '["posted"]')" = "1" ] || fail "--allow-post did not post: $(cat "$WORK_DIR/posting.json")"
 [ "$(grep -c -- '--method POST' "$LOG")" = "2" ] || fail "the granted sweep did not post exactly once"
+grep -q '"github.com/acme/widget": "2026-10-18T09:00:00Z"' "$MARKS" || fail "the posting sweep's watermark: $(cat "$MARKS")"
 
-echo "review sweep: first at now, since a date, the watermark kept, the lock, the grant - OK"
+echo "review sweep: first at now, since a date, the watermark kept, the lock, a dry run saving none, the grant - OK"

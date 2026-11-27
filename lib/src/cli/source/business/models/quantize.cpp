@@ -1,8 +1,12 @@
 #include "models/quantize.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -176,7 +180,179 @@ private:
 };
 #endif
 
+/// The bytes of a child's stderr kept for a failure's message.
+constexpr std::size_t kChildTail = std::size_t{8} * 1024;
+
+/// The last non-empty line of `tail`.
+[[nodiscard]] std::string last_line_of(std::string_view tail) {
+    while (!tail.empty() && (tail.back() == '\n' || tail.back() == '\r' || tail.back() == ' ')) {
+        tail.remove_suffix(1);
+    }
+    const std::size_t at = tail.find_last_of('\n');
+    return std::string{at == std::string_view::npos ? tail : tail.substr(at + 1)};
+}
+
+/// One line of the child's protocol read into `result`; true when it was the
+/// result line.
+bool read_protocol_line(std::string_view line, const QuantizeProgress& progress,
+                        QuantizeResult& result) {
+    const nlohmann::json event = nlohmann::json::parse(line, nullptr, false);
+    if (!event.is_object()) {
+        return false;  // not ours: a library's stray print, never acted on
+    }
+    if (const auto tensor = event.find("tensor"); tensor != event.end()) {
+        const auto of = event.find("of");
+        if (progress && tensor->is_number_unsigned() && of != event.end() &&
+            of->is_number_unsigned()) {
+            progress(tensor->get<std::size_t>(), of->get<std::size_t>());
+        }
+        return false;
+    }
+    const auto ok = event.find("ok");
+    if (ok == event.end() || !ok->is_boolean()) {
+        return false;
+    }
+    result.ok = ok->get<bool>();
+    result.error = event.value("error", std::string{});
+    result.input_bytes = event.value("input_bytes", std::int64_t{0});
+    result.output_bytes = event.value("output_bytes", std::int64_t{0});
+    if (!result.ok && result.error.empty()) {
+        result.error = "the quantizer failed without saying why";
+    }
+    return true;
+}
+
 }  // namespace
+
+platform::ChildCommand quantize_child_command(const std::filesystem::path& executable,
+                                              const std::filesystem::path& input,
+                                              const std::filesystem::path& output,
+                                              std::string_view type) {
+    platform::ChildCommand command;
+    command.program = executable.string();
+    command.arguments = {std::string{kQuantizeVerb}, input.string(), output.string(),
+                         std::string{type}};
+    return command;
+}
+
+int quantize_for_parent(const std::filesystem::path& input, const std::filesystem::path& output,
+                        std::string_view type, std::ostream& out) {
+    std::mutex writing;
+    const auto say = [&out, &writing](const nlohmann::json& line) {
+        const std::scoped_lock lock{writing};
+        out << line.dump() << "\n";
+        out.flush();
+    };
+    const QuantizeResult result =
+        quantize(input, output, type, [&say](std::size_t done, std::size_t total) {
+            say(nlohmann::json{{"tensor", done}, {"of", total}});
+        });
+    if (result.ok) {
+        say(nlohmann::json{{"ok", true},
+                           {"input_bytes", result.input_bytes},
+                           {"output_bytes", result.output_bytes}});
+        return 0;
+    }
+    say(nlohmann::json{{"ok", false}, {"error", result.error}});
+    return 1;
+}
+
+QuantizeResult quantize_in_child(const platform::ChildCommand& command,
+                                 const QuantizeProgress& progress,
+                                 const harness::CancellationToken& cancellation) {
+    QuantizeResult result;
+    if (cancellation.stop_requested()) {
+        result.stopped = true;
+        result.error = "stopped";
+        return result;
+    }
+    std::string error;
+    const std::unique_ptr<platform::ChildProcess> child = platform::start_child(command, error);
+    if (child == nullptr) {
+        result.error = "could not start the quantizer (" + command.program + ")" +
+                       (error.empty() ? std::string{} : ": " + error);
+        return result;
+    }
+    child->close_stdin();
+
+    std::string pending;  // a stdout line not yet ended
+    std::string tail;     // the last of its stderr
+    bool said = false;
+    bool out_open = true;
+    bool err_open = true;
+    std::string piece;
+    const auto stopped = [&child]() {
+        child->terminate();
+        (void)child->wait_for_exit(std::chrono::seconds{2});
+        QuantizeResult out;
+        out.stopped = true;
+        out.error = "stopped";
+        return out;
+    };
+    while (out_open || err_open) {
+        if (cancellation.stop_requested()) {
+            return stopped();
+        }
+        if (out_open) {
+            switch (child->read_stdout(piece, std::chrono::milliseconds{50})) {
+                case platform::ReadStatus::Data:
+                    pending += piece;
+                    for (std::size_t end = pending.find('\n'); end != std::string::npos;
+                         end = pending.find('\n')) {
+                        said = read_protocol_line(std::string_view{pending}.substr(0, end),
+                                                  progress, result) ||
+                               said;
+                        pending.erase(0, end + 1);
+                    }
+                    break;
+                case platform::ReadStatus::Timeout:
+                    break;
+                case platform::ReadStatus::Eof:
+                case platform::ReadStatus::Error:
+                    out_open = false;
+                    break;
+            }
+        }
+        if (err_open) {
+            switch (child->read_stderr(piece, std::chrono::milliseconds{out_open ? 0 : 50})) {
+                case platform::ReadStatus::Data:
+                    tail += piece;
+                    if (tail.size() > kChildTail) {
+                        tail.erase(0, tail.size() - kChildTail);
+                    }
+                    break;
+                case platform::ReadStatus::Timeout:
+                    break;
+                case platform::ReadStatus::Eof:
+                case platform::ReadStatus::Error:
+                    err_open = false;
+                    break;
+            }
+        }
+    }
+    if (!pending.empty()) {
+        said = read_protocol_line(pending, progress, result) || said;
+    }
+    // A Ctrl-C at the terminal reaches the child too, which dies of it: a
+    // stop, whichever of the two was noticed first.
+    if (cancellation.stop_requested()) {
+        return stopped();
+    }
+    const std::optional<int> status = child->wait_for_exit(std::chrono::seconds{5});
+    if (said && status.has_value() && (*status == 0) == result.ok) {
+        return result;
+    }
+    QuantizeResult failed;
+    const std::string last = last_line_of(tail);
+    failed.error = said && !result.error.empty()
+                       ? result.error
+                       : "the quantizer ended without a result" +
+                             (!status.has_value() ? std::string{" (it did not exit)"}
+                              : *status >= 0      ? " (exit " + std::to_string(*status) + ")"
+                                                  : std::string{" (killed by a signal)"}) +
+                             (last.empty() ? std::string{} : ": " + last);
+    return failed;
+}
 
 std::optional<std::string> canonical_quant_type(std::string_view name) {
     const Entry* entry = find_type(name);

@@ -1,0 +1,13 @@
+ID:          kr-20261021T045944Z-1e2354
+Intent:      We dropped the cancel button because testers kept mistaking it for back.
+Decision:    Remove the cancel button from checkout.
+Status:      rejected
+Discipline:  ux
+Link:        -
+Source:      meeting
+Attribution: Ada Lovelace
+Raw:         /Users/someone/.apogee/knowledge/raw/kr-20261021T045944Z-1e2354.md
+Captured:    2026-10-21T04:59:44.463192Z
+
+-- Raw conversation --
+Ada: testers keep hitting cancel when they mean back. Grace: then we drop the cancel button from checkout. Ada: agreed, ship it.

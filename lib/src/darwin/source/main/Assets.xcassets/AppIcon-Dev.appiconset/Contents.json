@@ -1,0 +1,82 @@
+{
+  "images" : [
+    {
+      "filename" : "icon_16x16.png",
+      "idiom" : "mac",
+      "scale" : "1x",
+      "size" : "16x16"
+    },
+    {
+      "filename" : "icon_16x16@2x.png",
+      "idiom" : "mac",
+      "scale" : "2x",
+      "size" : "16x16"
+    },
+    {
+      "filename" : "icon_32x32.png",
+      "idiom" : "mac",
+      "scale" : "1x",
+      "size" : "32x32"
+    },
+    {
+      "filename" : "icon_32x32@2x.png",
+      "idiom" : "mac",
+      "scale" : "2x",
+      "size" : "32x32"
+    },
+    {
+      "filename" : "icon_128x128.png",
+      "idiom" : "mac",
+      "scale" : "1x",
+      "size" : "128x128"
+    },
+    {
+      "filename" : "icon_128x128@2x.png",
+      "idiom" : "mac",
+      "scale" : "2x",
+      "size" : "128x128"
+    },
+    {
+      "filename" : "icon_256x256.png",
+      "idiom" : "mac",
+      "scale" : "1x",
+      "size" : "256x256"
+    },
+    {
+      "filename" : "icon_256x256@2x.png",
+      "idiom" : "mac",
+      "scale" : "2x",
+      "size" : "256x256"
+    },
+    {
+      "filename" : "icon_512x512.png",
+      "idiom" : "mac",
+      "scale" : "1x",
+      "size" : "512x512"
+    },
+    {
+      "filename" : "icon_512x512@2x.png",
+      "idiom" : "mac",
+      "scale" : "2x",
+      "size" : "512x512"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "files-sha256" : {
+      "icon_16x16.png" : "74f2db1d893553739d60b334a9da5e4ff370cf112314c71c9f329a2ed51c9ac1",
+      "icon_16x16@2x.png" : "20928cce5e02a9077d5631f74a441590c9be4220325a9e86b910acce5e8251ee",
+      "icon_32x32.png" : "59701ae6afb29c5f326b49d7e81b82740a10c0c95af58bb75029348e7379c0dc",
+      "icon_32x32@2x.png" : "c383c2dbf9a1d5660b0fd812556ca04425b14d786882dcb03e73dcbfa7495f82",
+      "icon_128x128.png" : "c8d2ee98fcbc3c2935f4b1ca79cf69569a86a24b40dc41d11b51ca96775d7dac",
+      "icon_128x128@2x.png" : "eac325c352f9b2c40f3f8707534bb666f662f499f145700660c461ef9a028c8a",
+      "icon_256x256.png" : "94e76ab2202c99c39aa840a7b67269e6137b686f98494c7224793fa78a00d81d",
+      "icon_256x256@2x.png" : "4085cf944d813ecb918d88af11dde68ed5a6cf66eb5ac58c56d7ca2e9116f591",
+      "icon_512x512.png" : "b1e5c7c97ca10c4c5b196af5569735dbc08e3e1bc710258241a395f0c399f44a",
+      "icon_512x512@2x.png" : "6d24f0d94f6031d8a520d0023b4caf576de7689e9f690efd3092a8db8e94d937"
+    },
+    "generated-by" : "lib/src/darwin/scripts/icon.sh",
+    "master-sha256" : "e688f48f3fb43166fa240f6431236f136327f1b0523f2ebef985bc9e016fae8c",
+    "version" : 1
+  }
+}

@@ -356,8 +356,27 @@ private:
     /// the same freeing a beat earlier.
     void expire_if_idle();
 
+    /// One turn, under the base's lock. A failure fails the turn alone
+    /// (57c): llama.cpp's own -- a context it could not make, a decode
+    /// refused or short of a KV slot -- arrives as a plain `runtime_error`
+    /// and leaves as this entry's `ProviderError`, the image path's with it;
+    /// and a failure once the conversation's KV is being cut and refilled
+    /// forgets it (`forget_session`).
     [[nodiscard]] harness::ChatResponse run(const harness::ChatRequest& request,
                                             const harness::StreamOptions& options);
+
+    /// `run`'s body, the lock held. Sets `session_changing` once the
+    /// conversation's KV may no longer hold what `session_tokens_` says.
+    [[nodiscard]] harness::ChatResponse run_locked(const harness::ChatRequest& request,
+                                                   const harness::StreamOptions& options,
+                                                   bool& session_changing);
+
+    /// Forgets what the conversation's context holds (57c): its token
+    /// record and its KV, so the next turn reads its whole prompt again
+    /// rather than trusting a cache a failed decode left half-written. A
+    /// context that will not empty goes whole, and the next turn makes a
+    /// new one. Called under the base's lock.
+    void forget_session() noexcept;
 
     /// The window the conversation's context is made with: `context_size`, or
     /// the default for the loaded model (26a). Needs the model loaded.

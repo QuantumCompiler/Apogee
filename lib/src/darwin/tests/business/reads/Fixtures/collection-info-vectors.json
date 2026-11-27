@@ -1,0 +1,18 @@
+{
+ "chunks": 3,
+ "collection": "notes",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/notes.db",
+ "schema": 8,
+ "sources": [
+  "heat-pumps.md",
+  "solar.md",
+  "windows.md"
+ ],
+ "vectors": {
+  "chunks": 3,
+  "dimension": 8,
+  "model": "mock-embed",
+  "widths": 1
+ }
+}

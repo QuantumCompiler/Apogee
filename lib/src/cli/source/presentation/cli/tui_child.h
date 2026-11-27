@@ -16,7 +16,9 @@
 /// a promoted version, a config line -- are the command's by construction.
 ///
 /// The child gets the shell's root -- `--config` when the shell was given
-/// one, and the root it resolved as `APOGEE_HOME` -- its three pipes and
+/// one, and the root it resolved as `APOGEE_HOME`, each made absolute so a
+/// child started in another folder (an ACP session's, 56a) reads the same
+/// files -- its three pipes and
 /// nothing else (`platform/child_process`), stdin closed at once (a command
 /// that would ask reads end-of-input and declines), and its stdout and
 /// stderr lines are handed on as they arrive. Stopping it interrupts it as

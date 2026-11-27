@@ -82,7 +82,7 @@ struct ModelsViewModelTests {
     }
 
     @Test("delete asks after the CLI's plan, then runs with --yes, --and-backends only when chosen and the plan names a backend, and reads back")
-    func delete() async {
+    func delete() async throws {
         let runner = ScriptedRunner()
         var said: [String] = []
         let model = await connected(runner)
@@ -95,7 +95,7 @@ struct ModelsViewModelTests {
             runner.calls.filter { $0.hasPrefix("run") && !$0.hasPrefix("run __complete") && !$0.hasPrefix("run config get") }
                 == ["run models delete qwen-mlx"],
             "asked first: only the plan read -- and the adapters' list, a read -- nothing changed")
-        await model.confirmDelete(andBackends: false)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
         let ran = runner.calls.firstIndex(of: "run models delete qwen-mlx --yes")!
         #expect(runner.calls[ran + 1 ... ran + 2] == ["read models list", "read models status"], "read back")
         #expect(said == ["Deleted qwen-mlx"])
@@ -104,12 +104,12 @@ struct ModelsViewModelTests {
         // own plans).
         await model.askToDelete(row)
         #expect(!model.offersAndBackends)
-        await model.confirmDelete(andBackends: true)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: true)
         #expect(!runner.calls.contains { $0.contains("--and-backends") })
     }
 
     @Test("a local backend's entry is removed on asking, its weights kept: config delete-backend, read back")
-    func removeBackend() async {
+    func removeBackend() async throws {
         let runner = ScriptedRunner()
         let model = await connected(runner)
         let row = model.rows.first { $0.backend == "qwen3-8b-Q4KM" }!
@@ -117,10 +117,26 @@ struct ModelsViewModelTests {
         model.askToRemove(row)
         #expect(model.removing == "qwen3-8b-Q4KM")
         #expect(!runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"), "asked first")
-        await model.confirmRemove()
+        try await model.confirmRemove(#require(model.removing))
         #expect(runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"))
         #expect(!runner.calls.contains { $0.hasPrefix("run models delete") }, "the weights stay")
         #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
+    }
+
+    @Test("Remove the backend, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- config delete-backend runs, read back (GUI M20)")
+    func removeInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        var said: [String] = []
+        let model = await connected(runner)
+        model.say = { said.append($0) }
+        let row = try #require(model.rows.first { $0.backend == "qwen3-8b-Q4KM" })
+        model.askToRemove(row)
+        let answer = try #require(model.removing)
+        model.removing = nil
+        await model.confirmRemove(answer)
+        #expect(runner.calls.contains("run config delete-backend qwen3-8b-Q4KM"))
+        #expect(runner.calls.filter { $0 == "read models list" }.count == 2, "read back")
+        #expect(said.last == "Removed the backend qwen3-8b-Q4KM")
     }
 
     @Test("a model renames whole by the name the binary completes, any backend as a backend; repair says what the CLI said")
@@ -219,7 +235,7 @@ struct ModelsViewModelTests {
     }
 
     @Test("stored weights' details, delete and repair go by their handle, rename by their directory; the placeholder is never a name")
-    func storedVerbs() async {
+    func storedVerbs() async throws {
         let runner = ScriptedRunner()
         let model = await recordedLibrary(runner)
         runner.reading(["models", "info"], Self.recorded("info-set"))
@@ -229,7 +245,7 @@ struct ModelsViewModelTests {
         #expect(model.selectedRow == set && model.info != nil)
         #expect(model.lineage.map(\.kind) == ["pulled"], "52e's typed data, read by the handle")
         await model.askToDelete(set)
-        await model.confirmDelete(andBackends: false)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: false)
         #expect(runner.calls.contains("run models delete Llama3.2-1B-Instruct/safetensors/edaba290ce7f --yes"))
         var checked: [String] = []
         model.checkFiles = { checked.append($0) }
@@ -266,5 +282,39 @@ struct ModelsViewModelTests {
         // A binary before 53e: every MLX backend opens a session, as before.
         let older = await connected(ScriptedRunner())
         #expect(older.rows.filter { $0.group == "mlx" }.allSatisfy { older.opensSessions($0) && $0.mlxKind == nil })
+    }
+
+    @Test("Roles under a default suite: the six roles and the suite as a line; no picker ever runs config set-default-suite or set-default-footprint (GUI 6d)")
+    func rolesUnderASuite() async throws {
+        // Recorded from apogee-dev over a sandbox: mock backends m1-m4, `duo`
+        // (chat m1, utility m2, described "two") the default.
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../business/reads/Fixtures")
+        func fixture(_ name: String) -> String {
+            (try? String(contentsOf: fixtures.appendingPathComponent("\(name).json"), encoding: .utf8)) ?? ""
+        }
+        for status in ["suites-models-status-described-typed", "suites-models-status-described"] {
+            let runner = ScriptedRunner()
+            runner.reading(["models", "list"], fixture("suites-models-list-described"))
+            runner.reading(["models", "status"], fixture(status))
+            let model = ModelsViewModel(runner: runner)
+            await model.connect(binary: Self.binary)
+            #expect(model.roles.map(\.role) == ["chat", "embedding", "extraction", "vision", "transcription", "utility"], "\(status)")
+            #expect(model.rolesSuite == "duo", "\(status): the line names the suite")
+            #expect(model.backends == ["m1", "m2", "m3", "m4"])
+            for role in model.roles {
+                for backend in model.choices(for: role) { await model.assign(role, to: backend) }
+            }
+            let ran = runner.calls.filter { $0.hasPrefix("run config set-default") }
+            #expect(!ran.isEmpty && ran.allSatisfy { !$0.hasPrefix("run config set-default-suite") && !$0.hasPrefix("run config set-default-footprint") },
+                    "\(status): \(ran)")
+            #expect(ran.contains("run config set-default-utility m1") && ran.contains("run config set-default m2"))
+        }
+        // No suite active: no line.
+        let runner = ScriptedRunner()
+        runner.reading(["models", "list"], fixture("suites-models-list-described"))
+        runner.reading(["models", "status"], fixture("roles-status-off"))
+        let model = ModelsViewModel(runner: runner)
+        await model.connect(binary: Self.binary)
+        #expect(model.rolesSuite == nil && model.roles.count == 6)
     }
 }

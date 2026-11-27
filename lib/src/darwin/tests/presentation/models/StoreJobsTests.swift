@@ -103,11 +103,36 @@ struct StoreJobsTests {
         return #"{"object":"list","data":[\#(rows.joined(separator: ","))]}"#
     }
 
-    @Test("a conversion runs the sheet's command; its steps tick as the sets land, registration on a good end; Show the weights")
+    static let q4 = "Llama3.2-1B-Instruct/gguf/8d51e6c04a27"
+
+    /// Where the store keeps a set, as `models convert` prints it on a line
+    /// of its own: a GGUF's file, an MLX set's directory.
+    static func path(of handle: String) -> String {
+        let parts = handle.split(separator: "/")
+        let base = "/Users/someone/.apogee/models/" + handle
+        guard parts.count == 3, parts[1] == "gguf" else { return base }
+        let level = handle == f16 || handle == JobIdentityTests.f16 ? "F16" : "Q4_K_M"
+        return base + "/\(parts[0])-\(level).gguf"
+    }
+
+    /// `models info <its path>`: the set's handle and format, all a store job
+    /// takes from it.
+    static func info(_ handle: String) -> String {
+        let format = handle.split(separator: "/").dropFirst().first.map(String.init) ?? "gguf"
+        return #"{"name":"\#(path(of: handle))","fields":[],"data":{"format":"\#(format)","handle":"\#(handle)"}}"#
+    }
+
+    /// A runner that answers `models info` of each set's path.
+    static func naming(_ handles: [String], on runner: ScriptedRunner) {
+        for handle in handles { runner.reading(["models", "info", path(of: handle)], info(handle)) }
+    }
+
+    @Test("a conversion runs the sheet's command; its steps tick on each set its run names as stored, registration on a good end; Show the weights")
     func convertJob() async throws {
         let job = ScriptedJob()
         let runner = ScriptedRunner()
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot]))
+        Self.naming([Self.f16, Self.q4], on: runner)
         let (model, starter) = jobs([job], runner)
         var opened: String?
         model.showWeights = { opened = $0 }
@@ -119,19 +144,56 @@ struct StoreJobsTests {
         let download = try #require(model.downloads.first)
         #expect(download.kind == .convert && download.state(of: 0) == .running)
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot, Self.f16]))
-        job.say(.said("converting Llama3.2-1B-Instruct to F16"))
+        // The chain's words (`run_chain`, `models_pull.cpp`): the stage, the
+        // conversion, then the GGUF it stored on a line of its own.
+        job.say(.said("[1/3] convert to F16"))
+        job.say(.said("converting /Users/someone/.apogee/models/\(Self.snapshot) to a GGUF (F16)"))
+        #expect(download.state(of: 0) == .running, "a conversion begun is no set made")
+        job.say(.said(Self.path(of: Self.f16)))
         #expect(await eventually { download.state(of: 0) == .done })
         #expect(download.state(of: 1) == .running && download.state(of: 2) == .waiting)
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot, "Llama3.2-1B-Instruct-F16", "Llama3.2-1B-Instruct-Q4KM"]))
+        job.say(.said(Self.path(of: Self.q4)))
+        #expect(await eventually { download.state(of: 1) == .done })
         // Registered, in the chain's words (`register_backends`): its own backends.
         job.say(.said("registered Llama3.2-1B-Instruct-F16"))
         job.say(.said("registered Llama3.2-1B-Instruct-Q4KM"))
         job.end()
         #expect(await eventually { !download.isRunning && download.endedAt != nil })
         #expect((0..<3).map(download.state(of:)) == [.done, .done, .done])
-        #expect(download.firstLanded == "Llama3.2-1B-Instruct-F16")
+        #expect(download.named == [Self.f16, Self.q4])
+        #expect(download.firstLanded == Self.f16)
         model.showWeights?(download.firstLanded!)
-        #expect(opened == "Llama3.2-1B-Instruct-F16")
+        #expect(opened == Self.f16)
+    }
+
+    @Test("a conversion's named sets are its own: a projector, a path outside its model folder, the set it converts and a path named twice tick nothing more")
+    func convertNamesOnlyItsOwn() async throws {
+        let job = ScriptedJob()
+        let runner = ScriptedRunner()
+        runner.reading(["models", "list", "--all"], Self.list([Self.snapshot]))
+        Self.naming([Self.f16, JobIdentityTests.gemmaQ4], on: runner)
+        let (model, starter) = jobs([job], runner)
+        var form = ConvertForm(handle: Self.snapshot, mlx: false, bytes: nil)
+        form.levels = ["Q4_K_M"]
+        model.convert(form)
+        #expect(await eventually { starter.starts.count == 1 })
+        let download = try #require(model.downloads.first)
+        job.say(.said(Self.path(of: Self.f16)))
+        #expect(await eventually { download.named == [Self.f16] })
+        job.say(.said(Self.path(of: Self.f16).replacingOccurrences(of: ".gguf", with: "-mmproj.gguf")))
+        job.say(.said("  " + Self.path(of: Self.f16)))
+        job.say(.said(Self.path(of: JobIdentityTests.gemmaQ4)))
+        job.say(.said("/Users/someone/.apogee/models/\(Self.snapshot)"))
+        job.end(status: 1)
+        #expect(await eventually { download.endedAt != nil })
+        #expect(download.named == [Self.f16], "its F16 once; Gemma's set, its projector and its source are none of its sets")
+        #expect(download.state(of: 0) == .done && download.state(of: 1) == .waiting)
+        let asked = runner.calls.filter { $0.hasPrefix("read models info") }
+        #expect(asked == ["read models info " + Self.path(of: Self.f16), "read models info " + Self.path(of: Self.f16),
+                          "read models info " + Self.path(of: JobIdentityTests.gemmaQ4)],
+                "the projector and the snapshot's folder are never asked about")
+        #expect(DownloadsViewModel.storedPath("converting /a/b.gguf") == nil && DownloadsViewModel.storedPath("/m/X/mlx/1a2b") == "/m/X/mlx/1a2b")
     }
 
     @Test("Stop interrupts: what landed stays landed; the CLI's resume command runs as typed")
@@ -140,6 +202,7 @@ struct StoreJobsTests {
         let second = ScriptedJob()
         let runner = ScriptedRunner()
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot]))
+        Self.naming([Self.f16], on: runner)
         let (model, starter) = jobs([first, second], runner)
         var form = ConvertForm(handle: Self.snapshot, mlx: false, bytes: nil)
         form.levels = ["Q4_K_M"]
@@ -147,7 +210,9 @@ struct StoreJobsTests {
         #expect(await eventually { starter.starts.count == 1 })
         let download = try #require(model.downloads.first)
         runner.reading(["models", "list", "--all"], Self.list([Self.snapshot, Self.f16]))
+        first.say(.said(Self.path(of: Self.f16)))
         first.say(.said("the F16 is made; quantize it with: apogee models quantize \(Self.f16) -t Q4_K_M"))
+        #expect(await eventually { download.named == [Self.f16] })
         await model.stop(download)
         #expect(first.stops == 1)
         #expect(await eventually { download.progress.status == .stopped && download.endedAt != nil })

@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -155,6 +156,121 @@ TEST_CASE("a halt or cancel is left for the running task and read back", "[tasks
     t::clear_request(fixture.root, id);
     CHECK(t::read_request(fixture.root, id) == t::Request::None);
     CHECK_FALSE(t::write_request(fixture.root, "../x", t::Request::Halt).empty());
+}
+
+TEST_CASE("a request standing when the lock is taken is cleared; one written after it stays",
+          "[tasks][ledger][lock][57u]") {
+    // 27h's rule, its point moved to the lock changing hands: a request left
+    // for a process that ended is stale once a new one holds the lock, and
+    // one written after that is addressed to the holder.
+    const Fixture fixture;
+    const std::string id = "task-20261004-120000";
+    REQUIRE(t::write_request(fixture.root, id, t::Request::Cancel).empty());
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(fixture.root, id, error);
+    REQUIRE(lock.has_value());
+    CHECK(t::read_request(fixture.root, id) == t::Request::None);
+
+    REQUIRE(t::write_request(fixture.root, id, t::Request::Halt).empty());
+    CHECK(t::read_request(fixture.root, id) == t::Request::Halt);
+    // A second acquire, refused by the live holder, clears nothing.
+    CHECK_FALSE(t::TaskLock::acquire(fixture.root, id, error).has_value());
+    CHECK(t::read_request(fixture.root, id) == t::Request::Halt);
+    lock->release();
+
+    // Another task's lock never touches this task's request.
+    const std::optional<t::TaskLock> other =
+        t::TaskLock::acquire(fixture.root, "task-20261004-130000", error);
+    REQUIRE(other.has_value());
+    CHECK(t::read_request(fixture.root, id) == t::Request::Halt);
+}
+
+TEST_CASE("a run still starting is no task yet, and what its refusal leaves is removed",
+          "[tasks][ledger][lock][57u]") {
+    const Fixture fixture;
+    const std::string id = "task-20261004-120000";
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(fixture.root, id, error);
+    REQUIRE(lock.has_value());
+    CHECK_FALSE(t::ledger_written(fixture.root, id));
+    // A stop sent while the run starts makes its directory before its ledger.
+    REQUIRE(t::write_request(fixture.root, id, t::Request::Cancel).empty());
+    std::vector<std::string> problems;
+    CHECK(t::list_tasks(fixture.root, &problems).empty());
+    CHECK(problems.empty());  // not a task yet, and not a problem either
+
+    // Refused before it ran: the request and the then-empty directory go.
+    t::discard_unread_request(fixture.root, id);
+    CHECK(t::read_request(fixture.root, id) == t::Request::None);
+    CHECK_FALSE(std::filesystem::exists(t::task_dir(fixture.root, id)));
+    lock->release();
+
+    // The run ended before it read the stop -- killed during its setup -- so
+    // the stop is all its directory holds: no task, and no problem either.
+    REQUIRE(t::write_request(fixture.root, id, t::Request::Cancel).empty());
+    problems.clear();
+    CHECK(t::list_tasks(fixture.root, &problems).empty());
+    CHECK(problems.empty());
+    // A directory with no ledger and anything else in it is named, as
+    // before -- and so is an empty one.
+    std::ofstream{t::task_dir(fixture.root, id) / "stray"} << "x\n";
+    const std::string empty = "task-20261004-110000";
+    std::filesystem::create_directories(t::task_dir(fixture.root, empty));
+    problems.clear();
+    CHECK(t::list_tasks(fixture.root, &problems).empty());
+    CHECK(problems.size() == 2);
+    CHECK(std::ranges::count(problems, "no task '" + id + "'") == 1);
+    CHECK(std::ranges::count(problems, "no task '" + empty + "'") == 1);
+    std::filesystem::remove(t::task_dir(fixture.root, id) / "stray");
+    std::filesystem::remove(t::task_dir(fixture.root, empty));
+
+    // A ledger keeps its directory: only the request goes.
+    REQUIRE(t::save_task(fixture.root, make(id, "2026-10-04T12:00:00Z")).empty());
+    CHECK(t::ledger_written(fixture.root, id));
+    t::discard_unread_request(fixture.root, id);
+    CHECK(t::read_request(fixture.root, id) == t::Request::None);
+    CHECK(t::ledger_written(fixture.root, id));
+    // Never a path out of `tasks/`.
+    t::discard_unread_request(fixture.root, "..");
+    CHECK(std::filesystem::exists(fixture.root));
+    CHECK_FALSE(t::ledger_written(fixture.root, "../x"));
+}
+
+TEST_CASE("a run killed in its setup leaves its unread stop: no task, no problem, its id kept",
+          "[tasks][ledger][lock][57u]") {
+    // A new run held the lock, a stop sent while it started made its
+    // directory, and the run was killed there -- before its signal handlers
+    // were up, so nothing of its own cleaned up.
+    const Fixture fixture;
+    const auto when = std::chrono::system_clock::time_point{std::chrono::seconds{1791117296}};
+    const std::string killed = t::new_task_id(fixture.root, when);
+    REQUIRE(t::write_request(fixture.root, killed, t::Request::Cancel).empty());
+    std::ofstream{fixture.root / "task.lock"} << "999999999\n" << killed << "\n";
+    std::vector<std::string> problems;
+    CHECK(t::list_tasks(fixture.root, &problems).empty());
+    CHECK(problems.empty());
+
+    // The next run takes the dead holder's lock over and leaves another
+    // task's directory be: still no problem, and the id never minted again
+    // -- the next run of that second is `-2`, the one after `-3`, listed in
+    // the order they began.
+    const std::string second = t::new_task_id(fixture.root, when);
+    CHECK(second == killed + "-2");
+    std::string error;
+    std::optional<t::TaskLock> lock = t::TaskLock::acquire(fixture.root, second, error);
+    REQUIRE(lock.has_value());
+    CHECK(t::read_request(fixture.root, killed) == t::Request::Cancel);
+    REQUIRE(t::save_task(fixture.root, make(second, "2026-10-04T12:34:56Z")).empty());
+    lock->release();
+    const std::string third = t::new_task_id(fixture.root, when);
+    CHECK(third == killed + "-3");
+    REQUIRE(t::save_task(fixture.root, make(third, "2026-10-04T12:34:56Z")).empty());
+    problems.clear();
+    const std::vector<t::Task> listed = t::list_tasks(fixture.root, &problems);
+    CHECK(problems.empty());
+    REQUIRE(listed.size() == 2);
+    CHECK(listed.at(0).id == third);
+    CHECK(listed.at(1).id == second);
 }
 
 TEST_CASE("one task runs at a time: the lock refuses a second, naming the first",

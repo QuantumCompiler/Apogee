@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <random>
 #include <string>
@@ -17,6 +18,7 @@
 /// control pair merges in the same run; a second run is a no-op.
 namespace {
 
+using apogee::embedstore::ChunkRef;
 using apogee::embedstore::GraphNode;
 using apogee::embedstore::MergeGroup;
 using apogee::embedstore::Store;
@@ -116,6 +118,30 @@ TEST_CASE(
     CHECK(f.store.search_nodes("orchestrator", 5).size() == 1);
     // A second run merges nothing: idempotent.
     CHECK(f.store.dedupe_nodes(0.92, false).empty());
+}
+
+TEST_CASE("a fold counts the chunks that state either edge once each, and the survivor heals",
+          "[embedstore][graph][dedupe][57t]") {
+    Fixture f;
+    const std::int64_t k8s = f.node("K8s", "system", "", {1.0F, 0.0F, 0.0F, 0.0F}, {f.chunk1});
+    const std::int64_t kubernetes = f.node("Kubernetes", "system", "an orchestrator",
+                                           {0.99F, 0.1F, 0.0F, 0.0F}, {f.chunk1, f.chunk2});
+    const std::int64_t vault = f.node("Vault", "system", "", {0.0F, 1.0F, 0.0F, 0.0F}, {f.chunk2});
+    const ChunkRef one{.collection = "", .chunk_id = f.chunk1};
+    const ChunkRef two{.collection = "", .chunk_id = f.chunk2};
+    f.store.upsert_edge(k8s, vault, "runs on", "", one);
+    f.store.upsert_edge(kubernetes, vault, "runs on", "", one);  // the same chunk, both names
+    f.store.upsert_edge(kubernetes, vault, "runs on", "", two);
+    REQUIRE(f.store.dedupe_nodes(0.92, false).size() == 1);
+    const auto neighbors = f.store.node_neighbors(k8s);
+    REQUIRE(neighbors.size() == 1);
+    CHECK(neighbors.front().weight == 2);  // chunk1 and chunk2, never chunk1 twice
+    // The survivor took a description and lost its vector: no longer a
+    // dedupe candidate until something embeds it, and listed for that.
+    CHECK(f.store.nodes_by_ids({k8s}).front().dim == 0);
+    const std::vector<std::int64_t> waiting = f.store.nodes_without_vectors();
+    CHECK(std::ranges::find(waiting, k8s) != waiting.end());
+    CHECK(std::ranges::find(waiting, vault) == waiting.end());
 }
 
 TEST_CASE("namesakes of different types never merge, and the threshold is respected",

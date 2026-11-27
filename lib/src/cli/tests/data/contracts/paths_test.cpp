@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "contracts/layout.h"
+#include "platform/platform.h"
 #include "support/channel_guard.h"
 #include "support/env_guard.h"
 
@@ -479,4 +480,75 @@ TEST_CASE("a root's config is config.json, or the config.yaml an older install h
     // Only the JSON: silent.
     std::filesystem::remove(config / "config.yaml");
     CHECK(apogee::harness::default_config_path() == config / "config.json");
+}
+
+namespace {
+
+/// `path`'s UTF-8 bytes, as an environment variable carries it.
+[[nodiscard]] std::string utf8_of(const std::filesystem::path& path) {
+    const std::u8string bytes = path.u8string();
+    return {bytes.begin(), bytes.end()};
+}
+
+}  // namespace
+
+// 57j: on Windows `APOGEE_HOME` and the profile folder were read in the ANSI
+// code page and handed to libstdc++, which reads a narrow path as UTF-8 and
+// threw "Cannot convert character sequence" -- every command exited 1 under
+// `C:\Users\José`. Both are read as UTF-8 now and built into the path as such.
+
+TEST_CASE("a non-ASCII APOGEE_HOME resolves to that folder exactly", "[paths][utf8][57j]") {
+    const apogee::testing::TempDir temp{"paths-utf8-" + std::to_string(std::random_device{}())};
+    // "Josè-home", written as its bytes.
+    const std::filesystem::path folder =
+        temp.path() / apogee::platform::path_from_utf8("Jos\xC3\xA8-home");
+    std::filesystem::create_directories(folder);
+    const EnvGuard home{"APOGEE_HOME", utf8_of(folder)};
+
+    const RootResolution resolved = apogee::harness::current_root();
+    REQUIRE(resolved.ok());
+    CHECK(resolved.rung == RootRung::Environment);
+    CHECK(resolved.root == folder);
+    CHECK(utf8_of(resolved.root.filename()) == "Jos\xC3\xA8-home");
+#if defined(_WIN32)
+    CHECK(resolved.root.filename().wstring() == L"Jos\u00e8-home");
+#else
+    CHECK(resolved.root.filename().string() == "Jos\xC3\xA8-home");
+#endif
+    CHECK(apogee_home() == folder);
+    CHECK(std::filesystem::equivalent(apogee_home(), folder));
+}
+
+TEST_CASE("the baked root under a non-ASCII home names that home exactly", "[paths][utf8][57j]") {
+    const apogee::testing::TempDir temp{"paths-utf8-home-" +
+                                        std::to_string(std::random_device{}())};
+    // "José", written as its bytes.
+    const std::filesystem::path home =
+        temp.path() / apogee::platform::path_from_utf8("Jos\xC3\xA9");
+    std::filesystem::create_directories(home);
+    const EnvUnsetGuard no_override{"APOGEE_HOME"};
+    const EnvGuard user_home{"HOME", utf8_of(home)};
+    const EnvGuard profile{"USERPROFILE", utf8_of(home)};
+    const apogee::testing::BakedChannelGuard release{Channel::Release};
+
+    const RootResolution resolved = apogee::harness::current_root();
+    REQUIRE(resolved.ok());
+    CHECK(resolved.rung == RootRung::Baked);
+    CHECK(resolved.root == home / ".apogee");
+    CHECK(utf8_of(resolved.root.parent_path().filename()) == "Jos\xC3\xA9");
+    CHECK(apogee_home() == home / ".apogee");
+}
+
+TEST_CASE("a root built from UTF-8 inputs keeps every character", "[paths][utf8][57j]") {
+    // The pure chain: what the platform hands it is UTF-8, and the root is
+    // that path on every platform -- wide on Windows, the bytes elsewhere.
+    const RootInputs inputs{.flag = std::nullopt,
+                            .environment = {},
+                            .channel = Channel::Dev,
+                            .home_directory = "/h/\xC3\xA9t\xC3\xA9"};
+    const RootResolution resolved = apogee::harness::resolve_root(inputs);
+    REQUIRE(resolved.ok());
+    CHECK(utf8_of(resolved.root) ==
+          utf8_of(apogee::platform::path_from_utf8("/h/\xC3\xA9t\xC3\xA9") / ".apogee-dev"));
+    CHECK(utf8_of(resolved.root.parent_path().filename()) == "\xC3\xA9t\xC3\xA9");
 }

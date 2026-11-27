@@ -15,6 +15,7 @@
 
 #include "httpserver/http_types.h"
 #include "httpserver/shutdown.h"
+#include "platform/platform.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -22,7 +23,16 @@ namespace {
 /// The server a signal stops. One process serves one port.
 std::atomic<httplib::Server*> active_server{nullptr};
 
-void on_signal(int /*signal*/) {
+/// Whether a `StopOnSignals` stands: the handler stands itself again only
+/// then, never after the scope has put back what was there.
+std::atomic<bool> signals_standing{false};
+
+void on_signal(int signal) {
+    // Windows took the handler down to call it: stood again, the next Ctrl-C
+    // is another stop rather than the default action (57j).
+    if (signals_standing.load()) {
+        platform::rearm_signal(signal, on_signal);
+    }
     stop_serving();
 }
 
@@ -93,6 +103,10 @@ std::string bind_refusal(const BindOptions& bind) {
            "confirm this is a server deployment, or keep the default --bind 127.0.0.1";
 }
 
+bool host_check_applies(const BindOptions& bind) {
+    return is_loopback_host(bind.host) && !bind.allow_remote;
+}
+
 void stop_serving() noexcept {
     // The flag first, so a stream blocked waiting for its next event sees it
     // on its next poll; then the socket, which ends the accept loop.
@@ -102,10 +116,26 @@ void stop_serving() noexcept {
     }
 }
 
+StopOnSignals::StopOnSignals() {
+    signals_standing.store(true);
+    previous_int_ = std::signal(SIGINT, on_signal);
+    previous_term_ = std::signal(SIGTERM, on_signal);
+}
+
+StopOnSignals::~StopOnSignals() {
+    signals_standing.store(false);
+    (void)std::signal(SIGINT, previous_int_);
+    (void)std::signal(SIGTERM, previous_term_);
+}
+
 void run_server(Mux& mux, Handler& handler, const ServeOptions& options) {
     if (const std::string refusal = bind_refusal(options.bind); !refusal.empty()) {
         throw std::runtime_error(refusal);
     }
+    // The request gate's Host check is for a loopback bind (57n): under
+    // --allow-remote, loopback included, the operator's proxy owns the name
+    // the server is reached by. Set before the first request, never after.
+    mux.set_host_check(host_check_applies(options.bind));
 
     clear_shutdown();
     httplib::Server server;
@@ -186,14 +216,12 @@ void run_server(Mux& mux, Handler& handler, const ServeOptions& options) {
     }};
 
     active_server.store(&server);
-    const auto previous_int = std::signal(SIGINT, on_signal);
-    const auto previous_term = std::signal(SIGTERM, on_signal);
-
-    // Blocks until stop(). An in-flight turn finishes before the pool joins.
-    const bool clean = server.listen_after_bind();
-
-    (void)std::signal(SIGINT, previous_int);
-    (void)std::signal(SIGTERM, previous_term);
+    bool clean = false;
+    {
+        const StopOnSignals signals;
+        // Blocks until stop(). An in-flight turn finishes before the pool joins.
+        clean = server.listen_after_bind();
+    }
     active_server.store(nullptr);
 
     {

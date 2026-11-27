@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -107,10 +108,11 @@ TEST_CASE("a stalled producer holds back lines, never a frame", "[tui][progress]
     CHECK(progress.lines() == std::vector<std::string>{"before the stall", "after it"});
 }
 
-TEST_CASE("cancel reaches the run's channel exactly once", "[tui][progress]") {
+TEST_CASE("cancel reaches the run's channel exactly once, and says what it did",
+          "[tui][progress]") {
     apogee::tui::ManualPump pump;
     apogee::tui::Progress progress{pump};
-    CHECK_FALSE(progress.cancel());  // nothing to stop
+    CHECK_FALSE(progress.cancel().has_value());  // nothing to stop
     Latch latch;
     std::atomic<int> cancelled{0};
     REQUIRE(progress.start(
@@ -122,14 +124,16 @@ TEST_CASE("cancel reaches the run's channel exactly once", "[tui][progress]") {
         [&cancelled, &latch]() {
             ++cancelled;
             latch.release();
+            return std::string{"asked task task-1 to cancel"};
         }));
-    CHECK(progress.cancel());
-    CHECK_FALSE(progress.cancel());
+    // The channel's own words, for the notice row (57u).
+    CHECK(progress.cancel() == std::optional<std::string>{"asked task task-1 to cancel"});
+    CHECK_FALSE(progress.cancel().has_value());
     progress.join();
     (void)pump.drain();
     CHECK(cancelled == 1);
     CHECK(progress.lines() == std::vector<std::string>{"stopped through its own channel"});
-    CHECK_FALSE(progress.cancel());  // ended: nothing to stop
+    CHECK_FALSE(progress.cancel().has_value());  // ended: nothing to stop
 }
 
 TEST_CASE("the scrollback keeps the newest lines, and a throw is said", "[tui][progress]") {
@@ -180,6 +184,7 @@ TEST_CASE("a list view draws its run under the table, and Ctrl-C cancels it",
         [&cancelled, &latch]() {
             ++cancelled;
             latch.release();
+            return std::string{};  // the view's own words
         }));
     until(pump, [&progress]() { return !progress->lines().empty(); });
     const std::string running = frame();
@@ -187,6 +192,7 @@ TEST_CASE("a list view draws its run under the table, and Ctrl-C cancels it",
     CHECK(running.find(" first step") != std::string::npos);
     (void)shell.press(apogee::tui::Key::named(apogee::tui::Key::Name::CtrlC));
     CHECK(cancelled == 1);
+    CHECK(frame().find(" asked the run to stop") != std::string::npos);
     CHECK_FALSE(shell.quit_requested());  // the run stopped, the shell stays
     progress->join();
     CHECK(frame().find(" a run -- ended") != std::string::npos);

@@ -15,6 +15,8 @@ public final class ShellViewModel {
     public private(set) var overlay: Overlay?
     /// Hidden by the person (⌃⌘S); remembered across launches.
     public private(set) var sidebarHidden: Bool
+    /// The sidebar's width while it is full; the person sets it by dragging.
+    public private(set) var sidebarWidth: Double
     /// The window's width, as last laid out; `nil` before the first layout.
     public private(set) var width: Double?
     /// The one line at the bottom of the window, if one is showing.
@@ -30,6 +32,7 @@ public final class ShellViewModel {
         self.preferences = preferences
         route = preferences.route.flatMap(Destination.init(rawValue:)) ?? .sessions
         sidebarHidden = preferences.sidebarHidden
+        sidebarWidth = preferences.sidebarWidth
     }
 
     /// How the window lays out at its width.
@@ -69,6 +72,11 @@ public final class ShellViewModel {
         preferences.sidebarHidden = hidden
     }
 
+    public func setSidebarWidth(_ width: Double) {
+        sidebarWidth = min(max(width, 200), 420)
+        preferences.sidebarWidth = sidebarWidth
+    }
+
     /// The window was laid out `width` points wide.
     public func windowResized(width: Double) {
         if self.width != width {
@@ -98,6 +106,14 @@ public struct Toast: Equatable, Identifiable, Sendable {
 
     /// How long it shows.
     public static let lifetime: Duration = .seconds(5)
+
+    /// A toast saying `text`, `id` telling it from the one before so only
+    /// its own time ends it -- public so a window of its own, Settings
+    /// (GUI M19), keeps its toast as the shell keeps this one.
+    public init(id: Int, text: String) {
+        self.id = id
+        self.text = text
+    }
 }
 
 /// The window law (the design's decision 10): below 900 points wide the

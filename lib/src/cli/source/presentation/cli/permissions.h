@@ -16,6 +16,7 @@
 #include "ansi/ansi.h"
 #include "contracts/config.h"
 #include "machine/json_reporter.h"
+#include "platform/child_process.h"
 #include "views/status_line.h"
 
 /// The permission gate's two halves, as every surface wires them.
@@ -120,10 +121,23 @@ struct GatedName {
     std::string key;
     bool host = false;
     std::string error{};
+    /// A native tool this build never offers (57k: a shell or git tool where
+    /// no program can be started); `error` says so rather than naming the set.
+    bool unoffered = false;
 };
 
+/// Whether a name that is no gated tool reads as a website (57o): dotted,
+/// bracketed, holding a `:` (an IPv6 literal), or a single label with no `_`
+/// -- `localhost`, an intranet name. A dotless name with a `_` is shaped like
+/// a tool, so a mistyped one is refused as a typo. `canonical_host` still
+/// has to accept it.
+[[nodiscard]] bool website_shaped(std::string_view name) noexcept;
+
+/// `child_processes` is the platform's answer by default; a test sets it to
+/// see either side on any host. Takes every host `--allow-host` takes (57o).
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
-                                   bool websites = true);
+                                   bool websites = true,
+                                   bool child_processes = platform::supports_child_processes());
 
 /// `--allow`, `--allow-host` and `/allow`: allowed for the session, a
 /// denial of it lifted. `--deny` and `/deny`: denied, an allowance lifted.
@@ -154,6 +168,21 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 /// be null (nothing is remembered).
 [[nodiscard]] agent::PermissionChecker make_permission_checker(
     const harness::Config& config, std::shared_ptr<SessionApprovals> approvals);
+
+/// The permission prompt's first line: the tag, the tool, and `-> <target>`
+/// when there is one -- for a file writer the file the call writes (57o).
+/// The tool and the target are drawn as lines, shown and never obeyed (57p).
+[[nodiscard]] std::string permission_prompt_line(const agent::GateRequest& request,
+                                                 const ansi::Style& style);
+
+/// Every line the prompt draws above its question (57p), which the terminal
+/// and the full-screen shell both print: the first line, then the detail --
+/// a file writer's change by its counts (52a), any other detail whole, as
+/// text, each of its lines indented under the prompt, so nothing in it starts
+/// at column 0 where a prompt line starts. A detail that is the target
+/// itself is not said twice.
+[[nodiscard]] std::vector<std::string> permission_prompt_lines(const agent::GateRequest& request,
+                                                               const ansi::Style& style);
 
 /// The terminal prompt, or null when there is no terminal to prompt on -- and
 /// a null ConfirmFn is exactly what makes `ask` deny on a pipe.

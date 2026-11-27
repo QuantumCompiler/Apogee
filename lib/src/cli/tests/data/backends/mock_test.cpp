@@ -266,6 +266,11 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
     // A level (39a) after `@`.
     request.thinking = apogee::harness::Thinking{.effort = apogee::harness::Effort::XHigh};
     CHECK(apogee::backends::expand_mock_text("{{thinking}}", request) == "on@xhigh");
+    // The bound the request carried (54b), or none.
+    CHECK(apogee::backends::expand_mock_text("{{max_tokens}}", request) == "none");
+    request.max_tokens = 256;
+    CHECK(apogee::backends::expand_mock_text("at most {{max_tokens}}", request) == "at most 256");
+    request.max_tokens.reset();
     request.thinking =
         apogee::harness::Thinking{.mode = apogee::harness::ThinkingMode::Off, .budget = 64};
     // The :json forms are string literals, quotes included, so a scripted JSON
@@ -290,6 +295,17 @@ TEST_CASE("placeholders expand against the request: the last tool result and the
                      apogee::harness::Tool{.name = "read_file"}};
     CHECK(apogee::backends::expand_mock_text("{{tool_count}}: {{tool_names}}", request) ==
           "2: graph_explain,read_file");
+    // The first user message as sent, and every call's id (57q).
+    CHECK(apogee::backends::expand_mock_text("[{{first_user}}] [{{tool_call_ids}}]", request) ==
+          "[q] []");
+    apogee::harness::ChatMessage calling = apogee::harness::ChatMessage::assistant("");
+    calling.tool_calls = {apogee::harness::ToolCall{.id = "call-A", .name = "a"},
+                          apogee::harness::ToolCall{.id = "call-B", .name = "b"}};
+    apogee::harness::ChatRequest asked = request;
+    asked.messages.push_back(calling);
+    asked.messages.push_back(apogee::harness::ChatMessage::user("later"));
+    CHECK(apogee::backends::expand_mock_text("[{{first_user}}] [{{tool_call_ids}}]", asked) ==
+          "[q] [call-A,call-B]");
 
     // And through the provider, streamed and not.
     apogee::backends::MockProvider::Options options;

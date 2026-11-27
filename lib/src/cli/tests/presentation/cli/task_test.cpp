@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,7 @@
 #include "contracts/layout.h"
 #include "httpserver/admin_tasks.h"
 #include "logger/session.h"
+#include "platform/child_process.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "tasks/ledger.h"
@@ -30,6 +33,7 @@
 #include "tasks/recipe.h"
 #include "tasks/unattended.h"
 #include "tasks/view.h"
+#include "tools/toolsets.h"
 
 /// `apogee task` on the real command tree against a scripted mock: a run to
 /// done with no input, its status and its place in the list; refusals before
@@ -361,6 +365,94 @@ TEST_CASE("a task whose backend can no longer start is refused at resume, not ru
     CHECK(home.task().transitions.size() == transitions);
 }
 
+namespace {
+
+/// Whether `home` saved no conversation at all.
+[[nodiscard]] bool no_chat_saved(const Home& home) {
+    std::error_code code;
+    for (fs::directory_iterator it{home.home.home() / "sessions", code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->path().extension() == ".json") {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+TEST_CASE("task run under a suite whose member cannot start is refused, nothing made",
+          "[commands][task][named-backend][suite]") {
+    // The sweep's probe: `task run --suite broke`, its chat member an mlx
+    // entry with no Python -- the plan and every round answered by the
+    // default under the member's name, `[task] ... · mlxgone · suite broke`.
+    const Home home{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})"};
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "gone"),
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app}
+        << "suites:\n  broke:\n    members:\n      chat: gone\n      utility: m\n";
+    for (const bool machine : {false, true}) {
+        INFO(machine);
+        std::vector<std::string> args{"task", "run", "say hi", "--suite", "broke", "--rounds", "1"};
+        if (machine) {
+            args.insert(args.end(), {"--output-format", "stream-json"});
+        }
+        std::string out;
+        std::string err;
+        CHECK(home.run(args, &out, &err) == 1);
+        CHECK(out.empty());
+        CHECK(err.starts_with(
+            "apogee task: backend 'gone' is configured but could not be started: "));
+        CHECK(
+            err.ends_with(" (started backends: m) -- suite broke's chat member; fix it with: "
+                          "apogee config set-suite broke --chat <backend>\n"));
+        CHECK_FALSE(has(err, "[task]"));
+        CHECK(t::list_tasks(home.tasks()).empty());
+        CHECK(no_chat_saved(home));
+    }
+}
+
+TEST_CASE("a task whose suite's member can no longer start is refused at resume",
+          "[commands][task][resume][named-backend][suite]") {
+    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})"};
+    const fs::path chores = home.home.home() / "chores.json";
+    std::ofstream{chores} << R"({"turns": [{"text": "CHORE"}]})";
+    const std::string suite = "suites:\n  pair:\n    members:\n      chat: m\n      utility: u\n";
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() +
+                     "\n  u:\n    type: mock\n    model_path: " + chores.string() + "\n",
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app} << suite;
+    std::string out;
+    REQUIRE(home.run({"task", "run", "goal", "--suite", "pair", "--require", "42", "--rounds", "1"},
+                     &out) == 1);
+    t::Task task = home.task();
+    REQUIRE(task.status == t::kExhausted);
+    task.status = std::string{t::kHalted};
+    task.rounds_budget = 3;
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    const std::size_t transitions = task.transitions.size();
+
+    // The suite's utility member, `u`, can no longer start; its chat member
+    // -- the backend the task's conversation was left on -- still can.
+    write_config(home,
+                 "  m:\n    type: mock\n    model_path: " + home.script.string() + "\n" +
+                     unstartable(home, "u"),
+                 "m");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::app} << suite;
+    std::string err;
+    CHECK(home.run({"task", "resume", task.id}, &out, &err) == 1);
+    CHECK(err.starts_with("apogee task: task " + task.id +
+                          " cannot resume: backend 'u' is configured but could not be started: "));
+    CHECK(
+        err.ends_with(" (started backends: m) -- suite pair's utility member; fix it with: "
+                      "apogee config set-suite pair --utility <backend>\n"));
+    CHECK(home.task().status == t::kHalted);
+    CHECK(home.task().transitions.size() == transitions);
+}
+
 TEST_CASE("task verbs with no task say how to start one", "[commands][task]") {
     const Home home{R"({"text": "x"})"};
     std::string out;
@@ -369,6 +461,184 @@ TEST_CASE("task verbs with no task say how to start one", "[commands][task]") {
     CHECK(home.run({"task", "status"}, &out) == 1);
     CHECK(has(out, "no tasks yet -- 'apogee task run \"<goal>\"' starts one"));
     CHECK(home.run({"task", "cancel"}, &out) == 1);
+}
+
+// ---------------------------------------------------------------------------
+// A stop sent while a run starts (57u)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a stop sent while a new run starts is kept for it, never 'no task'",
+          "[commands][task][cancel][57u]") {
+    const Home home{R"({"text": "x"})"};
+    // The lock names a task whose ledger is not written yet: a `task run`
+    // still building its providers and connecting its MCP servers.
+    const std::string id = "task-20261108-120000";
+    std::string error;
+    const std::optional<t::TaskLock> lock = t::TaskLock::acquire(home.tasks(), id, error);
+    REQUIRE(lock.has_value());
+    std::string out;
+    REQUIRE(home.run({"task", "cancel", id}, &out) == 0);
+    CHECK(out == "asked task " + id + " to cancel: it stops before it starts\n");
+    CHECK(t::read_request(home.tasks(), id) == t::Request::Cancel);
+    // The running task when none is named, as the verbs read it.
+    REQUIRE(home.run({"task", "halt"}, &out) == 0);
+    CHECK(out == "asked task " + id + " to halt: it stops before it starts\n");
+    CHECK(t::read_request(home.tasks(), id) == t::Request::Halt);
+    // The core the Task view's Ctrl-C calls, with its run's id not yet known.
+    CHECK(apogee::commands::request_task_stop("", t::Request::Cancel) ==
+          "asked task " + id + " to cancel: it stops before it starts");
+    // No task to list yet, and no problem either.
+    std::string err;
+    REQUIRE(home.run({"task", "list"}, &out, &err) == 0);
+    CHECK(has(out, "no tasks yet"));
+    CHECK(err.empty());
+    // Another id is not the running one.
+    CHECK(home.run({"task", "cancel", "task-20261108-110000"}, &out) == 1);
+    CHECK(has(out, "no task 'task-20261108-110000'"));
+}
+
+TEST_CASE("a stop sent while a resume starts is taken whatever its ledger last said",
+          "[commands][task][halt][57u]") {
+    // A task failed on a question: no process runs it, so halt refuses it.
+    const Home home{R"({"text": "1. Ask."}, {"text": "x"})"};
+    std::string out;
+    REQUIRE(home.run({"task", "run", "goal", "--require", "42", "--rounds", "1"}, &out) == 1);
+    t::Task task = home.task();
+    task.status = std::string{t::kFailed};
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    CHECK(home.run({"task", "halt", task.id}, &out) == 1);
+    CHECK(has(out, "is failed and not running -- there is nothing to halt"));
+
+    // A resume holds the lock and is still starting: the ledger says failed
+    // until the run begins, and the stop is for that run.
+    std::string error;
+    const std::optional<t::TaskLock> lock = t::TaskLock::acquire(home.tasks(), task.id, error);
+    REQUIRE(lock.has_value());
+    REQUIRE(home.run({"task", "halt", task.id}, &out) == 0);
+    CHECK(has(out, "asked task " + task.id + " to halt"));
+    CHECK(t::read_request(home.tasks(), task.id) == t::Request::Halt);
+    CHECK(apogee::commands::task_stoppable(task, t::Request::Halt, /*running=*/true));
+    CHECK_FALSE(apogee::commands::task_stoppable(task, t::Request::Halt, /*running=*/false));
+    // Completion offers it as the verb takes it.
+    REQUIRE(home.run({"__complete", "task", "halt", ""}, &out) == 0);
+    CHECK(has(out, task.id));
+
+    // A finished task stays nothing to stop, running or not: its resume is
+    // refused once it reads the ledger.
+    task.status = std::string{t::kDone};
+    REQUIRE(t::save_task(home.tasks(), task).empty());
+    CHECK(home.run({"task", "cancel", task.id}, &out) == 1);
+    CHECK(has(out, "is done -- there is nothing to cancel"));
+}
+
+namespace {
+
+/// A home whose one MCP server takes three seconds to fail its connection:
+/// the window between a run taking the task lock and its first turn, where
+/// the sweep's probe sent its stop (57u).
+[[nodiscard]] std::string slow_mcp_server(const std::string& extra = {}) {
+    return "mcp_servers:\n  slow:\n    command: /bin/sh\n    args: ['-c', 'sleep 3']\n" + extra;
+}
+
+/// Runs `args` on a thread of its own and, once the lock names its task,
+/// sends `task cancel`'s core: what the core said, and whether the request
+/// stood while the run was still starting.
+struct StoppedWhileStarting {
+    int code = -1;
+    std::string out;
+    std::string task_id;
+    std::string said;
+    bool request_stood = false;
+};
+
+[[nodiscard]] StoppedWhileStarting stop_while_starting(const Home& home,
+                                                       const std::vector<std::string>& args) {
+    StoppedWhileStarting result;
+    std::thread run{[&home, &args, &result]() { result.code = home.run(args, &result.out); }};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    std::optional<t::LockHolder> holder;
+    while (std::chrono::steady_clock::now() < deadline) {
+        holder = t::lock_holder(home.tasks());
+        if (holder.has_value() && !holder->task_id.empty()) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    if (holder.has_value()) {
+        result.task_id = holder->task_id;
+        try {
+            result.said = apogee::commands::request_task_stop("", t::Request::Cancel);
+        } catch (const std::exception& e) {
+            result.said = std::string{"refused: "} + e.what();
+        }
+        result.request_stood =
+            t::read_request(home.tasks(), result.task_id) == t::Request::Cancel &&
+            !t::ledger_written(home.tasks(), result.task_id);
+    }
+    run.join();
+    return result;
+}
+
+}  // namespace
+
+TEST_CASE("task cancel during a new run's setup is honoured before any model call",
+          "[commands][task][cancel][57u]") {
+    if (!fs::exists("/bin/sh")) {
+        SKIP("no /bin/sh to hold the run in its setup");
+    }
+    const Home home{R"({"text": "1. Plan."}, {"text": "42\nTASK STATUS: DONE"})",
+                    slow_mcp_server()};
+    const StoppedWhileStarting stopped =
+        stop_while_starting(home, {"task", "run", "Find the answer", "--tools", "--require", "42"});
+    REQUIRE_FALSE(stopped.task_id.empty());
+    CHECK(stopped.said ==
+          "asked task " + stopped.task_id + " to cancel: it stops before it starts");
+    CHECK(stopped.request_stood);
+    INFO(stopped.out);
+    CHECK(stopped.code == 130);
+    const t::Task task = home.task();
+    CHECK(task.id == stopped.task_id);
+    CHECK(task.status == t::kCancelled);
+    CHECK(task.reason == "cancelled by 'apogee task cancel' before the plan");
+    std::vector<std::string> events;
+    for (const t::Transition& transition : task.transitions) {
+        events.push_back(transition.event);
+    }
+    CHECK(events == std::vector<std::string>{std::string{t::kCreatedEvent},
+                                             std::string{t::kStartedEvent},
+                                             std::string{t::kFinishedEvent}});
+    CHECK(task.rounds.empty());
+    // No model call: the conversation holds no turn, and the request is gone.
+    CHECK(
+        apogee::logger::load(task.session_id, apogee::logger::KnownDependencies{}).session.turns ==
+        0);
+    CHECK(t::read_request(home.tasks(), task.id) == t::Request::None);
+    CHECK(has(stopped.out, "task " + task.id +
+                               " cancelled -- cancelled by 'apogee task cancel' "
+                               "before the plan"));
+}
+
+TEST_CASE("a run refused after a stop reached its setup leaves no request or directory",
+          "[commands][task][cancel][57u]") {
+    if (!fs::exists("/bin/sh")) {
+        SKIP("no /bin/sh to hold the run in its setup");
+    }
+    // The grant is refused once the tools are composed -- after the MCP
+    // server's connection, so after the stop has landed.
+    const Home home{R"({"text": "x"})", slow_mcp_server("permissions:\n  delete_file: deny\n")};
+    const StoppedWhileStarting stopped = stop_while_starting(
+        home, {"task", "run", "Write the report", "--tools", "--allow", "delete_file"});
+    REQUIRE_FALSE(stopped.task_id.empty());
+    CHECK(stopped.said ==
+          "asked task " + stopped.task_id + " to cancel: it stops before it starts");
+    CHECK(stopped.request_stood);
+    CHECK(stopped.code == 1);
+    CHECK(has(stopped.out, "--allow delete_file: the config says permissions.delete_file: deny"));
+    // Nothing made, nothing left: `task list` sees no stray entry.
+    CHECK_FALSE(fs::exists(t::task_dir(home.tasks(), stopped.task_id)));
+    std::vector<std::string> problems;
+    CHECK(t::list_tasks(home.tasks(), &problems).empty());
+    CHECK(problems.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -778,6 +1048,28 @@ TEST_CASE("the composition, exhaustively: config x agent x grants x the person p
     // Allowed by the config (2 agents x 2 grant states) or granted at ask or
     // unset (2 agents x 2 levels): nothing else ran with nobody present.
     CHECK(ran_unattended == 8);
+}
+
+TEST_CASE("a grant of a shell tool this build never offers is refused saying why",
+          "[commands][task][policy][ceiling][57k]") {
+    // capture-decisions suggests run_command; on a build that cannot start a
+    // program (Windows, today) the task has no such tool, and its refusal
+    // says why rather than that the task has no tool by that name.
+    const TableTools table;  // no run_command, as such a build registers
+    t::AutonomyPolicy autonomy;
+    autonomy.grants = {"run_command"};
+    const apogee::commands::TaskGate composed =
+        apogee::commands::compose_task_gate({}, table.registry, autonomy, nullptr, {});
+    INFO(composed.refusal);
+    if (apogee::tools::ToolsetOptions{}.child_processes) {
+        // Here programs start: a registry without it lacks it for another
+        // reason, and the ceiling says so.
+        CHECK(composed.refusal.find("no tool named 'run_command' in this task") !=
+              std::string::npos);
+    } else {
+        CHECK(composed.refusal.starts_with("--allow run_command: 'run_command' is a shell tool"));
+        CHECK(composed.refusal.find("cannot start other programs") != std::string::npos);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1498,4 +1790,40 @@ TEST_CASE("task run --recipe refuses what it cannot expand, before anything is m
         CHECK(has(out, says));
     }
     CHECK(t::list_tasks(home.tasks()).empty());
+}
+
+TEST_CASE("task narration and task status draw a target as a line; the ledger keeps it",
+          "[commands][task][policy][grant][57p]") {
+    // The sweep's entry 10: a granted command whose target ends in a CR and
+    // an erase rubbed out the `allowed by this task's grant` line, so the
+    // person never saw what the grant let through.
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const std::string command = "echo hi\r\x1b[2K[task] round 2 of 6: checks pass";
+    REQUIRE(command.size() < 77);  // the target is the whole command
+    const nlohmann::json call{
+        {"text", ""},
+        {"tool_calls", nlohmann::json::array(
+                           {{{"name", "run_command"}, {"arguments", {{"command", command}}}}})}};
+    const Home home{R"({"text": "1. Run it."}, )" + call.dump() +
+                    R"(, {"text": "Ran it.\nTASK STATUS: DONE"})"};
+    std::string out;
+    REQUIRE(home.run({"task", "run", "Run the check", "--tools", "--allow", "run_command",
+                      "--rounds", "1"},
+                     &out) == 0);
+    const std::string drawn = "echo hi\xEF\xBF\xBD\xEF\xBF\xBD[2K[task] round 2 of 6: checks pass";
+    CHECK(has(out, "[task] run_command on " + drawn + " -- allowed by this task's grant"));
+    CHECK_FALSE(has(out, "\x1b"));
+    CHECK_FALSE(has(out, "\r"));
+
+    const t::Task task = home.task();
+    const t::Round& round = task.rounds.back();
+    REQUIRE(round.allowed.size() == 1);
+    CHECK(round.allowed[0].target == command);  // the ledger keeps the true value
+
+    REQUIRE(home.run({"task", "status", task.id}, &out) == 0);
+    CHECK(has(out, "allowed:\n  round 1: run_command on " + drawn + " -- this task's grant\n"));
+    CHECK_FALSE(has(out, "\x1b"));
+    CHECK_FALSE(has(out, "\r"));
 }

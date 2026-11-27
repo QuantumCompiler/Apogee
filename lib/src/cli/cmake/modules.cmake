@@ -14,7 +14,7 @@
 #                     link here fails, and so does a link nothing includes.
 #
 # The layers are ADR 0001's, lowest first, and the build adds them in this
-# order (lib/documentation/cli/adrs/layer-enforcement.md). A module may link
+# order (lib/documentation/adrs/cli/layer-enforcement.md). A module may link
 # modules in its own layer and the layers below it, never above. A new module
 # gets a row here the day its directory exists -- source/<layer>/<module>/ --
 # and its links are the review conversation, held in this file.
@@ -28,7 +28,7 @@ set(APOGEE_LAYER_infrastructure platform events ansi version)
 set(APOGEE_LAYER_data contracts transport modelstore logger secrets embedstore backends)
 set(APOGEE_LAYER_business harness agent agentloop knowledge graph tools mcp models training
                           tasks symphony scaffold forge review video)
-set(APOGEE_LAYER_presentation markdown render views machine operations httpserver tui cli)
+set(APOGEE_LAYER_presentation markdown render views machine operations httpserver tui acp cli)
 
 # ---- Infrastructure ---------------------------------------------------------
 set(APOGEE_LINKS_platform "")
@@ -70,9 +70,11 @@ set(APOGEE_LINKS_machine agent agentloop contracts tasks)
 set(APOGEE_LINKS_operations agentloop backends contracts embedstore graph harness knowledge
                             logger modelstore platform secrets symphony training)
 set(APOGEE_LINKS_httpserver agent agentloop contracts embedstore events graph harness knowledge
-                            logger operations scaffold secrets symphony tasks tools training)
+                            logger operations platform scaffold secrets symphony tasks tools
+                            training)
 set(APOGEE_LINKS_tui agentloop ansi contracts markdown operations platform views)
-set(APOGEE_LINKS_cli agent agentloop ansi backends contracts embedstore events forge graph
+set(APOGEE_LINKS_acp platform version)
+set(APOGEE_LINKS_cli acp agent agentloop ansi backends contracts embedstore events forge graph
                      harness httpserver knowledge logger machine mcp models modelstore operations
                      platform render review scaffold secrets symphony tasks tools training
                      transport tui version video views)

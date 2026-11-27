@@ -19,10 +19,16 @@ public struct TrainingRun: Sendable, Equatable, Identifiable {
     /// The gate's verdict and score (`train eval`), nil until gated.
     public let evalPassed: Bool?
     public let evalScore: Double?
+    /// Known by its id alone: `train status` names every running run in its
+    /// `running` list but gives the facts of its newest five alone, so a run
+    /// still training that is older than those is a row of its id and the
+    /// CLI's `running` (GUI 6i) -- the app makes no other read for it.
+    public let listedByID: Bool
 
     public init?(_ value: JSONValue) {
         guard let id = value["id"]?.stringValue, !id.isEmpty else { return nil }
         self.id = id
+        listedByID = false
         kind = value["kind"]?.stringValue ?? ""
         status = value["status"]?.stringValue ?? ""
         method = value["method"]?.stringValue ?? ""
@@ -35,6 +41,25 @@ public struct TrainingRun: Sendable, Equatable, Identifiable {
         finishedAt = value["finished_at"]?.stringValue ?? ""
         evalPassed = value["eval_passed"]?.boolValue
         evalScore = Self.number(value["eval_score"])
+    }
+
+    /// A run `train status` lists as running by its id, with none of its
+    /// facts: status `running`, everything else unsaid.
+    public init(runningID id: String) {
+        self.id = id
+        kind = ""
+        status = "running"
+        method = ""
+        trainer = ""
+        iterations = nil
+        finalLoss = nil
+        baseModel = ""
+        dataset = ""
+        startedAt = ""
+        finishedAt = ""
+        evalPassed = nil
+        evalScore = nil
+        listedByID = true
     }
 
     static func number(_ value: JSONValue?) -> Double? {
@@ -104,11 +129,31 @@ public struct VersionLedger: Sendable, Equatable, Identifiable {
 /// `train status --output-format json`: the runs, what is running, the
 /// pipelines and the cycle.
 public struct TrainingStatus: Sendable, Equatable {
+    /// The newest five runs, each with its facts (the CLI's `kRecentRuns`).
     public let recent: [TrainingRun]
-    public let running: [TrainingRun]
+    /// Every run training now, by id, in the CLI's order -- `"running":
+    /// [ids]`, as `training_reads.h` documents it. An entry that is an object
+    /// is read by its `id`, so a later CLI that writes summaries there still
+    /// reads (GUI 6i).
+    public let runningIDs: [String]
     public let runs: Int
     public let pipelines: Int
+    /// Whether a live pass holds the cycle's lock -- since the CLI's 57g never
+    /// true for a lock a dead pass left, which `staleLock` names.
     public let cycleActive: Bool
+    /// The lock a dead pass left, by its path (the CLI's 57g: `cycle run`
+    /// refuses while it is there, and the person removes it); `nil` when
+    /// there is none -- or on an older binary, which says nothing of it.
+    public let staleLock: String?
+    /// Whether the binary tells a dead pass's lock from a live one: its
+    /// document carries `stale_lock` (57g), null or not. An older one reports
+    /// any lock as `cycle_active`.
+    public let statesLockLiveness: Bool
+    /// Why the cycle's history cannot be read, naming its file -- `<path>:
+    /// <reason>` (the CLI's 57h) -- with `cycle` null beside it; `nil` when it
+    /// reads or there is none, and on an older binary, which draws an
+    /// unreadable history as none.
+    public let cycleError: String?
     /// The pipeline run in progress now, by id -- a cycle pass's among them.
     public let activePipeline: String?
     /// The newest pipeline run, as `train pipeline status` lists it.
@@ -121,13 +166,24 @@ public struct TrainingStatus: Sendable, Equatable {
     public init(document: ReadDocument) {
         let v = document.value
         recent = (v["recent_runs"]?.arrayValue ?? []).compactMap(TrainingRun.init)
-        running = (v["running"]?.arrayValue ?? []).compactMap(TrainingRun.init)
+        runningIDs = (v["running"]?.arrayValue ?? []).compactMap { entry in
+            Self.text(entry) ?? Self.text(entry["id"])
+        }
         runs = v["runs"]?.intValue ?? 0
         pipelines = v["pipelines"]?.intValue ?? 0
         cycleActive = v["cycle_active"]?.boolValue ?? false
+        staleLock = Self.text(v["stale_lock"])
+        statesLockLiveness = v["stale_lock"] != nil
+        cycleError = Self.text(v["cycle_error"])
         activePipeline = v["active_pipeline"]?.stringValue
         latestPipeline = v["latest_pipeline"].flatMap(PipelineRunRow.init)
         cycle = v["cycle"].flatMap(CycleHeadline.init)
+    }
+
+    /// A string field's words: `nil` for a null, an empty string, another
+    /// kind of value, or none.
+    static func text(_ value: JSONValue?) -> String? {
+        value?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -190,6 +246,23 @@ public struct PipelineRun: Sendable, Equatable, Identifiable {
         public var id: Int { index }
     }
 
+    /// Where `train pipeline resume` starts, as the CLI says it (the
+    /// document's `resume`, 57h): after the last stage that passed.
+    public struct Resume: Sendable, Equatable {
+        /// From 1, as the CLI's text says it: `Resume from stage 3, c`.
+        public let stage: Int
+        public let name: String
+        /// The `--pipeline` value that finds the run's spec now -- set
+        /// whenever the CLI's lookup finds it, passing it being equivalent to
+        /// the bare form -- or `nil` when nothing does, and the bare resume is
+        /// refused naming `--pipeline`.
+        public let pipeline: String?
+        /// The earlier stages that failed their gate and stay as they are, in
+        /// the CLI's words (`stage 1, a, failed its gate and stays as it is`),
+        /// or `nil`.
+        public let note: String?
+    }
+
     public let id: String
     public let specName: String
     public let student: String
@@ -198,17 +271,51 @@ public struct PipelineRun: Sendable, Equatable, Identifiable {
     public let startedAt: String
     public let completedAt: String?
     public let stages: [Stage]
+    /// Where a resume starts and the spec it names (57h): `nil` for a
+    /// complete run, a cycle pass and a run with no stage left -- and for an
+    /// older binary's document, which `hasResumeField` tells apart.
+    public let resume: Resume?
+    /// Whether the document carries `resume` at all, null or not: a binary
+    /// from the CLI's 57h on. An older one's runs fall back to `isResumable`
+    /// and `resumesAt`.
+    public let hasResumeField: Bool
+    /// The `--pipeline` value the run took (57h) -- a `training.pipelines`
+    /// key, or a spec file's absolute path -- or `nil`.
+    public let specRef: String?
+    /// The live process that runs it now, by its id (the CLI's 57g: `pipeline
+    /// resume` refuses while there is one; 0 when its lock names none it can
+    /// read), or `nil`.
+    public let holder: Int?
 
-    /// The read's document: a pipeline's, never a plain run's.
+    /// The read's document: a pipeline's, never a plain run's -- its
+    /// manifest, and since the CLI's 57g and 57h its holder, its spec's
+    /// reference and where a resume starts.
     public init?(document: ReadDocument) {
-        guard document.value["kind"]?.stringValue == "pipeline", let pipeline = document.value["pipeline"] else { return nil }
-        self.init(pipeline)
+        let v = document.value
+        guard v["kind"]?.stringValue == "pipeline", let pipeline = v["pipeline"] else { return nil }
+        self.init(pipeline, around: v)
     }
 
-    /// The manifest itself, the document's `pipeline`.
+    /// The manifest itself, the document's `pipeline` -- with none of what
+    /// the document says around it.
     public init?(_ value: JSONValue) {
+        self.init(value, around: nil)
+    }
+
+    private init?(_ value: JSONValue, around document: JSONValue?) {
         guard let id = value["pipeline_run_id"]?.stringValue, !id.isEmpty else { return nil }
         self.id = id
+        let resume = document?["resume"]
+        hasResumeField = resume != nil
+        self.resume = resume.flatMap { point in
+            point["stage"]?.intValue.map { stage in
+                Resume(
+                    stage: stage, name: point["name"]?.stringValue ?? "", pipeline: TrainingStatus.text(point["pipeline"]),
+                    note: TrainingStatus.text(point["note"]))
+            }
+        }
+        specRef = TrainingStatus.text(document?["spec_ref"])
+        holder = document?["holder"].flatMap { $0.objectValue == nil ? nil : ($0["pid"]?.intValue ?? 0) }
         specName = value["spec_name"]?.stringValue ?? ""
         student = value["student"]?.stringValue ?? ""
         baseModel = value["base_model"]?.stringValue ?? ""
@@ -226,11 +333,24 @@ public struct PipelineRun: Sendable, Equatable, Identifiable {
         }
     }
 
-    /// Whether `train pipeline resume` carries it on: it stopped short.
+    /// Whether `train pipeline resume` carries it on, by its status alone:
+    /// it stopped short. An older binary's rule; from the CLI's 57h on the
+    /// document's `resume` says it.
     public var isResumable: Bool { Self.resumes(status) }
 
-    /// The first stage that has not passed: where a resume starts.
+    /// The first stage that has not passed: where an older binary's page
+    /// said a resume starts. From the CLI's 57h on the document's `resume`
+    /// says where -- after the last stage that passed.
     public var resumesAt: Stage? { stages.first { $0.status != "passed" } }
+
+    /// A cycle pass's pipeline, by the id's `cycle-` prefix -- the CLI's
+    /// `kCycleIdPrefix` (`cycle.h`), which every pass's id carries and no
+    /// other verb mints. Its candidate is the cycle's alone: no other verb
+    /// resumes it (57h).
+    public var isCyclePass: Bool { id.hasPrefix(Self.cyclePassPrefix) }
+
+    /// The CLI's `kCycleIdPrefix`.
+    public static let cyclePassPrefix = "cycle-"
 
     /// A run `train pipeline resume` continues: `aborted` or `failed`. The
     /// CLI refuses a complete one by name; a `running` one is left alone --
@@ -390,8 +510,14 @@ public struct CycleHistory: Sendable, Equatable {
     public let sessionsUntil: String
     /// Oldest first, as the history keeps them.
     public let runs: [Pass]
-    /// Whether a pass holds the cycle's lock now.
+    /// Whether a live pass holds the cycle's lock now -- since the CLI's 57g
+    /// never true for a lock a dead pass left.
     public let active: Bool
+    /// The lock a dead pass left, by its path (57g), or `nil`.
+    public let staleLock: String?
+    /// Whether the document carries `stale_lock` at all: a binary that tells
+    /// a dead pass's lock from a live one (57g).
+    public let statesLockLiveness: Bool
 
     public init?(document: ReadDocument) {
         let v = document.value
@@ -405,6 +531,8 @@ public struct CycleHistory: Sendable, Equatable {
         haltReason = v["halt_reason"]?.stringValue ?? ""
         sessionsUntil = v["sessions_until"]?.stringValue ?? ""
         active = v["active"]?.boolValue ?? false
+        staleLock = TrainingStatus.text(v["stale_lock"])
+        statesLockLiveness = v["stale_lock"] != nil
         runs = (v["runs"]?.arrayValue ?? []).enumerated().map { position, pass in
             Pass(
                 id: position + 1, runAt: pass["run_at"]?.stringValue ?? "", source: pass["source"]?.stringValue ?? "",

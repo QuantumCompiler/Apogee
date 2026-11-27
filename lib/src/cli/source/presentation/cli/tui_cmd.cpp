@@ -27,6 +27,7 @@
 #include "contracts/config.h"
 #include "platform/platform.h"
 #include "platform/system_info.h"
+#include "platform/termination.h"
 #include "tui/list_view.h"
 #include "tui/monitor_bar.h"
 #include "tui/pump.h"
@@ -51,6 +52,17 @@ namespace {
 }
 
 [[nodiscard]] int run_full_screen(const RootContext& context, const ShellLaunch& launch) {
+    // SIGTERM, SIGHUP and SIGINT are the screen's while it runs: it puts the
+    // terminal back and leaves its loop, then raises the signal on the action
+    // that was there before -- this watch's (57a), which holds it until the
+    // shell's conversation has closed below, a private one's folder removed
+    // with it, and raises it again as the shell ends. A conversation that
+    // cannot close in time has its folder removed by force.
+    platform::TerminationWatch watch{
+        platform::TerminationWatch::Hooks{.end = {},
+                                          .force = []() { remove_own_private_folders(); }},
+        kSignalGrace};
+    watch.catch_interrupt(true);
     const tui::Theme theme = tui::detect_theme();
     tui::Shell shell{
         tui::ShellOptions{.title = "apogee " + std::string{version::semantic()}, .theme = theme}};

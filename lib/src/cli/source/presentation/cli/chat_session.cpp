@@ -3,15 +3,20 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
-#include <random>
+#include <set>
 #include <sstream>
+#include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #include "agentloop/content.h"
@@ -25,9 +30,11 @@
 #include "agentloop/review_context.h"
 #include "agentloop/validate.h"
 #include "ansi/ansi.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "backends/model_roster.h"
 #include "backends/provider_cache.h"
+#include "cli/acp_cmd.h"
 #include "cli/chat_attachments.h"
 #include "cli/chat_completer.h"
 #include "cli/chat_history.h"
@@ -62,6 +69,7 @@
 #include "operations/knowledge_core.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
+#include "platform/termination.h"
 #include "symphony/tools.h"
 #include "tools/consult.h"
 #include "tools/delegate.h"
@@ -144,6 +152,41 @@ std::optional<SlashCommand> parse_slash(std::string_view line) {
 
 namespace {
 
+/// The lines an MCP startup said that stay -- its warnings: a server skipped,
+/// one an ACP host's displaced (56b) -- kept for a driver, which reads no
+/// stderr, and said as one `notice`. The registry's writer may also be
+/// called from a client's reader thread, so the lines are kept under a lock,
+/// and only until they are taken.
+class McpWarnings {
+public:
+    void add(std::string_view line) {
+        if (line.find("warning") == std::string_view::npos) {
+            return;  // progress: transient, as the status line has it
+        }
+        const std::lock_guard lock{mutex_};
+        if (open_) {
+            lines_.emplace_back(line);
+        }
+    }
+
+    /// Every line kept, one to a line; none are kept after.
+    [[nodiscard]] std::string take() {
+        const std::lock_guard lock{mutex_};
+        open_ = false;
+        std::string said;
+        for (const std::string& line : lines_) {
+            said += (said.empty() ? "" : "\n") + line;
+        }
+        lines_.clear();
+        return said;
+    }
+
+private:
+    std::mutex mutex_;
+    std::vector<std::string> lines_;
+    bool open_ = true;
+};
+
 /// What the conversation runs on, as the banner, the header and `/model` say
 /// it: its backend, and the roster model pinned on it (33).
 [[nodiscard]] std::string model_label(const logger::Session& session) {
@@ -207,36 +250,101 @@ constexpr std::string_view kPrivateLine =
            "saved";
 }
 
-/// A private chat's own folder (52d), in the system's temporary directory
-/// and removed with the run: where its attachments are indexed, so nothing
-/// of the conversation lands in the data directory. Inert for any other.
-class PrivateFolder {
+/// What `/title` says when a name given outside since the session's last
+/// save won over the one typed (57a; the outside name winning is 55b's): the
+/// file keeps it, and a second `/title` -- the outside name now the one the
+/// session last left there -- replaces it.
+[[nodiscard]] std::string title_kept_line(const logger::Session& session) {
+    return "not renamed -- " + session.chat_id + " was renamed outside to '" + session.custom_name +
+           "' meanwhile; /title again to replace it";
+}
+
+/// A session asked to end by a signal (57a): SIGTERM, SIGHUP -- and SIGINT
+/// while it waits at a terminal's prompt -- end it the way a closed input
+/// does. The watch's thread asks (`request`): the turn running is cancelled
+/// and the read waiting woken, and the session closes as it would at the end
+/// of its input, its destructors run -- a private chat's folder among them.
+/// What cannot be reached in time is forced (`force`): the folder removed
+/// before the process goes.
+class SessionEnd {
 public:
-    explicit PrivateFolder(bool used) {
-        if (used) {
-            path_ = std::filesystem::temp_directory_path() /
-                    ("apogee-private-" + std::to_string(std::random_device{}()));
+    /// What wakes the session's read while it lives -- the driver's input,
+    /// the line editor. A read the session cannot wake (a plain read on a
+    /// pipe) registers nothing, and is forced.
+    class Wake {
+    public:
+        Wake(SessionEnd& end, std::function<void()> wake) : end_{end} {
+            const std::lock_guard lock{end_.mutex_};
+            end_.wake_ = std::move(wake);
+            if (end_.requested_.load() && end_.wake_) {
+                end_.wake_();
+            }
+        }
+
+        ~Wake() {
+            const std::lock_guard lock{end_.mutex_};
+            end_.wake_ = {};
+        }
+
+        Wake(const Wake&) = delete;
+        Wake& operator=(const Wake&) = delete;
+        Wake(Wake&&) = delete;
+        Wake& operator=(Wake&&) = delete;
+
+    private:
+        SessionEnd& end_;
+    };
+
+    /// From the watch's thread: the turn running cancelled, the read woken.
+    void request() {
+        const std::lock_guard lock{mutex_};
+        requested_.store(true);
+        turn_.cancel();
+        if (wake_) {
+            wake_();
         }
     }
 
-    PrivateFolder(const PrivateFolder&) = delete;
-    PrivateFolder& operator=(const PrivateFolder&) = delete;
-    PrivateFolder(PrivateFolder&&) = delete;
-    PrivateFolder& operator=(PrivateFolder&&) = delete;
+    [[nodiscard]] bool requested() const noexcept {
+        return requested_.load();
+    }
 
-    ~PrivateFolder() {
-        if (!path_.empty()) {
+    /// The turn now running: cancelled when an end comes -- at once, when
+    /// one already has.
+    void turn(const harness::CancellationToken& token) {
+        const std::lock_guard lock{mutex_};
+        turn_ = token;
+        if (requested_.load()) {
+            turn_.cancel();
+        }
+    }
+
+    /// The private chat's folder, which `force` removes.
+    void private_folder(std::filesystem::path folder) {
+        const std::lock_guard lock{mutex_};
+        folder_ = std::move(folder);
+    }
+
+    /// From the watch's thread, the session not ended in time: what must not
+    /// outlive the process goes now.
+    void force() {
+        std::filesystem::path folder;
+        {
+            const std::lock_guard lock{mutex_};
+            folder = folder_;
+        }
+        if (!folder.empty()) {
             std::error_code code;
-            std::filesystem::remove_all(path_, code);
+            std::filesystem::remove_all(folder, code);
         }
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const noexcept {
-        return path_;
     }
 
 private:
-    std::filesystem::path path_;
+    std::mutex mutex_;
+    std::atomic<bool> requested_{false};
+    harness::CancellationToken turn_;
+    std::function<void()> wake_;
+    std::filesystem::path folder_;
 };
 
 /// A new chat closed before its first turn writes nothing (M28) -- and so
@@ -273,11 +381,59 @@ struct SettingSaid {
     std::string warning{};
 };
 
+/// The permission mode, said as `/permission-mode` says it.
+[[nodiscard]] std::string permission_mode_line(PermissionMode mode) {
+    return "permission mode: " + std::string{to_string(mode)} + " -- " +
+           std::string{permission_mode_description(mode)};
+}
+
+/// The permission mode moved to `word` (39b): the words `--permission-mode`
+/// takes, read by the gate at each call -- the one setter `/permission-mode`
+/// and a driver's `set` line (56a) each reach. Bypass only in a session that
+/// allows it: launched so, or given the yes `/permission-mode` asks for at a
+/// keyboard first -- a driver has nobody there to say it.
+[[nodiscard]] SettingSaid set_permission_mode(SessionApprovals& approvals, std::string_view word) {
+    const std::optional<PermissionMode> chosen = permission_mode_from_string(word);
+    if (!chosen.has_value()) {
+        return SettingSaid{.ok = false,
+                           .line = "not a permission mode: '" + std::string{word} +
+                                   "' (manual, accept-edits, plan, dont-ask or bypass)"};
+    }
+    if (*chosen == PermissionMode::Bypass && !approvals.bypass_allowed) {
+        return SettingSaid{.ok = false,
+                           .line =
+                               "bypass needs --allow-bypass (or --permission-mode bypass) at "
+                               "launch -- permission mode: " +
+                               std::string{to_string(approvals.mode.load())}};
+    }
+    approvals.mode = *chosen;
+    return SettingSaid{.ok = true, .line = permission_mode_line(*chosen)};
+}
+
+/// Moves every attachment anchor at or past message `from` by `by` (57q): the
+/// messages an inlined attachment and a folder's map ride are held by index
+/// (26d, 26q), so a message added or taken out ahead of them moves them all.
+/// An anchor left in place names the message beside its own, which the
+/// budget then drops as gone -- and the chat retrieves the file for good.
+void move_attachment_anchors(logger::Session& session, std::size_t from, std::ptrdiff_t by) {
+    const auto move = [from, by](std::optional<std::size_t>& at) {
+        if (at.has_value() && *at >= from) {
+            at = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(*at) + by);
+        }
+    };
+    for (logger::Attachment& attachment : session.attachments) {
+        move(attachment.inline_at);
+        move(attachment.map_at);
+    }
+}
+
 /// The prompt is the transcript's first message, put there as the chat
 /// opened: replaced in place -- matched by the prompt it held, so a
 /// compaction's summary is never taken for it -- or added at the head, so
 /// the next turn is sent under it. Until 52d `/system` moved only the
 /// setting, and every request after kept the old prompt (found 2026-10-20).
+/// A prompt added or taken out moves every message after it, and the
+/// attachments riding them move with them (57q).
 [[nodiscard]] SettingSaid set_system_prompt(logger::Session& session, std::string_view text) {
     const std::string before = session.params.system_prompt;
     session.params.system_prompt = harness::valid_utf8(text);
@@ -288,10 +444,12 @@ struct SettingSaid {
                       messages.front().content.plain_text() == before;
     if (held && now.empty()) {
         messages.erase(messages.begin());
+        move_attachment_anchors(session, 1, -1);
     } else if (held) {
         messages.front() = harness::ChatMessage::system(now);
     } else if (!now.empty()) {
         messages.insert(messages.begin(), harness::ChatMessage::system(now));
+        move_attachment_anchors(session, 0, 1);
     }
     return {.line = "system prompt updated"};
 }
@@ -345,16 +503,33 @@ struct SettingSaid {
 /// What -m takes (33): a backend, an entry's model, or a roster's model on
 /// its sole configured owner -- read against the file's view, so a pin is
 /// never mistaken for its entry's own model. `settle` runs before a pin
-/// moves: rebuilding a backend is a model call's business.
+/// moves: rebuilding a backend is a model call's business. A backend this
+/// session is not running -- configured, but it did not start -- is refused
+/// in M26's words, from what the session's start built (`built`), as `-m`
+/// refuses it at launch (56a).
 [[nodiscard]] SettingSaid switch_model(harness::Harness& harness, logger::Session& session,
                                        const harness::Config& config, const std::string& argument,
-                                       const backends::BuildOptions& options, bool tools,
+                                       const backends::BuildOptions& options,
+                                       const backends::BuildResult& built, bool tools,
                                        const std::function<void()>& settle) {
     const SessionModel asked = resolve_session_model(config, argument);
     if (asked.backend.empty()) {
         return {
             .ok = false,
             .line = asked.refusal.empty() ? "no backend named '" + argument + "'" : asked.refusal};
+    }
+    // Asked of the harness, which knows a backend a rebuild has started
+    // since: the router would answer for one it does not run from the
+    // default, under this one's name, without a word.
+    if (const std::vector<std::string> running = harness.provider_names();
+        !std::ranges::binary_search(running, asked.backend)) {
+        std::string refused = named_backend_refusal(
+            config, built,
+            configured_backend_key(config, argument).empty() ? asked.backend : argument);
+        if (refused.empty()) {
+            refused = "backend '" + asked.backend + "' is not running in this session";
+        }
+        return {.ok = false, .line = refused};
     }
     if (!asked.pinned.empty() || !session.model.empty()) {
         settle();
@@ -511,10 +686,10 @@ public:
     /// a model that cannot produce one is not asked again after every turn.
     /// Never for a private chat (55a): nothing would keep its title, and
     /// asking for one sends its questions to a second model, perhaps a cloud
-    /// one.
+    /// one -- nor for one deleted while it ran (57a), for the same reasons.
     void start_if_due(const logger::Session& session) {
-        if (asked_ || session.never_written || session.turns < 1 || !session.title.empty() ||
-            !session.custom_name.empty()) {
+        if (asked_ || session.never_written || session.deleted || session.turns < 1 ||
+            !session.title.empty() || !session.custom_name.empty()) {
             return;
         }
         asked_ = true;
@@ -542,7 +717,8 @@ public:
             session.title = title;
             logger::save(session);
             if (progress_) {
-                progress_("titled by " + backend_ + ": " + title);
+                // A line (57p): the model's words, never obeyed.
+                progress_("titled by " + backend_ + ": " + ansi::inert_line(title));
             }
         }
     }
@@ -628,13 +804,13 @@ void bind_session_flags(CLI::App& command, const std::shared_ptr<SessionFlags>& 
                   "in a place gone with the run");
     cmd->add_option("--allow", flags->allow,
                     "Allow a tool for this chat without asking (repeatable, with --tools)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this chat without asking (repeatable)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -727,6 +903,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // A front-end given -- the full-screen shell's session view (32c) --
     // decorates as a terminal does: its banner, its spacing.
     const bool decorate = front != nullptr || platform::is_terminal(platform::StandardStream::Out);
+
+    // The MCP servers an ACP host handed this session (56b), read first and
+    // the handover removed: its env values are credentials, and they live in
+    // this process from here, never on disk.
+    std::vector<std::string> host_server_notes;
+    const std::vector<mcp::ServerSpec> host_servers =
+        flags->host_servers.empty() ? std::vector<mcp::ServerSpec>{}
+                                    : host_mcp_servers(flags->host_servers, host_server_notes);
 
     harness::Config config;
     std::filesystem::path config_path;
@@ -940,6 +1124,15 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         session.chat_id = logger::new_chat_id();
         // Written once it has a turn (M28): one closed before leaves nothing.
         session.new_chat = true;
+        // Begun by an ACP host (56c): who, and in the folder its
+        // `session/new` named -- written with that first turn, and kept as
+        // they are by every resume after.
+        if (!flags->acp_origin.empty()) {
+            session.origin = flags->acp_origin;
+            std::error_code here;
+            session.cwd = !flags->acp_cwd.empty() ? flags->acp_cwd
+                                                  : std::filesystem::current_path(here).string();
+        }
     }
     // A private chat (52d) is never written -- `save` does nothing for it --
     // and never summarised.
@@ -969,6 +1162,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             chosen_suite = probe.models.default_suite;
         }
     }
+    // A member naming nothing, or one that did not start (57d), is refused
+    // before a turn could fall back to models.default and answer from a model
+    // nobody chose, under the member's name -- every role, the chat member
+    // included, whether the suite came from the flag, the resumed chat or the
+    // config. Asked of the suite the session would run under before it is
+    // switched to, so nothing is rebuilt or said for a suite refused; a
+    // resume says which chat it could not reopen, as a task's does.
+    {
+        harness::Config probe = config;
+        if (chosen_suite.has_value()) {
+            probe.models.default_suite = *chosen_suite;
+        }
+        if (const std::string refused = validate_active_suite(probe, built); !refused.empty()) {
+            fail_user(mode, !flags->resume.empty() || flags->cont
+                                ? "chat " + session.chat_id + " cannot resume: " + refused
+                                : refused);
+        }
+    }
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
@@ -980,11 +1191,6 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // suite can.
     if (mode == SessionMode::Execute && config.models.default_suite.empty() && flags->orchestrate) {
         fail_user(mode, execute_orchestrate_refusal(config));
-    }
-    // A member naming nothing is refused before a turn could fall back to
-    // models.default and answer from a model nobody chose.
-    if (const std::string refused = validate_active_suite(config); !refused.empty()) {
-        fail_user(mode, refused);
     }
     // Admission (27e): the set the session runs under, priced against
     // this machine. Over budget it is refused here, before anything is
@@ -1035,6 +1241,21 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     if (mode == SessionMode::Execute && model.empty()) {
         fail_user(mode, execute_suite_refusal(config));
     }
+    // A resumed chat opens on the backend it was left on, which answers under
+    // its own name or not at all (57d, M29 finished), as `task resume` holds
+    // it: one still configured that did not start is refused here, before
+    // anything is said, written or summarised -- the router would answer
+    // every turn from the default under the saved name. One the config no
+    // longer has was let go above, said, and falls to the default (M29).
+    if (flags->model.empty() && !saved_backend.empty() && session.backend == saved_backend) {
+        if (const std::string refused = named_backend_refusal(config, built, model);
+            !refused.empty()) {
+            fail_user(mode, "chat " + session.chat_id + " cannot resume: " + refused +
+                                " -- resume it on another backend with: apogee " +
+                                std::string{session_command(mode)} + " --resume " +
+                                session.chat_id + " -m <backend>");
+        }
+    }
     session.backend = model;
     // The chat's roster pin (33): the launch's; else, unless -m named a
     // backend, the one the chat was left on -- pinned again when the chat
@@ -1071,11 +1292,25 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // not; a chat a process that died left due is summarised now.
     ChatRecall recall{harness, config, session,
                       config.memory.recall && !flags->no_recall && !flags->private_chat};
+    // A signal ends the session as a closed input does (57a): declared
+    // before everything it must see released -- the private folder first --
+    // and raised again, as the process ends, once they have been. Never
+    // under the shell, whose screen owns the signals and closes its
+    // conversation itself.
+    SessionEnd session_end;
+    std::optional<platform::TerminationWatch> watch;
+    if (front == nullptr) {
+        watch.emplace(
+            platform::TerminationWatch::Hooks{.end = [&session_end]() { session_end.request(); },
+                                              .force = [&session_end]() { session_end.force(); }},
+            kSignalGrace);
+    }
     // Where the chat's attachments are indexed: its own index beside its
     // file -- or, for a private chat (52d), a folder of the run's own,
     // removed as it ends, so nothing of the conversation stays in the data
     // directory.
     const PrivateFolder private_folder{flags->private_chat};
+    session_end.private_folder(private_folder.path());
     // A new chat that ends with no turn was never written (M28), so its index
     // goes too -- after everything reading it, declared below, has gone.
     const UnwrittenIndex unwritten_index{session};
@@ -1130,8 +1365,12 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         session.messages.push_back(harness::ChatMessage::system(session.params.system_prompt));
     }
 
-    logger::log(logger::Level::Info, std::string{session_command(mode)},
-                "session " + session.chat_id + " on backend " + model);
+    // The operational log names the chat, when, and on which model -- never
+    // a private one's (57a): that it happened at all is the conversation's.
+    if (!flags->private_chat) {
+        logger::log(logger::Level::Info, std::string{session_command(mode)},
+                    "session " + session.chat_id + " on backend " + model);
+    }
 
     // --- the review context, from flags -----------------------------------
     if (flags->fetch && flags->no_fetch) {
@@ -1157,6 +1396,27 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     // --- tools ----------------------------------------------------------
     agent::ToolRegistry registry;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
+    // What the servers' startup said that stays -- a server skipped, one a
+    // host's displaced (56b) -- kept for a driver, which reads no stderr:
+    // one `notice` after its `session` event, every line of it. The status
+    // line has them as before.
+    const auto mcp_warnings = std::make_shared<McpWarnings>();
+    const auto mcp_status = [status = out.mcp_status(), mcp_warnings,
+                             keep = machine_stream](std::string_view line) {
+        if (status) {
+            status(line);
+        }
+        if (keep) {
+            mcp_warnings->add(line);
+        }
+    };
+    if (!flags->tools && !host_servers.empty()) {
+        host_server_notes.emplace_back(
+            "the host's MCP servers are not connected: this session runs without --tools");
+    }
+    for (const std::string& note : host_server_notes) {
+        mcp_status("[mcp] warning: " + note);
+    }
     if (flags->tools) {
         registry = make_built_in_tools(BuiltInToolOptions{
             .config = &config,
@@ -1164,20 +1424,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             .review = *live_review,
             .live_review = live_review,
             .mcp = mcp_registry,
-            .mcp_status = out.mcp_status(),
+            .mcp_status = mcp_status,
             // A server's stderr never reaches the terminal unless asked
             // for: with --verbose it is the raw stream, otherwise the
             // bounded tail rides the connect-failure message.
             .mcp_server_log = flags->verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
                 std::cerr << bytes << std::flush;
             }}
-                                             : mcp::StderrTail::Sink{}});
+                                             : mcp::StderrTail::Sink{},
+            .session_mcp_servers = host_servers});
         // The session todo (41d): the plan, kept by the model, drawn by
         // every front end; its board is this session's, set below.
         tools::register_todo_tool(registry);
         // The delegate (41e): a bounded sub-session, re-entering the loop
         // under this session's gate; its context is each turn's.
         tools::register_delegate_tool(registry);
+    }
+    if (std::string said = mcp_warnings->take(); !said.empty()) {
+        opening_notes.push_back(std::move(said));
     }
     // What the chat's backend is offered: every registered tool, or the
     // toolset the active suite pins on that backend (27d), and the
@@ -1542,6 +1806,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // it (28f); the loop, a question and the permission prompt all take
         // their lines from this one reader.
         DriverInput driver{std::cin};
+        // A signal ends the driver's input as its closing would (57a).
+        const SessionEnd::Wake driver_wake{session_end, [&driver]() { driver.end(); }};
 
         const auto machine_notice = [](const std::string& message) {
             // stdout carries ONLY protocol events, so a diagnostic goes to
@@ -1605,10 +1871,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             const bool opening = std::exchange(first_line, false);
             if (message.kind == DriverMessage::Kind::Hello) {
                 // A driver introducing itself (28d): recorded on the first
-                // line, harmless anywhere -- never a session-ending error.
+                // line, harmless anywhere -- never a session-ending error. A
+                // private chat records nothing, its driver's name included
+                // (57a).
                 if (opening) {
-                    logger::log(logger::Level::Info, std::string{session_command(mode)},
-                                describe_hello(message));
+                    if (!flags->private_chat) {
+                        logger::log(logger::Level::Info, std::string{session_command(mode)},
+                                    describe_hello(message));
+                    }
                 } else {
                     machine_notice("a hello after the first line is ignored");
                 }
@@ -1652,7 +1922,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 continue;
             }
             if (message.kind == DriverMessage::Kind::Set) {
-                const std::string keys = "model, system, think, effort or temperature";
+                const std::string keys =
+                    "model, system, think, effort, temperature or permission_mode";
                 if (!message.refused.empty()) {
                     std::string named;
                     for (const std::string& key : message.refused) {
@@ -1673,7 +1944,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         // A rebuild is a model call's business: the title in
                         // flight settles first, as before `/model` (55a).
                         title.settle(session);
-                        said = switch_model(harness, session, config, value, build_options,
+                        said = switch_model(harness, session, config, value, build_options, built,
                                             flags->tools, [&attached]() { attached.settle(); });
                         if (said.ok) {
                             reoffer_tools();
@@ -1684,6 +1955,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         said = set_thinking(session, value);
                     } else if (key == "effort") {
                         said = set_effort(session, harness, value);
+                    } else if (key == "permission_mode") {
+                        said = set_permission_mode(*approvals, value);
                     } else {
                         said = set_temperature(session, value);
                     }
@@ -1708,6 +1981,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             // the last finished turn left it.
             const std::int64_t turn = next_turn++;
             machine_reporter.begin_turn(turn);
+            // The title asked after the last turn is recorded first (57a),
+            // so the session a cancel rolls back to holds it: taken before
+            // it, the snapshot put the chat back to its bare id.
+            title.settle(session);
             const logger::Session before = session;
             const auto close_turn = [&machine_reporter, &driver, &got]() {
                 machine_reporter.end_turn();
@@ -1723,7 +2000,6 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 response.finish_reason = harness::FinishReason::Cancelled;
                 machine_reporter.emit_result(response);
             };
-            title.settle(session);
             // An execute session plays a `user` line that is a `/play`
             // command, as its REPL does (27s): found through the one table,
             // whose execute rows alone offer it, its stages the `tool_status`
@@ -1811,13 +2087,18 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         // stdin closed: the driver is done. Everything is already persisted
         // by the per-turn save, so exiting is clean by construction -- and a
         // session never sent a turn writes nothing (M28), nor one deleted
-        // while it ran (55b).
+        // while it ran (55b). A delete is learned here even when nothing
+        // changed and nothing is saved (57a), and again after the exit
+        // summary -- the model call a delete can land in.
         title.settle(session);
         save_if_changed();
+        (void)logger::learn_deleted(session);
         say_deleted();
         if (const std::string said = recall.finish({}); !said.empty()) {
             machine_notice(said);
         }
+        (void)logger::learn_deleted(session);
+        say_deleted();
         save_state(progress_sink(machine_reporter));
         return;
     }
@@ -1928,6 +2209,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         return permission_mode_label(approvals->mode.load(), style);
     };
     const std::unique_ptr<LineReader> reader = out.line_reader(std::move(reader_options));
+    // A signal ends the read waiting as an end of input would (57a) -- the
+    // editor's; nothing reaches a plain read on a pipe, which is forced.
+    const SessionEnd::Wake reader_wake{session_end, [&reader]() { reader->end(); }};
 
     // How the reasoning is drawn while it streams (43): the config's, flipped
     // for this chat by `/thinking-display`. A summary is asked for only where
@@ -2024,22 +2308,30 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         }
     };
     bool running = true;
-    while (running) {
+    while (running && !session_end.requested()) {
         say_deleted();
         report_held();
         // The editor draws its own prompt; the plain reader ignores it and
         // the prompt goes to stderr so a piped run's stdout stays clean.
         std::optional<std::string> line;
         if (reader->interactive()) {
+            // Idle at a terminal's prompt, SIGINT ends the session as a
+            // signal's end does (57a); in a turn it does what it always did.
+            if (watch.has_value()) {
+                watch->catch_interrupt(true);
+            }
             line = reader->read(style.colorize("You: ", ansi::Color::Green));
+            if (watch.has_value()) {
+                watch->catch_interrupt(false);
+            }
         } else {
             if (decorate) {
                 std::cerr << style.colorize("You: ", ansi::Color::Green) << std::flush;
             }
             line = reader->read({});
         }
-        if (!line.has_value()) {
-            break;  // EOF, or Ctrl-D / Ctrl-C at the editor
+        if (!line.has_value() || session_end.requested()) {
+            break;  // EOF, or Ctrl-D / Ctrl-C at the editor, or a signal (57a)
         }
 
         const std::string input = trim(*line);
@@ -2149,16 +2441,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                 case ChatVerb::PermissionMode: {
                     // How much runs without asking (39b): the mode is read by
                     // the gate at each call, so it holds from the next one.
+                    // The setter is the one a driver's `set` line reaches.
                     if (!argument.empty()) {
-                        const std::optional<PermissionMode> chosen =
-                            permission_mode_from_string(argument);
-                        if (!chosen.has_value()) {
-                            out.print_line(style.tag(ansi::Role::Error) +
-                                           " not a permission mode: '" + argument +
-                                           "' (manual, accept-edits, plan, dont-ask or bypass)");
-                            break;
-                        }
-                        if (*chosen == PermissionMode::Bypass && !approvals->bypass_allowed) {
+                        if (permission_mode_from_string(argument) == PermissionMode::Bypass &&
+                            !approvals->bypass_allowed) {
                             // Not allowed at launch: asked once (39b, the
                             // user's call), and a yes puts bypass in this
                             // session's Shift+Tab cycle too. Nobody to ask
@@ -2179,12 +2465,14 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                             }
                             approvals->bypass_allowed = true;
                         }
-                        approvals->mode = *chosen;
+                        if (const SettingSaid said = set_permission_mode(*approvals, argument);
+                            !said.ok) {
+                            out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
+                            break;
+                        }
                     }
-                    const PermissionMode now = approvals->mode.load();
-                    out.print_line(style.tag(ansi::Role::Permission) +
-                                   " permission mode: " + std::string{to_string(now)} + " -- " +
-                                   std::string{permission_mode_description(now)} +
+                    out.print_line(style.tag(ansi::Role::Permission) + " " +
+                                   permission_mode_line(approvals->mode.load()) +
                                    (argument.empty()
                                         ? std::string{" (manual, accept-edits, plan, dont-ask "
                                                       "or bypass; Shift+Tab cycles)"}
@@ -2271,7 +2559,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         break;
                     }
                     const SettingSaid said =
-                        switch_model(harness, session, config, argument, build_options,
+                        switch_model(harness, session, config, argument, build_options, built,
                                      flags->tools, [&attached]() { attached.settle(); });
                     if (!said.ok) {
                         out.print_line(style.tag(ansi::Role::Error) + " " + said.line);
@@ -2316,8 +2604,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     if (refused.empty()) {
                         refused = select_suite(probe, asked.suite);
                     }
+                    // Every member answers for itself, as at launch (57d):
+                    // the session keeps its suite.
                     if (refused.empty()) {
-                        refused = validate_active_suite(probe);
+                        refused = validate_active_suite(probe, built);
                     }
                     // Admission (27e), before anything is rebuilt.
                     std::optional<models::SuiteFootprint> priced;
@@ -2549,11 +2839,24 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         out.print_line(style.tag(ansi::Role::Rag) + " rerank set to " + argument);
                     }
                     break;
-                case ChatVerb::Title:
+                case ChatVerb::Title: {
+                    // Says what the save did (57a): a name given outside
+                    // since the last save wins (55b), and a deleted chat is
+                    // renamed nowhere.
                     session.custom_name = argument;
-                    logger::save(session);
-                    out.print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                    (void)logger::save(session);
+                    if (session.deleted) {
+                        deleted_said = true;
+                        out.print_line(style.tag(ansi::Role::Warning) + " not renamed -- " +
+                                       deleted_line(session.chat_id));
+                    } else if (session.custom_name != argument) {
+                        out.print_line(style.tag(ansi::Role::Warning) + " " +
+                                       title_kept_line(session));
+                    } else {
+                        out.print_line(style.tag(ansi::Role::Apogee) + " renamed");
+                    }
                     break;
+                }
                 case ChatVerb::Attach: {
                     // The path first, then its flags (27p): `--graph`
                     // over the config's default, for this attach alone.
@@ -2689,6 +2992,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                                                       : "Thinking…");
         {
             const TurnScope turn{out};
+            // A signal stops the turn as a closed input ends the session
+            // (57a): the turn cancelled, the session closed after it.
+            session_end.turn(turn.token);
             run_chat_turn(
                 harness, session, input, tools_on() ? offered : nullptr, selection.get(),
                 member_calls.get(), flags->tools ? out.ask_fn() : agentloop::AskFn{},
@@ -2702,6 +3008,10 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                     out.keep_line(style.tag(ansi::Role::Warning) + " " + message);
                 },
                 rag_settings, review_note, &attached, &recall, turn.token, summarizing(), standing);
+            session_end.turn({});
+        }
+        if (session_end.requested()) {
+            break;
         }
         title.start_if_due(session);
         if (session.compactions != saved_compactions) {
@@ -2721,6 +3031,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     }
     title.settle(session);
     save_if_changed();
+    // Deleted outside while it ran (55b), learned even with nothing to save
+    // (57a): a resumed chat left as it was writes nothing, and its close
+    // must not go on to summarise, save state for, capture and call saved a
+    // chat that is gone.
+    (void)logger::learn_deleted(session);
     say_deleted();
     // The model's state too, on a clean exit only (26j): an interrupt
     // asked for nothing more, and the transcript is saved either way.
@@ -2729,6 +3044,9 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const std::string said = recall.finish({}); !said.empty()) {
             out.print_line(style.dim("[memory] " + said));
         }
+        // A delete that landed while the summary was written (57a).
+        (void)logger::learn_deleted(session);
+        say_deleted();
         save_state(progress_sink(out.reporter()));
     }
     // Opt-in auto-capture on a CLEAN exit -- /exit, /quit, the end of the
@@ -2754,6 +3072,143 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         out.print_line(style.tag(ansi::Role::Apogee) + left);
     }
     out.set_held({});
+}
+
+namespace {
+
+/// What this process's private chats hold (57a): each folder's name, and the
+/// count the next one's carries. A claim and a sweep each run under the lock,
+/// so a sweep never takes a folder a chat of this process holds -- or one a
+/// claim on another thread has just made.
+struct HeldPrivateFolders {
+    std::mutex mutex;
+    std::set<std::string> names;
+    unsigned long next = 1;
+};
+
+/// How many names a private chat's opening tries before it gives up.
+constexpr int kPrivateNamesTried = 64;
+
+[[nodiscard]] HeldPrivateFolders& held_private_folders() {
+    static HeldPrivateFolders held;
+    return held;
+}
+
+/// The process a private folder's name says owns it -- `<prefix><pid>-<n>`
+/// -- or 0 for any other name.
+[[nodiscard]] long private_folder_owner(std::string_view name) {
+    if (!name.starts_with(kPrivateFolderPrefix)) {
+        return 0;
+    }
+    const std::string_view rest = name.substr(kPrivateFolderPrefix.size());
+    long owner = 0;
+    const auto [stop, error] = std::from_chars(rest.data(), rest.data() + rest.size(), owner);
+    if (error != std::errc{} || stop == rest.data() || owner <= 0 ||
+        stop == rest.data() + rest.size() || *stop != '-') {
+        return 0;
+    }
+    return owner;
+}
+
+/// `sweep_private_folders`, the lock held.
+void sweep_unheld_private_folders(const std::filesystem::path& temporary,
+                                  const std::set<std::string>& held) {
+    const long self = platform::current_process_id();
+    std::error_code code;
+    std::vector<std::filesystem::path> orphaned;
+    for (std::filesystem::directory_iterator it{temporary, code}, end; !code && it != end;
+         it.increment(code)) {
+        const std::string name = it->path().filename().string();
+        // `<pid>-<n>`: the owner's id, a dash, the run's count. Anything else
+        // -- an older run's random number among it -- is left alone: such a
+        // name says nothing of whether its run is still going.
+        const long owner = private_folder_owner(name);
+        std::error_code kind;
+        if (owner == 0 || !it->is_directory(kind)) {
+            continue;
+        }
+        // Named for this process, yet held by none of its chats: a killed
+        // run's, whose id this process was given again.
+        const bool left = owner == self ? !held.contains(name) : !platform::process_running(owner);
+        if (left && platform::owned_by_this_user(it->path())) {
+            orphaned.push_back(it->path());
+        }
+    }
+    for (const std::filesystem::path& folder : orphaned) {
+        std::filesystem::remove_all(folder, code);
+    }
+}
+
+}  // namespace
+
+void sweep_private_folders(const std::filesystem::path& temporary) {
+    HeldPrivateFolders& held = held_private_folders();
+    const std::lock_guard lock{held.mutex};
+    sweep_unheld_private_folders(temporary, held.names);
+}
+
+PrivateFolder::PrivateFolder(bool used) {
+    if (!used) {
+        return;
+    }
+    const std::filesystem::path temporary = std::filesystem::temp_directory_path();
+    HeldPrivateFolders& held = held_private_folders();
+    const std::lock_guard lock{held.mutex};
+    sweep_unheld_private_folders(temporary, held.names);
+    // Made here, where nothing was, or not at all: a name still taken after
+    // the sweep is another user's folder, never this chat's, and the next
+    // name is tried -- a bounded number of times.
+    const std::string own =
+        std::string{kPrivateFolderPrefix} + std::to_string(platform::current_process_id()) + "-";
+    for (int tried = 0; tried < kPrivateNamesTried; ++tried) {
+        const std::string name = own + std::to_string(held.next++);
+        bool exists = false;
+        if (platform::create_private_directory(temporary / name, exists)) {
+            held.names.insert(name);
+            path_ = temporary / name;
+            return;
+        }
+        if (!exists) {
+            break;
+        }
+    }
+    throw std::runtime_error{"a private chat's folder could not be made in " + temporary.string() +
+                             " -- check that the temporary directory (TMPDIR) is writable"};
+}
+
+PrivateFolder::~PrivateFolder() {
+    if (path_.empty()) {
+        return;
+    }
+    std::error_code code;
+    std::filesystem::remove_all(path_, code);
+    try {
+        HeldPrivateFolders& held = held_private_folders();
+        const std::lock_guard lock{held.mutex};
+        held.names.erase(path_.filename().string());
+    } catch (...) {
+        (void)0;  // the folder is gone; its name merely stays held
+    }
+}
+
+void remove_own_private_folders() {
+    std::error_code code;
+    const std::filesystem::path temporary = std::filesystem::temp_directory_path(code);
+    if (code) {
+        return;
+    }
+    const std::string own =
+        std::string{kPrivateFolderPrefix} + std::to_string(platform::current_process_id()) + "-";
+    std::vector<std::filesystem::path> folders;
+    for (std::filesystem::directory_iterator it{temporary, code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->path().filename().string().starts_with(own) && it->is_directory(code)) {
+            folders.push_back(it->path());
+        }
+    }
+    for (const std::filesystem::path& folder : folders) {
+        std::filesystem::remove_all(folder, code);
+    }
 }
 
 std::string execute_suite_refusal(const harness::Config& config) {

@@ -669,7 +669,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                     fail_user(rag.error);
                 }
                 if (rag.error.empty() && !rag.prefix.empty()) {
-                    options.transient_prefix = rag.prefix;
+                    options.transient_prefix =
+                        agentloop::injected_as(rag.prefix, agentloop::InjectedSource::Retrieval);
                 }
                 note(describe_retrieval(rag_choice, rag), !rag.error.empty());
                 if (rag.error.empty() && !rag.prefix.empty() && !rag.sources.empty()) {
@@ -736,9 +737,11 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                 make_tool_selection(harness, config, registry, config_path, ranked_by);
             options.tool_selection = selection.get();
             options.summary_model = named_utility(config);
-            if (policy == harness::AgentToolPolicy::All) {
-                options.permission = make_permission_checker(config, nullptr);
-            }
+            // Every agent with tools has the checker, so a listed host is
+            // reached -- `fetch_url`, the review fetch (57x). Machine mode has
+            // nobody to ask, so an unlisted host is denied, a read-only agent
+            // and an `all` one alike.
+            options.permission = make_permission_checker(config, nullptr);
             history.push_back(
                 harness::ChatMessage::user(input.empty() ? std::string{kDefaultInput} : input));
             try {
@@ -784,6 +787,7 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         reporter_options.style =
             ansi::Style::detect(flags->no_color ? ansi::ColorMode::Never : ansi::ColorMode::Auto);
         reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
+        reporter_options.answer_is_terminal = stdout_tty;
         CliReporter reporter{status_writer, reporter_options};
         const ansi::Style& style = reporter_options.style;
         const auto note = [&](std::string_view line, bool warning) {
@@ -815,11 +819,16 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             make_tool_selection(harness, config, registry, config_path, ranked_by);
         options.tool_selection = selection.get();
         options.summary_model = named_utility(config);
-        // The gate only for an `all` agent: a read-only registry has nothing
-        // to prompt for, which is the whole point of the policy.
+        // Every agent with tools has the checker, so a listed host is reached
+        // -- `fetch_url`, the review fetch (57x). Only an `all` agent also has
+        // the terminal confirm: it prompts for a write, and for a website not
+        // already listed. A read-only agent keeps the policy's promise never
+        // to prompt -- it writes nothing, and a host it is not already allowed
+        // is denied rather than asked -- so a listed host is reached and
+        // nothing blocks.
+        const auto approvals = std::make_shared<SessionApprovals>();
+        options.permission = make_permission_checker(config, approvals);
         if (policy == harness::AgentToolPolicy::All) {
-            const auto approvals = std::make_shared<SessionApprovals>();
-            options.permission = make_permission_checker(config, approvals);
             options.confirm = terminal_confirm_fn(reporter.status(), style, config_path, approvals);
         }
         // ask_user: per-agent opt-in, on a terminal, unless switched off --
@@ -833,7 +842,11 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
                                                           loaded.structured(), turn.answer);
             const std::string output = render_output(turn, rendering);
             if (print && !streamed) {
-                std::cout << output << "\n" << std::flush;
+                // At a terminal, drawn as text, never obeyed (57p): `--text`,
+                // `--markdown`, a structured agent and every interactive
+                // answer print here, not through the reporter's stream. The
+                // saved report and a pipe keep the bytes.
+                std::cout << answer_for_stdout(output, stdout_tty) << "\n" << std::flush;
             }
             if (will_save) {
                 std::string error;

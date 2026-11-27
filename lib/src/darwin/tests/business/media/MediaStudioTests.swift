@@ -78,6 +78,48 @@ struct InstallConsentErrorTests {
         #expect(older.arguments == ["train", "setup", "--with", "video"])
         #expect(older.said == runtimeErr.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+
+    @Test("a failed install naming its rebuild asks for the rebuild next; one naming itself, or nothing, asks nothing")
+    func afterFailedInstall() throws {
+        // The CLI's M19 refusal, as `train setup` says it on an environment
+        // whose Python the set does not run on (`PythonEnv::unfit_reason`).
+        let install = ["train", "setup", "--with", "voice"]
+        let unfit = "apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'voice' set runs on >=3.10,<3.13 -- rebuild it on a Python that fits: apogee train setup --rebuild --with voice"
+        let next = try #require(InstallConsent(afterFailed: install, failure: unfit, stderr: unfit + "\n"))
+        #expect(next.arguments == ["train", "setup", "--rebuild", "--yes", "--with", "voice"])
+        #expect(next.rebuilds)
+        #expect(next.set == "voice")
+        #expect(next.said == unfit)
+        #expect(!InstallConsent(arguments: install, said: "").rebuilds)
+        // A failure naming the install that just failed, or none, asks nothing again.
+        let again = "apogee voice: kokoro is not installed -- apogee train setup --with voice"
+        #expect(InstallConsent(afterFailed: install, failure: again, stderr: again) == nil)
+        let pip = "apogee train: pip install for the 'voice' set failed (exit code 1):\nERROR: No matching distribution found for kokoro"
+        #expect(InstallConsent(afterFailed: install, failure: pip, stderr: pip) == nil)
+        #expect(InstallConsent(afterFailed: install, failure: nil, stderr: "") == nil)
+    }
+
+    /// GUI 6c: one install into the one environment at a time, asked when
+    /// it starts -- every install waits for another place's install, and a
+    /// rebuild also for a run on the environment's Python.
+    @Test("an install waits for another install; a rebuild for that and for a run on the environment; each said by the command running")
+    func waitsWhenItStarts() {
+        let install = InstallConsent(arguments: ["train", "setup", "--with", "voice"], said: "")
+        let rebuild = InstallConsent(arguments: ["train", "setup", "--rebuild", "--yes", "--with", "voice"], said: "")
+        #expect(install.waits(installing: nil, usingEnvironment: nil) == nil)
+        #expect(rebuild.waits(installing: nil, usingEnvironment: nil) == nil)
+        #expect(install.waits(installing: "apogee train setup", usingEnvironment: nil)
+            == "apogee train setup is already running: press Install again once it has finished")
+        #expect(rebuild.waits(installing: "apogee bootstrap", usingEnvironment: "apogee video generate")
+            == "apogee bootstrap is already running: press Rebuild again once it has finished", "the install is named first")
+        #expect(install.waits(installing: nil, usingEnvironment: "apogee video generate") == nil, "an install adds to the environment; it does not move it")
+        #expect(rebuild.waits(installing: nil, usingEnvironment: "apogee video generate")
+            == "apogee video generate is using Apogee's Python environment: press Rebuild again once it has finished")
+        #expect(rebuild.heldBack(by: "apogee train setup")
+            == "apogee train setup is already running: once it has finished, apogee train setup --rebuild --yes --with voice rebuilds the environment")
+        #expect(install.heldBack(by: "apogee bootstrap")
+            == "apogee bootstrap is already running: once it has finished, apogee train setup --with voice installs it")
+    }
 }
 
 @Suite("CaptionsAbility")

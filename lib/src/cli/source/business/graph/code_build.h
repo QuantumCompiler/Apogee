@@ -45,9 +45,12 @@
 /// binary or oversized file, one that cannot be read: each is **skipped and
 /// named**, never silently, and never a reason to fail the build. A file
 /// whose parse recovered from an error is used -- tree-sitter's recovery
-/// keeps the rest of the file -- and named as partial. Vendored and build
-/// directories nested in a tree (`third_party/`, `node_modules/`, ...) are
-/// left out whole, counted per directory.
+/// keeps the rest of the file -- and named as partial. A file whose bytes
+/// are not all UTF-8 is mended where it enters, used, and named as mended
+/// (57t): what is read from it reaches a JSON dump, which a byte that is not
+/// text would end. Vendored and build directories nested in a tree
+/// (`third_party/`, `node_modules/`, ...) are left out whole, counted per
+/// directory.
 namespace apogee::graph {
 
 /// Reads one file of a member by its relative path; nullopt with `error` set
@@ -109,6 +112,21 @@ struct SkippedFile {
     std::string reason;
 };
 
+/// A file used whose bytes were not all UTF-8 (57t): mended where it entered
+/// -- each maximal subpart of an ill-formed sequence one U+FFFD,
+/// `contracts/utf8.h`'s policy -- and parsed as mended, so a Latin-1 comment
+/// or string costs the file nothing of its structure. Its content hash is
+/// the bytes as read, so an unchanged file is not parsed again.
+struct MendedFile {
+    std::string member;
+    std::string file;
+    /// The bytes shown as U+FFFD.
+    std::size_t bytes = 0;
+};
+
+/// How a mended file is named: `not UTF-8 -- N byte(s) shown as U+FFFD`.
+[[nodiscard]] std::string mended_reason(const MendedFile& file);
+
 struct SourceBuildResult {
     bool dry_run = false;
     /// Cancellation was requested: the files parsed so far keep their
@@ -133,6 +151,9 @@ struct SourceBuildResult {
     /// Parsed with an error recovered from (`member/path`): their facts are
     /// partial.
     std::vector<std::string> partial;
+    /// Used, with bytes that were not UTF-8 shown as U+FFFD (57t), sorted by
+    /// (member, file).
+    std::vector<MendedFile> mended;
     /// Vendored or build directories left out, with how many files each held.
     std::map<std::string, int> excluded;
     ResolveCounts counts;

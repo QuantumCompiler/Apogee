@@ -224,6 +224,16 @@ struct Session {
     /// The ledger names the chat and the chat names its task; `chats delete`
     /// refuses a chat whose task is live.
     std::string task;
+    /// Who began this chat (56c): an ACP host's `clientInfo.name` as it sent
+    /// it -- `acp` when it sent none -- for a chat begun through `apogee
+    /// acp`. Set when the chat begins and never rewritten by a resume, from
+    /// anywhere, as `started_at` answers when. Empty for a chat begun anywhere
+    /// else, which writes nothing, so it saves exactly as before.
+    std::string origin;
+    /// The folder an ACP host began this chat in (56c), as its `session/new`
+    /// named it -- what its `session/list` filters by. Empty, as `origin` is,
+    /// for a chat no host began, writing nothing.
+    std::string cwd;
     /// The plan the model keeps with `todo_write` (41d), as it last left it
     /// -- shown again when the chat resumes. Empty writes nothing, so a chat
     /// that never kept one saves exactly as before.
@@ -305,6 +315,20 @@ enum class Saved : std::uint8_t {
 /// the chat stays deleted. Otherwise the session is written whole, its own
 /// rename included.
 Saved save(Session& session);
+
+/// Whether the chat this process filed is gone (57a): `session`'s file, once
+/// this process has read or written it, no longer exists -- deleted outside
+/// it. A session that has filed nothing (a private chat, a new one before its
+/// first turn) has no file to lose, and answers false. Reads only whether the
+/// file exists.
+[[nodiscard]] bool filed_and_gone(const Session& session);
+
+/// What `save` learns of a delete, learned without a save (57a): marks
+/// `session` deleted when `filed_and_gone`, so a close that writes nothing --
+/// a resumed chat left as it was -- still knows its chat was deleted, and
+/// saves, summarises, captures and says nothing more of it. Returns
+/// `session.deleted`.
+bool learn_deleted(Session& session);
 
 /// The conversation's turn count (55b): the count the session keeps, or the
 /// answered turns its history holds when that is more -- a file older than

@@ -124,8 +124,23 @@ struct GraphActsTests {
         #expect(runner.calls.filter { $0 == "read graph stats demo" }.count == 2, "read back")
     }
 
+    @Test("Delete the graph, in the dialog's order: the question cleared as the dialog closes, then the graph's name handed in -- graph delete runs, read back (GUI M20)")
+    func deleteInTheDialogsOrder() async throws {
+        let runner = ScriptedRunner()
+        runner.saying(["graph", "delete"], printedText("graph-delete.txt"))
+        var said: [String] = []
+        let model = await connected(runner)
+        model.say = { said.append($0) }
+        model.askToDelete()
+        let answer = try #require(model.pendingDelete, "the dialog is built from the question")
+        model.pendingDelete = nil
+        await model.confirmDelete(answer)
+        #expect(runner.calls.contains("run graph delete demo"))
+        #expect(said.first?.hasPrefix("Deleted graph") == true, "the CLI's own sentence")
+    }
+
     @Test("delete asks first, runs graph delete <graph>, reads back -- an emptied named graph says Rebuild makes it again")
-    func deleteAsked() async {
+    func deleteAsked() async throws {
         let runner = ScriptedRunner()
         runner.saying(["graph", "delete"], printedText("graph-delete.txt"))
         var said: [String] = []
@@ -138,7 +153,7 @@ struct GraphActsTests {
         #expect(model.pendingDelete == "demo")
         #expect(!runner.calls.contains { $0.hasPrefix("run graph delete") })
         runner.reading(["graph", "stats"], #"{"built":false,"collections":[],"graph":"demo","kind":"named","object":"graph.stats","sources":["/Users/someone/code/ingest"]}"#)
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run graph delete demo"))
         #expect(model.result == nil && model.pendingDelete == nil)
         #expect(said.first?.hasPrefix("Deleted graph \"spare\": 10 node(s), 13 edge(s)") == true, "the CLI's own sentence")

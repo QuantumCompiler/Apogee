@@ -2,9 +2,10 @@ import AppKit
 import Synchronization
 import SwiftUI
 
-/// A model's markdown drawn in the design's terms (lib/design/spec/html/
-/// main.html, the chat's answer): prose with emphasis, strong, links and
-/// inline code in the mono face on `surface.control`, rounded; headings by
+/// A model's markdown drawn in the design's terms (the design prototype's
+/// `session` answer, drawn by its `styles` `MarkdownText`): prose with
+/// emphasis, strong, links and inline code in the mono face on
+/// `surface.control`, rounded; headings by
 /// the type scale; lists, nested; block quotes; code blocks as a bordered
 /// card on `surface.code` under their language's caption, with copy, the
 /// code coloured by the language its fence names (`CodeLexer`) in the

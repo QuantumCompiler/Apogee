@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "agentloop/retriever.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config_edit.h"
@@ -217,6 +218,74 @@ TEST_CASE("migrate --yes moves every model and repoints everything that named on
     // And there is nothing left to do.
     REQUIRE(home.run({"models", "migrate"}, &out) == 0);
     CHECK(out.find("nothing to migrate") != std::string::npos);
+}
+
+TEST_CASE("migrate --yes renames a moved model in every source's record and a mixed store's names",
+          "[commands][models][migrate][57s]") {
+    const Home home;
+    const std::string old_path = home.flat_gguf.string();
+    // `notes` ingested under the backend that names its model by path: each
+    // source recorded the path beside its folder.
+    {
+        apogee::embedstore::Store store{home.collection};
+        store.ingest_source("one.md", "/corpus", old_path, {"one"}, {{1.0F, 0.0F, 0.0F, 0.0F}});
+        store.ingest_source("two.md", "/corpus", old_path, {"two"}, {{0.0F, 1.0F, 0.0F, 0.0F}});
+        store.set_embedding_model(old_path, 4);
+    }
+    // `mixed`: one source under the moved model, one under another -- bound
+    // to neither, so a migration asking only the binding passed it by.
+    const std::filesystem::path mixed_path = home.home / "embeddings" / "mixed.db";
+    {
+        apogee::embedstore::Store store{mixed_path};
+        store.ingest_source("a.md", "/corpus", old_path, {"a"}, {{1.0F, 0.0F, 0.0F, 0.0F}});
+        store.ingest_source("b.md", "/corpus", "other-embedder", {"b"}, {{0.0F, 1.0F, 0.0F, 0.0F}});
+        store.mark_embedding_mixed({old_path, "other-embedder"}, 4);
+    }
+
+    std::string out;
+    REQUIRE(home.run({"models", "migrate", "--yes"}, &out) == 0);
+    const auto flat =
+        apogee::models::list_store_ggufs(apogee::models::StoreRoots::at(home.models), "flat");
+    REQUIRE(flat.size() == 1);
+    const std::string moved = flat.front().file.string();
+    CHECK(out.find("rebound  notes.db") != std::string::npos);
+    CHECK(out.find("rebound  mixed.db") != std::string::npos);
+
+    {
+        apogee::embedstore::Store store{home.collection};
+        CHECK(store.embedding_model().model == moved);
+        const auto ingests = store.source_ingests();
+        REQUIRE(ingests.size() == 2);
+        CHECK(ingests.at("one.md").model == moved);
+        CHECK(ingests.at("two.md").model == moved);
+        CHECK(ingests.at("one.md").root == "/corpus");
+
+        // The reviewer's sequence: one more file ingested under the moved
+        // model, the binding decided over every vectored source's record as
+        // `embed ingest` decides it -- one model, bound, no warning.
+        store.ingest_source("three.md", "/corpus", moved, {"three"}, {{0.0F, 0.0F, 1.0F, 0.0F}});
+        apogee::agentloop::IngestBindingFacts facts;
+        facts.run_model = moved;
+        facts.vectors_written = 1;
+        const auto recorded = store.source_ingests();
+        for (const std::string& source : store.vectored_sources()) {
+            facts.source_models.push_back(recorded.at(source).model);
+        }
+        const apogee::agentloop::IngestBinding binding =
+            apogee::agentloop::resolve_ingest_binding(facts);
+        CHECK(binding.action == apogee::agentloop::BindingAction::Bind);
+        CHECK(binding.model == moved);
+        CHECK(binding.warning.empty());
+    }
+    {
+        const apogee::embedstore::Store store{mixed_path};
+        const apogee::embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+        CHECK_FALSE(binding.recorded());
+        CHECK(binding.mixed == std::vector<std::string>{moved, "other-embedder"});
+        CHECK(binding.dimension == 4);
+        CHECK(store.source_ingests().at("a.md").model == moved);
+        CHECK(store.source_ingests().at("b.md").model == "other-embedder");
+    }
 }
 
 TEST_CASE("migrate moves a flat MLX model into mlx/ and repoints the backend naming it",

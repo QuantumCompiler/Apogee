@@ -1644,6 +1644,69 @@ TEST_CASE(
     CHECK(slurp() == foreign);
 }
 
+TEST_CASE("a converted set's record follows its source's folder under a rename, nothing else",
+          "[models][store][rename]") {
+    // 57i: an MLX or voice conversion names its source by a handle; a rename
+    // of that model's folder rewrites the handle where it stands, under the
+    // byte-for-byte guard `bases` has. A repository id or a path is no
+    // handle, and another model's handle is not this rename's.
+    using apogee::models::BaseRename;
+    using apogee::models::rename_snapshot_ref;
+    CHECK(apogee::models::renamed_handle("wan--x/safetensors/aaaaaaaaaaaa", "wan--x", "Wan") ==
+          std::optional<std::string>{"Wan/safetensors/aaaaaaaaaaaa"});
+    for (const char* untouched : {"wan/x", "wan--x", "/srv/wan--x/safetensors/aaaaaaaaaaaa",
+                                  "wan--y/safetensors/aaaaaaaaaaaa", "wan--x/safetensors/zzz",
+                                  "wan--x/weights/aaaaaaaaaaaa"}) {
+        INFO(untouched);
+        CHECK_FALSE(apogee::models::renamed_handle(untouched, "wan--x", "Wan").has_value());
+    }
+
+    const Store store;
+    const std::filesystem::path dir = store.root.path() / "Wan" / "mlx" / "bbbbbbbbbbbb";
+    std::filesystem::create_directories(dir);
+    apogee::models::Snapshot record;
+    record.ref = "wan--x/safetensors/aaaaaaaaaaaa";
+    record.source = "convert";
+    record.pulled_at = "2026-10-21T09:00:00Z";
+    record.transform = "mlx_video.wan2.convert";
+    record.kind = "video";
+    record.files = {{.path = "config.json", .size = 412, .sha256 = std::string(64, 'c')}};
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    const std::filesystem::path path = apogee::models::snapshot_record_path(dir);
+    const auto slurp = [&path] {
+        std::ifstream in{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    };
+    const std::string before = slurp();
+
+    REQUIRE(rename_snapshot_ref(dir, "wan--x", "Wan") == BaseRename::Renamed);
+    std::string expected = before;
+    const std::string named = "\"wan--x/safetensors/aaaaaaaaaaaa\"";
+    REQUIRE(expected.find(named) != std::string::npos);
+    expected.replace(expected.find(named), named.size(), "\"Wan/safetensors/aaaaaaaaaaaa\"");
+    CHECK(slurp() == expected);
+
+    // Another model's rename, or none to make: nothing written.
+    const std::string settled = slurp();
+    CHECK(rename_snapshot_ref(dir, "wan--x", "Elsewhere") == BaseRename::Unnamed);
+    CHECK(rename_snapshot_ref(dir, "org--other", "Other") == BaseRename::Unnamed);
+    CHECK(slurp() == settled);
+    CHECK(rename_snapshot_ref(store.root.path() / "no-record", "a", "b") == BaseRename::Unnamed);
+
+    // A pull's record names a repository: never touched.
+    record.ref = "wan/x";
+    REQUIRE(apogee::models::write_snapshot(dir, record));
+    CHECK(rename_snapshot_ref(dir, "wan--x", "Wan") == BaseRename::Unnamed);
+
+    // One this build would not write back as it reads: left whole, failed.
+    const std::string foreign =
+        R"({"ref": "Wan/safetensors/aaaaaaaaaaaa", "source": "convert", "made_by": "later",)"
+        R"( "files": []})";
+    write_file(path, foreign);
+    CHECK(rename_snapshot_ref(dir, "Wan", "Wan2") == BaseRename::Failed);
+    CHECK(slurp() == foreign);
+}
+
 TEST_CASE(
     "a set's towers are what its config declares beside its language model: vision, audio, an "
     "omni model's thinker, never a name",

@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 
+#include "ansi/inert.h"
 #include "backends/anthropic_wire.h"
 #include "backends/google.h"
 #include "backends/google_wire.h"
@@ -936,7 +937,11 @@ std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi
         if (row.consumed && !all) {
             ++folded;
         } else {
-            table.rows.push_back(row);
+            // A file's own architecture string is its uploader's: drawn as a
+            // line (57p), while the JSON listing keeps it as the file has it.
+            ModelRow shown = row;
+            shown.architecture = ansi::inert_line(shown.architecture);
+            table.rows.push_back(std::move(shown));
         }
     }
     std::ranges::stable_sort(
@@ -1253,7 +1258,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     if (!info.parsed) {
         // The reason, always. An unreadable header rendering as blank fields is
         // the exact failure this surface exists to prevent.
-        out << "header:       FAILED -- " << info.parse_error << "\n";
+        out << "header:       FAILED -- " << ansi::inert_line(info.parse_error) << "\n";
         // A stored file names itself: <model>/gguf/<id>/<file>.
         const std::filesystem::path id_dir = path.parent_path();
         if (models::is_weight_id(id_dir.filename().string()) &&
@@ -1268,7 +1273,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     }
 
     out << "header:       ok (GGUF v" << info.version << ")\n";
-    out << "architecture: " << (info.architecture.empty() ? "(absent)" : info.architecture) << "\n";
+    // What the file says, drawn as lines (57p): a GGUF's strings are its
+    // uploader's, and a title change or a screen clear in one is shown,
+    // never obeyed.
+    out << "architecture: "
+        << (info.architecture.empty() ? "(absent)" : ansi::inert_line(info.architecture)) << "\n";
     // Stated separately from the architecture above, and stated at all rather
     // than omitted: a user comparing two models needs to know how much Apogee
     // actually knows about each.
@@ -1282,7 +1291,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "evidence:     " << resolved->evidence << "\n";
     }
     if (!info.name.empty()) {
-        out << "name:         " << info.name << "\n";
+        out << "name:         " << ansi::inert_line(info.name) << "\n";
     }
     out << "tensors:      " << info.tensors << " total, " << info.text_tensors << " text\n";
     out << "size:         " << (info.file_size / (1024LL * 1024)) << " MiB\n";

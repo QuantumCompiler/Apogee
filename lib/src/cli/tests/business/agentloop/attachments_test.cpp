@@ -275,6 +275,47 @@ TEST_CASE("HTML is read as its main content, links resolved against the file",
     CHECK(read.text.find("file.invalid") == std::string::npos);
 }
 
+TEST_CASE("an HTML attachment is read in the charset its <meta> declares (57v)",
+          "[agentloop][attachments]") {
+    const Scratch scratch;
+    const std::string replacement = "\xEF\xBF\xBD";  // U+FFFD
+    const auto text_of = [&scratch](const std::string& name, const std::string& bytes) {
+        const auto read = read_attachment_text(scratch.write(name, bytes));
+        REQUIRE(read.ok());
+        CHECK(read.reader == "html");
+        return read.text;
+    };
+    SECTION("Latin-1, declared: its letters, not replacement characters") {
+        const std::string text =
+            text_of("legacy.html",
+                    "<html><head><meta charset=\"iso-8859-1\"><title>Legacy</title></head>"
+                    "<body><p>caf\xE9, na\xEFve, M\xFCller</p></body></html>");
+        CHECK(text.find("café, naïve, Müller") != std::string::npos);
+        CHECK(text.find(replacement) == std::string::npos);
+    }
+    SECTION("windows-1252, declared the http-equiv way: its curly quotes too") {
+        const std::string text =
+            text_of("quotes.htm",
+                    "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; "
+                    "charset=windows-1252\"></head><body><p>\x93quoted\x94 caf\xE9</p></body>"
+                    "</html>");
+        CHECK(text.find("“quoted” café") != std::string::npos);
+        CHECK(text.find(replacement) == std::string::npos);
+    }
+    SECTION("no declaration: UTF-8, unchanged") {
+        CHECK(text_of("plain.html", "<p>café, naïve, Müller</p>") == "café, naïve, Müller");
+        CHECK(text_of("stray.html", "<p>caf\xE9</p>") == "caf" + replacement);
+    }
+    SECTION("a UTF-8 byte order mark outranks the declaration") {
+        const std::string text =
+            text_of("marked.html",
+                    "\xEF\xBB\xBF<html><head><meta charset=\"iso-8859-1\"></head><body><p>"
+                    "café, naïve, Müller</p></body></html>");
+        CHECK(text.find("café, naïve, Müller") != std::string::npos);
+        CHECK(text.find("Ã") == std::string::npos);
+    }
+}
+
 TEST_CASE("a PDF is read through pdftotext, its pages numbered", "[agentloop][attachments][pdf]") {
     if (!apogee::embedstore::pdftotext_available()) {
         SKIP("pdftotext is not installed");

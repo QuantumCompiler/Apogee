@@ -6,6 +6,8 @@
 #include <exception>
 #include <utility>
 
+#include "agentloop/budget.h"
+
 namespace apogee::agentloop {
 namespace {
 
@@ -160,8 +162,13 @@ StructuredResult run_bound(const harness::Harness& harness,
                            std::vector<harness::ChatMessage>& history, const Options& bound,
                            Reporter& reporter, const nlohmann::json& schema) {
     StructuredResult result;
+    // The turn both attempts answer (57q): the correction continues it, so
+    // the tool results the first answer was built on are sent whole to the
+    // second, never as a finished turn's stubs telling it to read them again.
+    Options attempt_options = bound;
+    attempt_options.turn_start = bound.turn_start.value_or(current_turn_start(history));
     const auto attempt = [&]() {
-        result.run = run(harness, history, bound, reporter);
+        result.run = run(harness, history, attempt_options, reporter);
         result.answer = result.run.answer;
         result.attempts += 1;
         result.json = extract_json(result.answer);

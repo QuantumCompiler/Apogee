@@ -1,0 +1,7 @@
+{
+ "turns": [
+  {
+   "text": "It’s a cancellation, not a crash. The last frames are `TaskGroup.__aexit__` → `_abort()`, and the exception is `ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)` wrapping a `TimeoutError` from `runner.py:74`.\n\nSo one fetch timed out and the group cancelled the rest. That matches what you found in the ingest runner session this afternoon."
+  }
+ ]
+}

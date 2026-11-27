@@ -12,6 +12,8 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
     private let sessions: () -> Sessions
     private let screen: (Destination) -> Screen
     private let overlay: (Overlay) -> OverlayContent
+    /// The width when a drag on the divider began; `nil` between drags.
+    @State private var dragStart: Double?
 
     public init(
         model: ShellViewModel, @ViewBuilder sessions: @escaping () -> Sessions,
@@ -29,8 +31,24 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
         HStack(spacing: 0) {
             if layout.sidebar != .hidden {
                 Sidebar(model: model, compact: layout.sidebar == .icons, sessions: sessions)
-                    .frame(width: layout.sidebar == .full ? Layout.sidebar : Layout.sidebarCollapsed)
+                    .frame(width: layout.sidebar == .full ? CGFloat(model.sidebarWidth) : Layout.sidebarCollapsed)
                 Divider()
+                    .overlay {
+                        Color.clear
+                            .frame(width: 8)
+                            .contentShape(Rectangle())
+                            .pointerStyle(.frameResize(position: .trailing))
+                            .gesture(
+                                DragGesture(coordinateSpace: .global)
+                                    .onChanged { value in
+                                        let start = dragStart ?? model.sidebarWidth
+                                        dragStart = start
+                                        model.setSidebarWidth(start + value.translation.width)
+                                    }
+                                    .onEnded { _ in dragStart = nil }
+                            )
+                    }
+                    .zIndex(1)
             }
             screen(model.route)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,7 +60,7 @@ public struct ShellView<Screen: View, Sessions: View, OverlayContent: View>: Vie
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
-                ToastView(toast: toast)
+                ToastView(text: toast.text)
                     .padding(.bottom, Spacing.xl)
                     .task(id: toast.id) {
                         try? await Task.sleep(for: Toast.lifetime)
@@ -130,23 +148,6 @@ public struct PlaceholderView: View {
     }
 }
 
-/// The toast: one line at the bottom centre.
-struct ToastView: View {
-    let toast: Toast
-
-    var body: some View {
-        Text(toast.text)
-            .font(.apogeeBody)
-            .foregroundStyle(Palette.textPrimary)
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.s)
-            .background(Palette.card, in: Capsule())
-            .overlay(Capsule().strokeBorder(Palette.border))
-            .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
-            .accessibilityAddTraits(.updatesFrequently)
-    }
-}
-
 #if DEBUG
 #Preview("The window, on Models") {
     ShellView(model: ShellPreview.shell(at: .models)) {
@@ -174,10 +175,5 @@ struct ToastView: View {
 #Preview("A place not built yet") {
     PlaceholderView(symbol: Destination.models.symbol, placeholder: ShellPreview.placeholder)
         .frame(width: 800, height: 500)
-}
-
-#Preview("The toast") {
-    ToastView(toast: Toast(id: 1, text: "Renamed to qwen3-8b-chat"))
-        .padding(Spacing.xl)
 }
 #endif

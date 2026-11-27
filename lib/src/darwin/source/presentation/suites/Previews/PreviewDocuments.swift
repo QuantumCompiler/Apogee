@@ -127,5 +127,35 @@ utility: ghost
     static let statusVastTyped = #"""
 {"fields":[{"field":"suite","value":"vast"},{"field":"chat","value":"root   (via suite vast)   [local: 40960 MiB of weights, 136 MiB of cache]"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"vast   (via suite vast)   [local: 204800 MiB of weights, 136 MiB of cache]"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"},{"field":"footprint","value":"suite vast\nroot (chat): 41096 MiB -- 40960 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\nvast (extraction): 204936 MiB -- 204800 MiB of weights, 136 MiB of q8_0 cache at 8192 tokens\ntotal: suite vast needs 247056 MiB of this machine's 110100 MiB: root 41096 + vast 204936 + 1024 margin -- it does not fit"}],"footprint":{"budget_bytes":115448725504,"margin_bytes":1073741824,"members":[{"backend":"root","bytes":43092279296,"known":true,"local":true,"note":"","roles":["chat"],"shares":""},{"backend":"vast","bytes":214890971136,"known":true,"local":true,"note":"","roles":["extraction"],"shares":""}],"suite":"vast","total_bytes":259056992256,"verdict":"does not fit"}}
 """#
+    // The described sandbox (GUI 6d), recorded from apogee-dev: mock backends
+    // m1-m4, `duo` (chat m1, utility m2, described "two") the default, and
+    // `rich` (m3, m4).
+    /// tests/business/reads/Fixtures/suites-config-get-described.txt
+    static let configGetDescribed = #"""
+duo
+rich
+"""#
+    /// tests/business/reads/Fixtures/suites-config-get-duo.txt
+    static let configGetDuo = #"""
+chat: m1
+utility: m2
+"""#
+    /// tests/business/reads/Fixtures/suites-config-get-rich.txt
+    static let configGetRich = #"""
+chat: m3
+utility: m4
+"""#
+    /// tests/business/reads/Fixtures/suites-models-list-described.json
+    static let describedList = #"""
+{"data":[{"architecture":"-","backend":"m1","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"chat, embedding, extraction","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m2","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m3","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m4","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"}],"folded":0,"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-described-typed.json
+    static let describedStatus = #"""
+{"fields":[{"field":"suite","value":"duo   (two)"},{"field":"chat","value":"m1   (via suite duo)"},{"field":"embedding","value":"m1   (via models.default)"},{"field":"extraction","value":"m1   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"m2   (via suite duo)"},{"field":"footprint","value":"suite duo\nm1 (chat): nothing held here\nm2 (utility): nothing held here\ntotal: suite duo: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"m1","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""},{"backend":"m2","bytes":0,"known":true,"local":false,"note":"","roles":["utility"],"shares":""}],"suite":"duo","total_bytes":0,"verdict":"no member holds memory"}}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-described-rich-typed.json
+    static let describedStatusRich = #"""
+{"fields":[{"field":"suite","value":"rich"},{"field":"chat","value":"m3   (via suite rich)"},{"field":"embedding","value":"m1   (via models.default)"},{"field":"extraction","value":"m1   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"m4   (via suite rich)"},{"field":"footprint","value":"suite rich\nm3 (chat): nothing held here\nm4 (utility): nothing held here\ntotal: suite rich: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"m3","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""},{"backend":"m4","bytes":0,"known":true,"local":false,"note":"","roles":["utility"],"shares":""}],"suite":"rich","total_bytes":0,"verdict":"no member holds memory"}}
+"""#
 }
 #endif

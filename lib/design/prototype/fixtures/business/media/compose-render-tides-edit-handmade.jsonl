@@ -1,0 +1,20 @@
+{"protocol_version":1,"schema":"2026-10-25","type":"job","verb":"video compose"}
+{"text":"editing /Users/someone/Movies/Apogee/tides.mp4.json with planner: \"make the second scene the moon\"","type":"notice"}
+{"text":"scene 1/2: speaking its narration","type":"notice"}
+{"scene":1,"scenes":2,"state":"speaking","type":"scene"}
+{"device":"cpu","engine":"torch","scene":1,"type":"ready"}
+{"index":1,"of":1,"scene":1,"seconds":2.41,"type":"segment"}
+{"text":"scene 1/2: its clip runs 3.00 s, shorter than its narration now needs (3.41 s) -- rendering it again, its seed held","type":"notice"}
+{"text":"scene 1/2: rendering its clip -- 3.41 s, seed 1489828443","type":"notice"}
+{"scene":1,"scenes":2,"state":"rendering","type":"scene"}
+{"device":"mps","dtype":"bfloat16","engine":"torch","mode":"t2v","scene":1,"type":"ready"}
+{"scene":1,"step":10,"steps":50,"type":"step"}
+{"scene":1,"step":20,"steps":50,"type":"step"}
+{"scene":1,"step":30,"steps":50,"type":"step"}
+{"scene":1,"step":40,"steps":50,"type":"step"}
+{"scene":1,"step":50,"steps":50,"type":"step"}
+{"frames":81,"height":704,"scene":1,"type":"frames","width":1280}
+{"frames":81,"scene":1,"type":"assembling"}
+{"text":"joining 2 clips with 0.50 s crossfades","type":"notice"}
+{"text":"laying the narration","type":"notice"}
+{"document":{"assembly":"joined: the final profile: h264 at crf 20, preset medium, yuv420p; no sound; mixed: the picture copied as it was; aac 192k at 48000 Hz, stereo: narration (2 pieces)","brief":"the tides, twice a day","captions":{"burned":false,"file":"/Users/someone/Movies/Apogee/tides-edit.srt"},"created":"2026-11-14T11:59:00Z","edits":[{"from":"/Users/someone/Movies/Apogee/tides.mp4.json","instruction":"make the second scene the moon","redo":[]}],"error":null,"object":"video.project","output":"/Users/someone/Movies/Apogee/tides-edit.mp4","parent":"/Users/someone/Movies/Apogee/tides.mp4.json","plan":{"attempts":1,"backend":"planner"},"platform":"macos-arm64","removed":[],"scenes":[{"asset":null,"changes":["narration"],"clip":{"file":"/Users/someone/Movies/Apogee/tides-edit.scenes/s01.mp4","seconds":3.4},"from":1,"index":1,"moved":false,"narration":"The sea breathes under the moon.","seconds":3.0,"seed":1489828443,"visual":"a shore at dawn","voice":{"file":"/Users/someone/Movies/Apogee/tides-edit.scenes/s01.wav","seconds":2.41,"sentences":[{"offset":0.0,"seconds":2.41,"text":"The sea breathes under the moon."}]}},{"asset":null,"changes":[],"clip":{"file":"/Users/someone/Movies/Apogee/tides-edit.scenes/s02.mp4","seconds":3.0},"from":2,"index":2,"moved":false,"narration":"Twice a day.","seconds":3.0,"seed":761737461,"visual":"the moon over water","voice":{"file":"/Users/someone/Movies/Apogee/tides-edit.scenes/s02.wav","seconds":1.09,"sentences":[{"offset":0.0,"seconds":1.09,"text":"Twice a day."}]}}],"scenes_dir":"/Users/someone/Movies/Apogee/tides-edit.scenes","settings":{"assets":null,"captions":true,"crossfade":0.5,"model":"org--clip/pipeline/aaaaaaaaaaaa","music":null,"voice":"af_heart","voice_model":"hexgrad--Kokoro-82M/voice/cccccccccccc"},"status":"done","title":"Tides","version":1},"type":"document"}

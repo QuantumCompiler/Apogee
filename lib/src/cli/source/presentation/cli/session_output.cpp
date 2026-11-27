@@ -19,6 +19,7 @@ CliReporter::Options TerminalOutput::reporter_options(const Options& options) {
     out.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
     out.markdown = options.markdown;
     out.hyperlinks = ansi::hyperlinks_supported();
+    out.answer_is_terminal = platform::is_terminal(platform::StandardStream::Out);
     return out;
 }
 

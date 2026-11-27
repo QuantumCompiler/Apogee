@@ -3,10 +3,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "agent/tool.h"
 #include "backends/mock.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
@@ -210,4 +213,60 @@ TEST_CASE("two misses are delivered raw and flagged, never dropped and never a s
     CHECK(result.errors.front().find("not a JSON object") != std::string::npos);
     // Exactly ONE retry: never a third request.
     CHECK(rig.mock->requests().size() == 2);
+}
+
+TEST_CASE("the correction sees the turn's tool results whole, never stubs telling it to call again",
+          "[agentloop][structured][retry][budget][57q]") {
+    // The correction is pushed as a user message, so the turn once started
+    // there: the 40 KB the bad answer was built on became an earlier turn's,
+    // sent as a stub, and the model read the file again or made the field up.
+    const std::string file(40 * 1024, 'r');
+    apogee::backends::MockProvider::Options mock;
+    mock.turns = {
+        apogee::backends::MockTurn{
+            .text = "",
+            .tool_calls = {apogee::harness::ToolCall{
+                .id = "read-1", .name = "read_file", .arguments = R"({"path":"big.txt"})"}},
+            .finish_reason = apogee::harness::FinishReason::ToolCalls},
+        apogee::backends::MockTurn{.text = std::string{kBad}},
+        apogee::backends::MockTurn{.text = std::string{kGood}}};
+    const auto provider = std::make_shared<apogee::backends::MockProvider>(std::move(mock));
+    apogee::harness::Harness harness{apogee::harness::Config{}};
+    harness.register_provider("mock", provider);
+    harness.use_default_router();
+
+    apogee::agent::ToolRegistry registry;
+    apogee::agent::Tool reading;
+    reading.name = "read_file";
+    reading.description = "Reads a file";
+    reading.run = [&file](std::string_view) { return apogee::agent::ToolOutcome{file, false}; };
+    registry.add(reading);
+
+    std::vector<apogee::harness::ChatMessage> history{apogee::harness::ChatMessage::user("review")};
+    apogee::agentloop::Options options;
+    options.model = "mock";
+    options.tools = &registry;
+    apogee::agentloop::NullReporter reporter;
+    const auto result = run_structured(harness, history, options, reporter, schema());
+    CHECK(result.attempts == 2);
+    CHECK(result.conforms);
+
+    REQUIRE(provider->requests().size() == 3);
+    const auto& corrective = provider->requests().back().messages;
+    CHECK(std::ranges::any_of(corrective, [&file](const apogee::harness::ChatMessage& message) {
+        return message.role == apogee::harness::Role::Tool && message.content.plain_text() == file;
+    }));
+    CHECK(std::ranges::none_of(corrective, [](const apogee::harness::ChatMessage& message) {
+        return message.content.plain_text().find("call it again") != std::string::npos;
+    }));
+    // A new turn after it starts at its own question again: the read is a
+    // finished turn's, and its stub.
+    history.push_back(apogee::harness::ChatMessage::user("thanks"));
+    apogee::agentloop::Options next;
+    next.model = "mock";
+    (void)apogee::agentloop::run(harness, history, next);
+    CHECK(std::ranges::none_of(provider->requests().back().messages,
+                               [&file](const apogee::harness::ChatMessage& message) {
+                                   return message.content.plain_text() == file;
+                               }));
 }

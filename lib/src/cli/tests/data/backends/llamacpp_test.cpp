@@ -336,6 +336,110 @@ TEST_CASE("a load failure names the file and does not crash", "[backends][llamac
     }
 }
 
+TEST_CASE("a context llama.cpp cannot make fails its turn as the entry's, and the next tries again",
+          "[backends][llamacpp][errors]") {
+    // The model loads with no context made, so a cache_type the user named
+    // or a window the hardware cannot hold fails at the first turn -- in
+    // llama.cpp's plain runtime_error, which ended `chat` and machine mode
+    // with exit 1 (57c). It is the entry's ProviderError now.
+    constexpr std::string_view kRefusal =
+        "llama.cpp: could not create a context for this model with cache_type q8_0 -- try "
+        "cache_type: f16";
+    Fixture fixture;
+    fixture.runtime->context_error = std::string{kRefusal};
+    try {
+        (void)fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+        FAIL("expected ProviderError");
+    } catch (const apogee::harness::ProviderError& error) {
+        CHECK(error.backend() == "local");
+        CHECK(std::string{error.what()} == "local: " + std::string{kRefusal});
+    }
+    REQUIRE(fixture.runtime->model != nullptr);  // the model loaded; the context did not
+    CHECK(fixture.runtime->model->contexts.empty());
+
+    // A side request's own context is refused the same way.
+    ChatRequest side = turn({ChatMessage::user("title this")});
+    side.transient.side_request = true;
+    CHECK_THROWS_AS(fixture.provider->chat(side, {}), apogee::harness::ProviderError);
+
+    // Nothing was kept of the failure: the next turn makes its context.
+    fixture.runtime->model->context_error.clear();
+    const auto answered = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    CHECK(fixture.runtime->model->contexts.size() == 1);
+    CHECK(answered.usage.prompt_tokens > 0);
+}
+
+TEST_CASE("a decode llama.cpp refuses fails only its turn, and the next reads from the start",
+          "[backends][llamacpp][errors][kv]") {
+    // A decode that fails mid-prompt leaves the session's KV trimmed and
+    // half-written while the record still names the last prompt: trusted,
+    // the next turn would decode on from a cache that holds something else
+    // (57c). The failure is the entry's, and the record and the cache go.
+    constexpr std::string_view kRefusal =
+        "llama.cpp: no KV slot for the batch -- the prompt exceeds this backend's context_size";
+    Fixture fixture;
+    const auto first = fixture.provider->chat(turn({ChatMessage::user("alpha beta")}), {});
+    REQUIRE(fixture.runtime->model->contexts.size() == 1);
+    auto session = fixture.runtime->model->contexts.front();
+
+    const ChatRequest second =
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant(first.message.content),
+              ChatMessage::user("gamma delta epsilon")});
+    session->decode_error = std::string{kRefusal};
+    try {
+        (void)fixture.provider->chat(second, {});
+        FAIL("expected ProviderError");
+    } catch (const apogee::harness::ProviderError& error) {
+        CHECK(std::string{error.what()} == "local: " + std::string{kRefusal});
+    }
+    CHECK(session->resident == 0);  // the half-written cache emptied
+    REQUIRE_FALSE(session->trims.empty());
+    CHECK(session->trims.back() == 0);
+
+    // The same question again reads its whole prompt from position 0, on the
+    // same context, and answers.
+    const std::size_t before = session->decodes.size();
+    const auto again = fixture.provider->chat(second, {});
+    CHECK(fixture.runtime->model->contexts.size() == 1);
+    REQUIRE(session->decodes.size() > before);
+    CHECK(session->decodes[before].position == 0);
+    CHECK(session->decodes[before].count == again.usage.prompt_tokens);
+
+    // And the cache is warm again for the turn after.
+    const std::size_t warm = session->decodes.size();
+    (void)fixture.provider->chat(
+        turn({ChatMessage::user("alpha beta"), ChatMessage::assistant(first.message.content),
+              ChatMessage::user("gamma delta epsilon"),
+              ChatMessage::assistant(again.message.content), ChatMessage::user("zeta")}),
+        {});
+    REQUIRE(session->decodes.size() > warm);
+    CHECK(session->decodes[warm].position > 0);
+}
+
+TEST_CASE("a cancelled turn keeps the session's cache", "[backends][llamacpp][kv][cancel]") {
+    // A cancellation leaves the record and the KV agreeing -- the next trim
+    // cuts what the turn generated -- so Ctrl-C costs the next turn nothing
+    // (57c forgets the cache only on a failure).
+    Fixture fixture;
+    (void)fixture.provider->chat(turn({ChatMessage::user("prime the vocabulary")}), {});
+    auto session = fixture.runtime->model->contexts.front();
+    session->script.assign(100, fixture.runtime->model->id_for("prime"));
+    session->sampled = 0;
+    const auto cancellation = apogee::harness::CancellationToken::create();
+    apogee::harness::StreamOptions options;
+    options.cancellation = cancellation;
+    options.on_token = [&cancellation](std::string_view) { cancellation.cancel(); };
+    CHECK_THROWS_AS(fixture.provider->stream_chat(
+                        turn({ChatMessage::user("prime the vocabulary go")}), options),
+                    apogee::harness::CancelledError);
+
+    session->script.clear();
+    const std::size_t before = session->decodes.size();
+    (void)fixture.provider->chat(turn({ChatMessage::user("prime the vocabulary go")}), {});
+    REQUIRE(session->decodes.size() > before);
+    CHECK(session->decodes[before].position > 0);
+}
+
 TEST_CASE("a backend with no model_path refuses with an actionable message",
           "[backends][llamacpp][errors]") {
     apogee::harness::BackendConfig config;

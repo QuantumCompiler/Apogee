@@ -95,6 +95,17 @@ struct InputBar: View {
         .task { await SessionPreview.converse(model, typed: SessionPreview.noteTurn) }
 }
 
+#Preview("Restarting: Send off while the child is stopped, a message waiting in the draft") {
+    let model = SessionViewModel(starter: PreviewChats(lines: SessionPreview.mockActor, holdsStop: true))
+    InputBar(model: model)
+        .frame(width: 760)
+        .task {
+            await SessionPreview.ready(model)
+            model.draft = SessionPreview.noteTurn
+            await model.switchSuite(to: "pair")
+        }
+}
+
 #Preview("Starting apogee") {
     let model = SessionPreview.session(SessionPreview.mockActor, silentFrom: "session")
     InputBar(model: model)

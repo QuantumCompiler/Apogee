@@ -1,5 +1,6 @@
 import BusinessJobs
 import BusinessReads
+import DataProtocol
 import Foundation
 import Testing
 
@@ -54,7 +55,7 @@ struct RecordsViewModelTests {
     }
 
     @Test("link, move and delete are their verbs, each read back; the export writes where the person chose")
-    func changes() async {
+    func changes() async throws {
         let (model, runner, _) = await records()
         let record = model.records[0]
         await model.link(record, to: "  PROJ-7 ")
@@ -64,11 +65,22 @@ struct RecordsViewModelTests {
         await model.move(record, to: "shipped")
         #expect(!runner.calls.contains("run knowledge|status|\(record.id)|shipped"), "already shipped: nothing runs")
         model.pendingDelete = record
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
         await model.export(to: URL(fileURLWithPath: "/Users/someone/knowledge.md"), markdown: true, anonymize: true)
         #expect(runner.calls.contains("run knowledge|export|--format|markdown|--anonymize|-o|/Users/someone/knowledge.md"))
         #expect(runner.calls.filter { $0 == "read knowledge|list" }.count >= 5, "every change read back")
+    }
+
+    @Test("a record's Delete, in the dialog's order: the question cleared as the dialog closes, then the record handed in -- knowledge delete runs (GUI M20)")
+    func recordDeleteInTheDialogsOrder() async throws {
+        let (model, runner, _) = await records()
+        let record = try #require(model.records.first)
+        model.pendingDelete = record
+        let answer = try #require(model.pendingDelete)
+        model.pendingDelete = nil
+        await model.confirmDelete(answer)
+        #expect(runner.calls.contains("run knowledge|delete|\(record.id)"))
     }
 
     @Test("a capture is the clerk's run, supervised: its command as typed, overrides only where set")
@@ -123,6 +135,28 @@ struct CollectionsViewModelTests {
         #expect(model.info.map(CollectionsViewModel.vectors) == "none -- a text index only")
     }
 
+    /// GUI 6h: `embed info`'s `vectors` object, recorded from the branch's
+    /// `apogee-dev` (`collection-info-vectors*.json`), said in the CLI's
+    /// text-mode words; the unrecorded model and the widths are handmade
+    /// from that shape, as `embed.cpp`'s text prints them.
+    @Test("a vectorised collection says its vectors as the CLI's embed info does; a text-only one still says so")
+    func vectorsLine() async throws {
+        let runner = ScriptedRunner()
+        runner.reading(["embed", "list"], fixture("collections-list"))
+        runner.reading(["embed", "info"], fixture("collection-info-vectors"))
+        let model = CollectionsViewModel(runner: runner, starter: ScriptedJobs([]))
+        await model.connect(binary: Self.binary)
+        await model.select(model.collections[1])
+        #expect(model.info.map(CollectionsViewModel.vectors) == "3 of 3 chunks, 8-d [mock-embed]")
+        let mixed = try #require(CollectionInfo(document: ReadDocument(text: fixture("collection-info-vectors-mixed"))!))
+        #expect(CollectionsViewModel.vectors(mixed) == "4 of 4 chunks, 8-d [mixed: 'mock-embed' and 'mock-embed-b' -- re-ingest every source with one model]")
+        let unbound = try #require(CollectionInfo(document: ReadDocument(text: #"{"collection":"old","chunks":1,"vectors":{"chunks":1,"dimension":384,"widths":2}}"#)!))
+        #expect(CollectionsViewModel.vectors(unbound) == "1 of 1 chunk, 384-d [model not recorded -- re-ingest to bind] -- MIXED: 2 widths")
+        #expect(CollectionsViewModel.spoken(["a", nil, "c"]) == "'a', an unrecorded model and 'c'")
+        let textOnly = try #require(CollectionInfo(document: ReadDocument(text: fixture("collection-info"))!))
+        #expect(CollectionsViewModel.vectors(textOnly) == "none -- a text index only")
+    }
+
     @Test("a search is embed query, its lines as printed -- the retriever and the scores the CLI's")
     func search() async {
         let (model, runner, _) = await collections()
@@ -133,14 +167,25 @@ struct CollectionsViewModelTests {
         #expect(model.results?.hasPrefix("0.000  [lexical]  heat-pumps.md#0") == true)
     }
 
+    @Test("a collection's Delete, and a source's, in the dialog's order: the question cleared as the dialog closes, then its answer handed in -- embed delete runs (GUI M20)")
+    func collectionDeleteInTheDialogsOrder() async throws {
+        let (model, runner, _) = await collections()
+        for answer in [CollectionsViewModel.PendingDelete(collection: "notes", source: "solar.md"), .init(collection: "notes", source: nil)] {
+            model.pendingDelete = answer
+            model.pendingDelete = nil
+            await model.confirmDelete(answer)
+            #expect(runner.calls.contains("run " + answer.arguments.joined(separator: "|")), "\(answer)")
+        }
+    }
+
     @Test("a whole collection's delete passes --yes only after the person's word; a source's, as the CLI takes it")
-    func deletes() async {
+    func deletes() async throws {
         let (model, runner, _) = await collections()
         model.pendingDelete = .init(collection: "notes", source: "solar.md")
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run embed|delete|notes|--source|solar.md"))
         model.pendingDelete = .init(collection: "notes", source: nil)
-        await model.confirmDelete()
+        try await model.confirmDelete(#require(model.pendingDelete))
         #expect(runner.calls.contains("run embed|delete|notes|--yes"))
     }
 

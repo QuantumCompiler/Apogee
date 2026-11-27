@@ -95,6 +95,28 @@ TEST_CASE("an ERROR node makes a parse partial; a MISSING token does not",
     CHECK_FALSE(cpp.parse("void f(Options options = {});\n").has_errors);
 }
 
+TEST_CASE("deep nesting around a syntax error is walked on the heap, never the stack",
+          "[graph][code][parser][57t]") {
+    // 400 KB, 200000 levels: well under the 2 MiB cap, and deep enough that
+    // the recursive walk this replaced ran off the stack (SIGSEGV).
+    CodeParser python{CodeLanguageId::Python};
+    const std::size_t depth = 200000;
+    const std::string open(depth, '(');
+    const std::string close(depth, ')');
+    const CodeParseResult broken = python.parse("x = " + open + "1 +" + close + "\n");
+    CHECK(broken.parsed);
+    CHECK(broken.has_errors);
+    // The same nesting without the error is as it was: whole.
+    const CodeParseResult fine = python.parse("x = " + open + "1" + close + "\n");
+    CHECK(fine.parsed);
+    CHECK_FALSE(fine.has_errors);
+    // An error deep in one branch beside a clean one is still found.
+    CHECK(python
+              .parse("a = (1)\nb = " + std::string(5000, '[') + "1 +" + std::string(5000, ']') +
+                     "\nc = 2\n")
+              .has_errors);
+}
+
 TEST_CASE("the roster: names, aliases, extensions and the header rule",
           "[graph][code][languages]") {
     CHECK(apogee::graph::code_languages().size() == 12);

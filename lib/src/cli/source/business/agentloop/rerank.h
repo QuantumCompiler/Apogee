@@ -16,8 +16,9 @@
 /// ## The (ranked, applied) contract
 ///
 /// `rerank` never fails. Every failure path -- no judge, a provider error, a
-/// reply that is not a ranking -- returns the raw retrieval order with
-/// `applied = false`, and the reason. A caller therefore cannot label results
+/// reply that is not a ranking (no array, more than one, or one with no
+/// usable id, 57r) -- returns the raw retrieval order with `applied = false`,
+/// and the reason. A caller therefore cannot label results
 /// "reranked" when they are really raw order: the ordering and the claim about
 /// the ordering come from the same place. A judge that legitimately drops
 /// every candidate returns nothing with `applied = true`: that is a verdict --
@@ -87,9 +88,30 @@ struct RerankChoice {
                                               const std::vector<embedstore::SearchHit>& candidates,
                                               int limit);
 
-/// The 1-based ids in a reply, tolerating prose and fences around the array
-/// and dropping duplicates and out-of-range ids. nullopt only when no array
-/// could be read at all; an empty array is a valid "none of these".
+/// What a judge's reply reads as: a ranking, or why it is not one (57r).
+struct RerankReading {
+    /// The 1-based ids, when the reply is a usable ranking. An empty one is
+    /// the judge's "none of these help" -- a verdict, read only off a
+    /// literally empty array.
+    std::optional<std::vector<int>> ids{};
+    /// Why the reply is not a ranking, when it is not: the degrade note's
+    /// words.
+    std::string problem{};
+};
+
+/// The reply read as a ranking, tolerating prose and fences around the
+/// array. Inside it, a whole number written as a string (`"2"`) is that id,
+/// and duplicates, out-of-range and non-number entries are dropped -- a
+/// mostly good ranking is still better than raw order. It is NOT a ranking
+/// (57r) when no array can be read, when the reply holds more than one array
+/// (`Passage [3] is off-topic; the ranking is [2, 1]`: which one ranks
+/// would be a guess), or when an array with entries leaves no usable id
+/// (`["x"]`, `[0]`, `[3]` of two): none of those is the judge saying "none
+/// help", so none may cost the turn its chunks.
+[[nodiscard]] RerankReading read_rerank_reply(std::string_view reply, std::size_t candidates);
+
+/// `read_rerank_reply`'s ids: nullopt whenever the reply is not a ranking;
+/// an empty array is a valid "none of these".
 [[nodiscard]] std::optional<std::vector<int>> parse_rerank_ids(std::string_view reply,
                                                                std::size_t candidates);
 
@@ -100,7 +122,9 @@ struct RerankOutcome {
     std::string note;
 };
 
-/// One judge call over `hits`, cut to `limit`. See the contract above.
+/// One judge call over `hits`, cut to `limit`. See the contract above. A
+/// cancel is not a judge failure: `CancelledError` goes on up, so a stopped
+/// turn is never said as "using raw retrieval order" (57r).
 [[nodiscard]] RerankOutcome rerank(const harness::Harness& harness, std::string_view backend,
                                    std::string_view question,
                                    const std::vector<embedstore::SearchHit>& hits, int limit,

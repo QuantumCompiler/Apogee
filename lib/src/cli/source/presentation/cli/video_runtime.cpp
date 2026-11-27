@@ -15,6 +15,11 @@ namespace apogee::commands {
 std::string install_runtime_set(training::PythonEnv& env, training::RequirementSet set,
                                 std::string_view needs, std::string_view size, bool interactive,
                                 std::istream& in, std::ostream& out, std::string_view purpose) {
+    // A set this environment's Python cannot run is refused before it is
+    // offered (M19): the answer would only be pip's refusal.
+    if (std::string unfit = env.unfit_reason(set); !unfit.empty()) {
+        return unfit;
+    }
     const std::string name{training::to_string(set)};
     const std::string remedy = "apogee train setup --with " + name;
     std::string packages;

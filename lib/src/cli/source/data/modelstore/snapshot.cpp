@@ -138,6 +138,29 @@ BaseRename rename_snapshot_base(const std::filesystem::path& dir, std::string_vi
     return write_snapshot(dir, *record) ? BaseRename::Renamed : BaseRename::Failed;
 }
 
+BaseRename rename_snapshot_ref(const std::filesystem::path& dir, std::string_view from,
+                               std::string_view to) {
+    std::optional<Snapshot> record = load_snapshot(dir);
+    if (!record.has_value()) {
+        return BaseRename::Unnamed;
+    }
+    const std::optional<std::string> renamed = renamed_handle(record->ref, from, to);
+    if (!renamed.has_value()) {
+        return BaseRename::Unnamed;
+    }
+    // Only `ref` may change, under the guard `bases` has (M25): read and
+    // closed before the write, as Windows needs.
+    const std::string bytes = [&dir] {
+        std::ifstream in{snapshot_record_path(dir), std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }();
+    if (snapshot_record_text(*record) != bytes) {
+        return BaseRename::Failed;
+    }
+    record->ref = *renamed;
+    return write_snapshot(dir, *record) ? BaseRename::Renamed : BaseRename::Failed;
+}
+
 bool is_snapshot_dir(const std::filesystem::path& dir) {
     std::error_code code;
     if (!std::filesystem::is_directory(dir, code) ||

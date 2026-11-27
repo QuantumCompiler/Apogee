@@ -25,6 +25,7 @@
 #include "support/cli_home.h"
 #include "support/wan_original.h"
 #include "transport/http_client.h"
+#include "video/runtime.h"
 
 /// Wan's original layout pulled whole (53j), end to end in process: the
 /// user's own set -- its record of ten files and its config, as the pull
@@ -820,4 +821,51 @@ TEST_CASE("an MLX video conversion's size is mlx-video's README's, where it stat
         CHECK(out.find("to MLX (" + said + ") -- mlx-video's converter") != std::string::npos);
     }
     CHECK(apogee::models::list_store_mlx(pull.roots).size() == 3);
+}
+
+TEST_CASE("a renamed Wan model's MLX conversion still reads its tokenizer and knows its source",
+          "[commands][models][wan][rename][mlx_video]") {
+    // 57i, finding 5 -- probe h4 as a test: the MLX build names the Wan set
+    // it was converted from by handle, and reads the T5 tokenizer from it.
+    // After `models rename` moved the folder, that handle named the old one:
+    // generation refused at the tokenizer rung with a re-pull of a set still
+    // on disk, lineage lost its source, and the set listed nothing made from
+    // it.
+    const CliHome home{"backends:\n  m:\n    type: mock\n"};
+    const StoreRoots roots = StoreRoots::at(home.models());
+    const std::filesystem::path source = apogee::testing::write_user_wan_set(roots);
+    const std::filesystem::path model = apogee::testing::write_converted_wan(roots, source);
+    const std::string set = source.filename().string();
+    const std::string build = model.filename().string();
+    std::string reason;
+    std::string remedy;
+    REQUIRE(apogee::video::find_mlx_video_tokenizer(roots, model, reason, remedy) ==
+            source / "google" / "umt5-xxl");
+
+    std::string out;
+    REQUIRE(home.run({"models", "rename", "Wan-AI--Wan2.2-TI2V-5B", "wan-renamed"}, &out) == 0);
+    INFO(out);
+    CHECK(out.find("1 record of what was made from it now names 'wan-renamed' as its source\n") !=
+          std::string::npos);
+    const std::filesystem::path moved_source =
+        apogee::models::weights_dir(roots, apogee::models::kSafetensorsFormat, "wan-renamed", set);
+    const std::filesystem::path moved_model =
+        apogee::models::weights_dir(roots, apogee::models::kMlxFormat, "wan-renamed", build);
+    REQUIRE(std::filesystem::is_directory(moved_model));
+    // The tokenizer rung passes: the source where it now lies, no remedy.
+    CHECK(apogee::video::find_mlx_video_tokenizer(roots, moved_model, reason, remedy) ==
+          moved_source / "google" / "umt5-xxl");
+    CHECK(reason.empty());
+    CHECK(remedy.empty());
+    // Lineage finds the source; the source lists what was made from it.
+    REQUIRE(home.run({"models", "info", "wan-renamed/mlx/" + build, "-q"}, &out) == 0);
+    CHECK(out.find("converted from wan-renamed/safetensors/" + set) != std::string::npos);
+    CHECK(out.find("no longer on disk") == std::string::npos);
+    REQUIRE(home.run({"models", "info", "wan-renamed/safetensors/" + set, "-q"}, &out) == 0);
+    CHECK(out.find("made from it: wan-renamed/mlx/" + build + " (recorded)\n") !=
+          std::string::npos);
+    // A second rename carries it again.
+    REQUIRE(home.run({"models", "rename", "wan-renamed", "wan-again"}, &out) == 0);
+    REQUIRE(home.run({"models", "info", "wan-again/safetensors/" + set, "-q"}, &out) == 0);
+    CHECK(out.find("made from it: wan-again/mlx/" + build + " (recorded)\n") != std::string::npos);
 }

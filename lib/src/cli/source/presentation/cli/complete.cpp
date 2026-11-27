@@ -234,33 +234,36 @@ ChatAttachments::Turn attach_for_prompt(OneShotAttachments& attachments, const C
 harness::ChatResponse run_one(const harness::Harness& harness, const harness::Config& config,
                               const std::filesystem::path& config_path, const CompleteFlags& flags,
                               const std::string& model, const std::string& prompt, bool decorate) {
-    harness::ChatRequest request;
-    request.model = model;
-    request.messages = build_messages(resolve_system_prompt(flags.system_prompt, config, model),
-                                      flags.context, prompt, {});
+    // The one-shot's core (54b): the request and its options, from the
+    // flags, else the backend's entry -- what `mcp serve`'s `complete` runs.
+    const OneShot shot =
+        one_shot(config, model, prompt,
+                 OneShotSettings{
+                     .system_prompt = flags.system_prompt,
+                     .context = flags.context,
+                     .temperature = flags.temperature_option->count() > 0
+                                        ? std::optional<double>{flags.temperature}
+                                        : std::nullopt,
+                     .max_tokens = flags.max_tokens_option->count() > 0
+                                       ? std::optional<std::int64_t>{flags.max_tokens}
+                                       : std::nullopt,
+                     // Whether the model thinks first (26i): the flags, else the
+                     // backend's.
+                     .think = flags.think.empty() ? std::nullopt
+                                                  : harness::thinking_mode_from_string(flags.think),
+                     .think_budget = flags.think_budget_option->count() > 0
+                                         ? std::optional<std::int64_t>{flags.think_budget}
+                                         : std::nullopt,
+                     .effort = flags.effort.empty() ? std::nullopt
+                                                    : harness::effort_from_string(flags.effort)});
     const bool attaching = !flags.attach.empty() || !flags.images.empty();
-
-    const std::optional<double> temperature =
-        flags.temperature_option->count() > 0 ? std::optional<double>{flags.temperature}
-                                              : resolve_temperature(std::nullopt, config, model);
-    const std::optional<std::int64_t> max_tokens =
-        flags.max_tokens_option->count() > 0 ? std::optional<std::int64_t>{flags.max_tokens}
-                                             : resolve_max_tokens(std::nullopt, config, model);
-    request.temperature = temperature;
-    request.max_tokens = max_tokens;
+    const std::optional<std::int64_t> max_tokens = shot.options.max_tokens;
     if (!flags.tools &&
         !PermissionPresets{
             .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts}
              .empty()) {
         fail_user("--allow, --deny and --allow-host need --tools: without tools, nothing is asked");
     }
-    // Whether the model thinks first (26i): the flags, else the backend's.
-    const harness::Thinking thinking = resolve_thinking(
-        flags.think.empty() ? std::nullopt : harness::thinking_mode_from_string(flags.think),
-        flags.think_budget_option->count() > 0 ? std::optional<std::int64_t>{flags.think_budget}
-                                               : std::nullopt,
-        config, model,
-        flags.effort.empty() ? std::nullopt : harness::effort_from_string(flags.effort));
 
     // Machine mode: the SAME loop, a different Reporter. Nothing below this
     // point knows which one is in use, which is the Reporter seam's whole
@@ -277,14 +280,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         capabilities.tools = flags.tools;
         reporter.begin_session(model, capabilities);
 
-        agentloop::Options machine_options;
-        machine_options.model = model;
-        machine_options.temperature = temperature;
-        machine_options.max_tokens = max_tokens;
-        machine_options.thinking = thinking;
-        machine_options.thinking_judge = named_utility(config);
-        machine_options.stream_answer = true;
-        machine_options.summary_model = named_utility(config);
+        agentloop::Options machine_options = shot.options;
         std::optional<OneShotAttachments> machine_attachments;
         if (attaching) {
             machine_attachments.emplace(
@@ -299,11 +295,12 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                     // walks it -- unless the config or --graph asks (27p).
                     .built_in_graph = harness::AttachmentGraphMethod::Off});
             ChatAttachments::Turn turn =
-                attach_for_prompt(*machine_attachments, flags, prompt, request.messages.size() - 1,
+                attach_for_prompt(*machine_attachments, flags, prompt, shot.messages.size() - 1,
                                   agentloop::turn_budget(harness, model, max_tokens));
             machine_options.inline_attachments = std::move(turn.inlined);
             if (turn.retrieved.has_value() && turn.retrieved->error.empty()) {
-                machine_options.transient_prefix = turn.retrieved->prefix;
+                machine_options.transient_prefix = agentloop::injected_as(
+                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
                 if (!turn.retrieved->prefix.empty()) {
                     reporter.on_sources(turn.retrieved->sources);
                 }
@@ -349,7 +346,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
             // never advertised, rather than advertised and unanswerable.
         }
 
-        std::vector<harness::ChatMessage> machine_history = request.messages;
+        std::vector<harness::ChatMessage> machine_history = shot.messages;
         try {
             const agentloop::RunResult result =
                 agentloop::run(harness, machine_history, machine_options, reporter);
@@ -365,6 +362,13 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         } catch (const harness::HarnessError& e) {
             // Both channels: the event so a driver need not scrape prose, and
             // stderr so a human tailing the log sees it too.
+            reporter.emit_error(e.what());
+            fail_backend(e.what());
+        } catch (const std::exception& e) {
+            // The backstop (57c): anything else a provider let out is still
+            // the run's backend failure -- its `error` event and exit 2,
+            // never exit 1 with no event.
+            logger::log(logger::Level::Error, "complete", e.what());
             reporter.emit_error(e.what());
             fail_backend(e.what());
         }
@@ -387,6 +391,9 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
     reporter_options.markdown = !flags.raw && config.ui.markdown;
     reporter_options.hyperlinks = ansi::hyperlinks_supported();
+    // `-q` at a terminal decorates nothing, and still draws the answer
+    // shown, never obeyed (57p).
+    reporter_options.answer_is_terminal = platform::is_terminal(platform::StandardStream::Out);
 
     CliReporter reporter{status_writer, reporter_options};
 
@@ -395,16 +402,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         reporter.status().print_line(reporter_options.style.tag(ansi::Role::Apogee) + " " + model);
     }
 
-    agentloop::Options loop_options;
-    loop_options.model = model;
-    loop_options.temperature = temperature;
-    loop_options.max_tokens = max_tokens;
-    loop_options.thinking = thinking;
-    loop_options.thinking_judge = named_utility(config);
-    loop_options.stream_answer = true;
-    // A large tool result is summarised by the utility model, when one is
-    // set, before the model reads it (26b).
-    loop_options.summary_model = named_utility(config);
+    agentloop::Options loop_options = shot.options;
 
     // Retrieval, spliced into the OUTGOING request only. `transient_prefix` is
     // the seam the agent loop already test-locks as never reaching persisted
@@ -446,11 +444,12 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                 // walks it -- unless the config or --graph asks (27p).
                 .built_in_graph = harness::AttachmentGraphMethod::Off});
         ChatAttachments::Turn turn =
-            attach_for_prompt(*attached, flags, prompt, request.messages.size() - 1, budget);
+            attach_for_prompt(*attached, flags, prompt, shot.messages.size() - 1, budget);
         loop_options.inline_attachments = std::move(turn.inlined);
         if (turn.retrieved.has_value()) {
             if (turn.retrieved->error.empty() && !turn.retrieved->prefix.empty()) {
-                loop_options.transient_prefix = turn.retrieved->prefix;
+                loop_options.transient_prefix = agentloop::injected_as(
+                    turn.retrieved->prefix, agentloop::InjectedSource::Retrieval);
                 share_used = turn.retrieved->tokens;
                 sent = turn.retrieved->sources;
             }
@@ -476,8 +475,10 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         // Whenever there is a prefix: the chunks, or the graph context that
         // survived a judge dropping every chunk.
         if (rag.error.empty() && !rag.prefix.empty()) {
+            const std::vector<agentloop::Injected> retrieved =
+                agentloop::injected_as(rag.prefix, agentloop::InjectedSource::Retrieval);
             loop_options.transient_prefix.insert(loop_options.transient_prefix.end(),
-                                                 rag.prefix.begin(), rag.prefix.end());
+                                                 retrieved.begin(), retrieved.end());
             sent.insert(sent.end(), rag.sources.begin(), rag.sources.end());
         }
         reporter.status().print_line(reporter_options.style.tag(role) + " " +
@@ -539,7 +540,7 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         }
     }
 
-    std::vector<harness::ChatMessage> history = request.messages;
+    std::vector<harness::ChatMessage> history = shot.messages;
 
     try {
         const agentloop::RunResult result =
@@ -559,10 +560,34 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         fail_user(e.what());
     } catch (const harness::HarnessError& e) {
         fail_backend(e.what());
+    } catch (const std::exception& e) {
+        // The backstop (57c), as the driven run's.
+        logger::log(logger::Level::Error, "complete", e.what());
+        fail_backend(e.what());
     }
 }
 
 }  // namespace
+
+OneShot one_shot(const harness::Config& config, const std::string& model, const std::string& prompt,
+                 const OneShotSettings& settings) {
+    OneShot shot;
+    shot.messages = build_messages(resolve_system_prompt(settings.system_prompt, config, model),
+                                   settings.context, prompt, {});
+    shot.options.model = model;
+    shot.options.temperature = resolve_temperature(settings.temperature, config, model);
+    shot.options.max_tokens = resolve_max_tokens(settings.max_tokens, config, model);
+    shot.options.thinking =
+        resolve_thinking(settings.think, settings.think_budget, config, model, settings.effort);
+    shot.options.stream_answer = true;
+    if (settings.utility) {
+        shot.options.thinking_judge = named_utility(config);
+        // A large tool result is summarised by the utility model, when one
+        // is set, before the model reads it (26b).
+        shot.options.summary_model = named_utility(config);
+    }
+    return shot;
+}
 
 std::string_view CompleteCommand::name() const noexcept {
     return "complete";
@@ -647,13 +672,13 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
                   "Let the model call tools (fetch_url; ask_user on a terminal)");
     cmd->add_option("--allow", flags->allow,
                     "Allow a tool for this run without asking (repeatable, with --tools)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
     cmd->add_option("--deny", flags->deny,
                     "Refuse a tool or website for this run without asking (repeatable)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -736,8 +761,9 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user(message);
         }
 
-        // A suite member naming nothing is refused, never routed around (27d).
-        if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+        // A suite member naming nothing, or one that did not start (57d), is
+        // refused, never routed around (27d).
+        if (const std::string refused = validate_active_suite(config, built); !refused.empty()) {
             fail_user(refused);
         }
         // `--graph` is how this run's attaches are indexed (27p): with none,

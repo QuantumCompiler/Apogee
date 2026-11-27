@@ -4,13 +4,16 @@ import InfrastructureProcess
 /// Finds the `apogee` binary the app drives.
 ///
 /// A `.app` inherits no shell `PATH` (the GUI spike's W3), so the binary is
-/// looked for where the CLI's installs put it, in order: the user's own
-/// override, the release channel (`~/.local/bin/apogee`, `install.sh`'s and
-/// `make install`'s), then the dev and test channels beside it
-/// (`apogee-dev`, `apogee-test`, `make install MODE=…`). Each candidate is
-/// verified by running it -- `apogee version` must answer as Apogee does --
-/// and one that fails is skipped and said. None found is a stated condition,
-/// never a crash or a silent retry.
+/// looked for where the CLI's installs put it, on the channel the build drives
+/// (GUI M18, `InstallChannel`), in order: the user's own override, then the
+/// channel's places. The release channel looks at `~/.local/bin/apogee`
+/// (`install.sh`'s and `make install`'s), then the dev and test channels beside
+/// it (`apogee-dev`, `apogee-test`, `make install MODE=…`), as it always has;
+/// the dev channel at `apogee-dev` alone, never the release binary. Each
+/// candidate is verified by running it -- `apogee version` must answer as
+/// Apogee does -- and one that fails is skipped and said. None found is a
+/// stated condition, with the channel's install line, never a crash or a
+/// silent retry.
 public struct BinaryDiscovery: Sendable {
     private let spawner: any ChildSpawner
     private let home: URL
@@ -26,20 +29,29 @@ public struct BinaryDiscovery: Sendable {
         self.timeout = timeout
     }
 
-    /// Where the binary is looked for, first to last.
-    public func candidates(override: URL?) -> [BinaryCandidate] {
+    /// Where the binary is looked for on `channel`, first to last: the
+    /// override, then the channel's places.
+    public func candidates(override: URL?, channel: InstallChannel) -> [BinaryCandidate] {
         let bin = home.appendingPathComponent(".local/bin")
-        return (override.map { [BinaryCandidate(url: $0, source: .override)] } ?? []) + [
-            BinaryCandidate(url: bin.appendingPathComponent("apogee"), source: .release),
-            BinaryCandidate(url: bin.appendingPathComponent("apogee-dev"), source: .dev),
-            BinaryCandidate(url: bin.appendingPathComponent("apogee-test"), source: .test),
-        ]
+        let places: [BinaryCandidate] =
+            switch channel {
+            case .release:
+                [
+                    BinaryCandidate(url: bin.appendingPathComponent("apogee"), source: .release),
+                    BinaryCandidate(url: bin.appendingPathComponent("apogee-dev"), source: .dev),
+                    BinaryCandidate(url: bin.appendingPathComponent("apogee-test"), source: .test),
+                ]
+            case .dev:
+                [BinaryCandidate(url: bin.appendingPathComponent("apogee-dev"), source: .dev)]
+            }
+        return (override.map { [BinaryCandidate(url: $0, source: .override)] } ?? []) + places
     }
 
-    /// The first candidate that answers as Apogee, and every one passed over.
-    public func locate(override: URL?) async -> DiscoveryOutcome {
+    /// The first of `channel`'s candidates that answers as Apogee, and every
+    /// one passed over; a place not on the channel is never run.
+    public func locate(override: URL?, channel: InstallChannel) async -> DiscoveryOutcome {
         var skipped: [SkippedCandidate] = []
-        for candidate in candidates(override: override) {
+        for candidate in candidates(override: override, channel: channel) {
             switch await verify(candidate) {
             case .success(let found):
                 return .found(found, skipped: skipped)
@@ -47,7 +59,7 @@ public struct BinaryDiscovery: Sendable {
                 skipped.append(SkippedCandidate(candidate: candidate, reason: reason.text))
             }
         }
-        return .notFound(skipped: skipped)
+        return .notFound(skipped: skipped, channel: channel)
     }
 
     private struct Reason: Error {
@@ -139,16 +151,24 @@ public struct SkippedCandidate: Sendable, Equatable {
 
 public enum DiscoveryOutcome: Sendable, Equatable {
     case found(FoundBinary, skipped: [SkippedCandidate])
-    /// No candidate answered: Apogee is not installed where the app looks.
-    case notFound(skipped: [SkippedCandidate])
+    /// No candidate answered: Apogee is not installed where the app looks on
+    /// `channel`.
+    case notFound(skipped: [SkippedCandidate], channel: InstallChannel = .release)
 
-    /// How to install the CLI, said where no binary was found.
-    public static let installHint =
-        "Install Apogee with: curl -fsSL https://raw.githubusercontent.com/QuantumCompiler/Apogee/stable/lib/scripts/install.sh | bash"
+    /// How to install the release CLI, said where no binary was found on the
+    /// release channel.
+    public static let installHint = InstallChannel.release.installHint
+
+    /// How to install the binary none was found of -- the channel's own line
+    /// -- or `nil` when one was found.
+    public var installHint: String? {
+        guard case .notFound(_, let channel) = self else { return nil }
+        return channel.installHint
+    }
 
     public var skipped: [SkippedCandidate] {
         switch self {
-        case .found(_, let skipped), .notFound(let skipped): skipped
+        case .found(_, let skipped), .notFound(let skipped, _): skipped
         }
     }
 

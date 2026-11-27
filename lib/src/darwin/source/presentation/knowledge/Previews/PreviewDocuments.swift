@@ -150,6 +150,52 @@ enum KnowledgeDocuments {
  "vectors": null
 }
 """#
+    /// tests/business/reads/Fixtures/collection-info-vectors.json
+    static let collectionInfoVectors = #"""
+{
+ "chunks": 3,
+ "collection": "notes",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/notes.db",
+ "schema": 8,
+ "sources": [
+  "heat-pumps.md",
+  "solar.md",
+  "windows.md"
+ ],
+ "vectors": {
+  "chunks": 3,
+  "dimension": 8,
+  "model": "mock-embed",
+  "widths": 1
+ }
+}
+"""#
+    /// tests/business/reads/Fixtures/collection-info-vectors-mixed.json
+    static let collectionInfoVectorsMixed = #"""
+{
+ "chunks": 4,
+ "collection": "mixed",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/mixed.db",
+ "schema": 8,
+ "sources": [
+  "heat-pumps.md",
+  "insulation.md",
+  "solar.md",
+  "windows.md"
+ ],
+ "vectors": {
+  "chunks": 4,
+  "dimension": 8,
+  "mixed": [
+   "mock-embed",
+   "mock-embed-b"
+  ],
+  "widths": 1
+ }
+}
+"""#
     /// tests/business/reads/Fixtures/collection-query.txt
     static let collectionQuery = #"""
 0.000  [lexical]  heat-pumps.md#0

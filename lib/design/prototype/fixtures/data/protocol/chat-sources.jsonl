@@ -1,0 +1,97 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-111509-a4e5","model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"text":"switched to claude -- from the next turn","type":"notice"}
+{"text":"attaching storage-engine-design.pdf (1 file, 144.7 KB)","type":"notice"}
+{"text":"attaching postgresql.conf (1 file, 12.4 KB)","type":"notice"}
+{"text":"attached storage-engine-design.pdf: 1 file, 133 chunks, searched by its words: no embedding model is set ('apogee config set-default-embedding') -- its excerpts are retrieved each turn","turn":1,"type":"notice"}
+{"text":"attached postgresql.conf: 1 file, 29 chunks, searched by its words: no embedding model is set ('apogee config set-default-embedding') -- its excerpts are retrieved each turn","turn":1,"type":"notice"}
+{"sources":[{"file":"storage-engine-design.pdf","pages":[185,189],"retriever":"lexical","score":0.9409128065121013},{"file":"postgresql.conf","lines":[209,219],"retriever":"lexical","score":0.9136619386681804},{"file":"storage-engine-design.pdf","pages":[191,193],"retriever":"lexical","score":0.9065172927771616}],"turn":1,"type":"sources"}
+{"turn":1,"type":"thinking"}
+{"turn":1,"type":"answer_start"}
+{"text":"Because ","turn":1,"type":"answer_delta"}
+{"text":"one flus","turn":1,"type":"answer_delta"}
+{"text":"h pays f","turn":1,"type":"answer_delta"}
+{"text":"or many ","turn":1,"type":"answer_delta"}
+{"text":"commits.","turn":1,"type":"answer_delta"}
+{"text":" A trans","turn":1,"type":"answer_delta"}
+{"text":"action i","turn":1,"type":"answer_delta"}
+{"text":"s durabl","turn":1,"type":"answer_delta"}
+{"text":"e once i","turn":1,"type":"answer_delta"}
+{"text":"ts log r","turn":1,"type":"answer_delta"}
+{"text":"ecord re","turn":1,"type":"answer_delta"}
+{"text":"aches di","turn":1,"type":"answer_delta"}
+{"text":"sk, and ","turn":1,"type":"answer_delta"}
+{"text":"a single","turn":1,"type":"answer_delta"}
+{"text":" `fsync(","turn":1,"type":"answer_delta"}
+{"text":")` makes","turn":1,"type":"answer_delta"}
+{"text":" every r","turn":1,"type":"answer_delta"}
+{"text":"ecord ap","turn":1,"type":"answer_delta"}
+{"text":"pended b","turn":1,"type":"answer_delta"}
+{"text":"efore it","turn":1,"type":"answer_delta"}
+{"text":" durable","turn":1,"type":"answer_delta"}
+{"text":", so tra","turn":1,"type":"answer_delta"}
+{"text":"nsaction","turn":1,"type":"answer_delta"}
+{"text":"s that c","turn":1,"type":"answer_delta"}
+{"text":"ommit in","turn":1,"type":"answer_delta"}
+{"text":"side the","turn":1,"type":"answer_delta"}
+{"text":" same fl","turn":1,"type":"answer_delta"}
+{"text":"ush wind","turn":1,"type":"answer_delta"}
+{"text":"ow share","turn":1,"type":"answer_delta"}
+{"text":" one wri","turn":1,"type":"answer_delta"}
+{"text":"te [1].\n","turn":1,"type":"answer_delta"}
+{"text":"\nUnder l","turn":1,"type":"answer_delta"}
+{"text":"oad the ","turn":1,"type":"answer_delta"}
+{"text":"window f","turn":1,"type":"answer_delta"}
+{"text":"ills on ","turn":1,"type":"answer_delta"}
+{"text":"its own:","turn":1,"type":"answer_delta"}
+{"text":" while o","turn":1,"type":"answer_delta"}
+{"text":"ne flush","turn":1,"type":"answer_delta"}
+{"text":" is in f","turn":1,"type":"answer_delta"}
+{"text":"light, t","turn":1,"type":"answer_delta"}
+{"text":"he next ","turn":1,"type":"answer_delta"}
+{"text":"commits ","turn":1,"type":"answer_delta"}
+{"text":"queue be","turn":1,"type":"answer_delta"}
+{"text":"hind it ","turn":1,"type":"answer_delta"}
+{"text":"and go o","turn":1,"type":"answer_delta"}
+{"text":"ut toget","turn":1,"type":"answer_delta"}
+{"text":"her [1].","turn":1,"type":"answer_delta"}
+{"text":" `commit","turn":1,"type":"answer_delta"}
+{"text":"_delay` ","turn":1,"type":"answer_delta"}
+{"text":"widens t","turn":1,"type":"answer_delta"}
+{"text":"he windo","turn":1,"type":"answer_delta"}
+{"text":"w on pur","turn":1,"type":"answer_delta"}
+{"text":"pose, tr","turn":1,"type":"answer_delta"}
+{"text":"ading up","turn":1,"type":"answer_delta"}
+{"text":" to that","turn":1,"type":"answer_delta"}
+{"text":" much la","turn":1,"type":"answer_delta"}
+{"text":"tency pe","turn":1,"type":"answer_delta"}
+{"text":"r commit","turn":1,"type":"answer_delta"}
+{"text":" for few","turn":1,"type":"answer_delta"}
+{"text":"er flush","turn":1,"type":"answer_delta"}
+{"text":"es; it","turn":1,"type":"answer_delta"}
+{"text":"’s 0, so","turn":1,"type":"answer_delta"}
+{"text":" off, un","turn":1,"type":"answer_delta"}
+{"text":"til you ","turn":1,"type":"answer_delta"}
+{"text":"set it [","turn":1,"type":"answer_delta"}
+{"text":"2][3].\n\n","turn":1,"type":"answer_delta"}
+{"text":"- **Ligh","turn":1,"type":"answer_delta"}
+{"text":"t load:*","turn":1,"type":"answer_delta"}
+{"text":"* little","turn":1,"type":"answer_delta"}
+{"text":" to gain","turn":1,"type":"answer_delta"}
+{"text":"; each c","turn":1,"type":"answer_delta"}
+{"text":"ommit st","turn":1,"type":"answer_delta"}
+{"text":"ill wait","turn":1,"type":"answer_delta"}
+{"text":"s for it","turn":1,"type":"answer_delta"}
+{"text":"s own fl","turn":1,"type":"answer_delta"}
+{"text":"ush.\n- *","turn":1,"type":"answer_delta"}
+{"text":"*Many wr","turn":1,"type":"answer_delta"}
+{"text":"iters:**","turn":1,"type":"answer_delta"}
+{"text":" flushes","turn":1,"type":"answer_delta"}
+{"text":" per sec","turn":1,"type":"answer_delta"}
+{"text":"ond stay","turn":1,"type":"answer_delta"}
+{"text":" flat wh","turn":1,"type":"answer_delta"}
+{"text":"ile comm","turn":1,"type":"answer_delta"}
+{"text":"its per ","turn":1,"type":"answer_delta"}
+{"text":"second c","turn":1,"type":"answer_delta"}
+{"text":"limb.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"claude","text":"Because one flush pays for many commits. A transaction is durable once its log record reaches disk, and a single `fsync()` makes every record appended before it durable, so transactions that commit inside the same flush window share one write [1].\n\nUnder load the window fills on its own: while one flush is in flight, the next commits queue behind it and go out together [1]. `commit_delay` widens the window on purpose, trading up to that much latency per commit for fewer flushes; it’s 0, so off, until you set it [2][3].\n\n- **Light load:** little to gain; each commit still waits for its own flush.\n- **Many writers:** flushes per second stay flat while commits per second climb.","turn":1,"type":"result"}

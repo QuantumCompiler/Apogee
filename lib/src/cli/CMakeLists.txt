@@ -32,13 +32,21 @@ endif()
 # is stamped into version.h via configure_file. Bump it here when cutting a
 # release (see CLAUDE.md -> Versioning).
 project(Apogee
-    VERSION 0.2.0
+    VERSION 0.2.1
     DESCRIPTION "A self-contained C++ AI harness for local and cloud LLMs"
     # C is enabled for one reason: SQLite ships as a C amalgamation, and the
     # chunk store compiles it. No Apogee source is C -- "primarily C++" is
     # unaffected by the language a vendored dependency happens to be written in.
     LANGUAGES CXX C
 )
+
+# Windows builds a resource into every executable: its manifest, which names
+# UTF-8 the process's code page (57j, source/apogee.rc). MinGW's platform
+# module enables the resource compiler already; said here, where the languages
+# are, so the dependency is seen.
+if(WIN32)
+    enable_language(RC)
+endif()
 
 # C++20 baseline, decided 2026-08-24: the only standard uniformly supported
 # across all six release targets. Promotion to C++23 is a deliberate event,

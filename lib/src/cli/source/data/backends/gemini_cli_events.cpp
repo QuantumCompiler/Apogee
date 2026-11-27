@@ -29,6 +29,13 @@ namespace {
     return best_output > 0 ? best : std::string{};
 }
 
+/// A string field, or empty when it is absent or not a string -- a vendor's
+/// error object is read, never trusted to have the shape it had last time.
+[[nodiscard]] std::string string_field(const nlohmann::json& object, std::string_view key) {
+    const auto found = object.find(key);
+    return found != object.end() && found->is_string() ? found->get<std::string>() : std::string{};
+}
+
 [[nodiscard]] CliEvent parse_result(const nlohmann::json& root) {
     TurnComplete complete;
 
@@ -37,7 +44,21 @@ namespace {
     const std::string status = root.value("status", std::string{"success"});
     if (status != "success") {
         complete.is_error = true;
-        complete.error_subtype = status;
+        // 0.46.0's `handleError` says why in an `error` object beside the
+        // status (57b): its message is the detail, its type only when there
+        // is no message. With neither, a status of `error` says nothing the
+        // exit status and stderr will not say better, so the detail is left
+        // for them; any other spelling is named, so it stays visible.
+        if (const auto error = root.find("error"); error != root.end() && error->is_object()) {
+            complete.error_type = string_field(*error, "type");
+            complete.error_subtype = string_field(*error, "message");
+        }
+        if (complete.error_subtype.empty()) {
+            complete.error_subtype = complete.error_type;
+        }
+        if (complete.error_subtype.empty() && status != "error") {
+            complete.error_subtype = status;
+        }
     }
 
     const auto stats = root.find("stats");
@@ -111,6 +132,16 @@ std::optional<CliEvent> parse_line(std::string_view line) {
     }
 
     if (type == "error") {
+        // A warning is said and the turn stands on its result (57b): 0.46.0
+        // sends one before a successful result when it stops a loop or an
+        // agent's execution is blocked. Anything else -- `error`, or no
+        // severity, the older shape -- fails the turn.
+        if (string_field(root, "severity") == "warning") {
+            Notice notice;
+            notice.kind = "warning";
+            notice.detail = string_field(root, "message");
+            return CliEvent{std::move(notice)};
+        }
         TurnComplete complete;
         complete.is_error = true;
         complete.error_subtype = root.value("message", std::string{"failed"});
@@ -145,7 +176,14 @@ std::string describe(const CliEvent& event) {
             } else if constexpr (std::is_same_v<T, ToolOutcome>) {
                 return std::string{"tool_result:"} + (value.is_error ? "error" : "ok");
             } else if constexpr (std::is_same_v<T, TurnComplete>) {
-                return "turn:" + (value.is_error ? value.error_subtype : std::string{"ok"});
+                if (!value.is_error) {
+                    return "turn:ok";
+                }
+                // The vendor's kind of failure, beside its words (57b).
+                const bool kind =
+                    !value.error_type.empty() && value.error_type != value.error_subtype;
+                return "turn:" + (kind ? value.error_type + ":" : std::string{}) +
+                       value.error_subtype;
             } else if constexpr (std::is_same_v<T, Notice>) {
                 return "notice:" + value.kind;
             } else {

@@ -14,6 +14,7 @@
 
 #include "contracts/config.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
 
 namespace apogee::training {
 namespace {
@@ -812,6 +813,9 @@ PythonEnvStatus PythonEnv::status() const {
     if (!status.exists) {
         return status;
     }
+    // What `python -m venv` wrote is the environment's own fact, record or
+    // not; the record's `base_version` (since M19) says it where it can.
+    status.base_version = pyvenv_version(dir_);
     std::ifstream in{record_path(), std::ios::binary};
     if (!in) {
         status.error = "no record at " + record_path().string();
@@ -824,11 +828,10 @@ PythonEnvStatus PythonEnv::status() const {
     }
     status.base_python = record.value("base_python", std::string{});
     status.created_at = record.value("created_at", std::string{});
-    // The record's own word since M19; an environment made before it is read
-    // from what `python -m venv` wrote.
-    const std::optional<PythonVersion> recorded =
-        PythonVersion::parse(record.value("base_version", std::string{}));
-    status.base_version = recorded.value_or(pyvenv_version(dir_));
+    if (const std::optional<PythonVersion> recorded =
+            PythonVersion::parse(record.value("base_version", std::string{}))) {
+        status.base_version = *recorded;
+    }
     if (const auto it = record.find("sets"); it != record.end() && it->is_array()) {
         for (const nlohmann::json& set : *it) {
             if (set.is_string()) {
@@ -868,19 +871,13 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
     }
     // Before pip (M19): a set its Python cannot run fails here with the way
     // out, not in pip's words after the download.
-    if (const PythonVersion on = status().base_version;
-        on.known() && !python_range(set).contains(on)) {
-        return "the Python environment at " + dir_.string() + " is on Python " + on.str() +
-               ", and the '" + std::string{to_string(set)} + "' set runs on " +
-               python_range(set).describe() +
-               " -- rebuild it on a Python that fits: apogee train "
-               "setup --rebuild --with " +
-               std::string{to_string(set)};
+    if (std::string unfit = unfit_reason(set); !unfit.empty()) {
+        return unfit;
     }
     // A package built from a commit is fetched with git (53k): without it,
     // said here with the way out, not in pip's words.
-    if (const std::optional<PinnedSource> source = pinned_source(set);
-        source.has_value() && platform::find_on_path("git").empty()) {
+    const std::optional<PinnedSource> source = pinned_source(set);
+    if (source.has_value() && platform::find_on_path("git").empty()) {
         return "the '" + std::string{to_string(set)} + "' set installs " +
                std::string{source->package} + " from " + std::string{source->repository} +
                " at commit " + std::string{source->commit.substr(0, 12)} +
@@ -888,6 +885,12 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
                "'xcode-select --install'), then: apogee train setup --with " +
                std::string{to_string(set)};
     }
+    // Off its pin before the install (57i): pip keeps an installed version
+    // it is asked for again -- a VCS requirement at another commit that
+    // declares the same version installs nothing -- so the pinned
+    // requirement is installed again over it, alone.
+    const bool off_pin =
+        source.has_value() && read_installed_set(dir_, set).standing == SetStanding::OffPin;
     platform::ChildCommand command;
     command.program = interpreter().string();
     command.arguments = {"-m", "pip", "install", "--disable-pip-version-check"};
@@ -899,6 +902,42 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
         return describe_failure(
             "pip install for the '" + std::string{to_string(set)} + "' set failed", result);
     }
+    if (off_pin) {
+        platform::ChildCommand reinstall;
+        reinstall.program = interpreter().string();
+        reinstall.arguments = {"-m",
+                               "pip",
+                               "install",
+                               "--disable-pip-version-check",
+                               "--force-reinstall",
+                               "--no-deps",
+                               source->requirement()};
+        const CommandResult again = runner_(reinstall, cancellation);
+        if (!again.ok()) {
+            return describe_failure("pip could not reinstall " + std::string{source->package} +
+                                        " at its pinned commit " +
+                                        std::string{source->commit.substr(0, 12)},
+                                    again);
+        }
+    }
+    // Installed means current (57i): a pinned set is read again, and one
+    // still off its pin is no install -- never recorded, never `installed`.
+    if (source.has_value()) {
+        const InstalledSet after = read_installed_set(dir_, set);
+        if (after.standing != SetStanding::Current) {
+            const std::string names =
+                after.record.empty() ? "pip left no record of it in " + dir_.string()
+                : after.commit.empty()
+                    ? "its direct_url.json (in " + after.record.string() + ") names no commit"
+                    : "its direct_url.json (in " + after.record.string() + ") names commit " +
+                          after.commit.substr(0, 12);
+            return "pip finished, and " + std::string{source->package} +
+                   " is not at the commit this Apogee pins (" +
+                   std::string{source->commit.substr(0, 12)} + "): " + names + " -- the '" +
+                   std::string{to_string(set)} +
+                   "' set is not recorded as installed; 'apogee check' shows what is there";
+        }
+    }
     PythonEnvStatus current = status();
     if (!current.has(set)) {
         current.sets.emplace_back(to_string(set));
@@ -907,13 +946,28 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
                         current.created_at, current.sets);
 }
 
+std::string PythonEnv::unfit_reason(RequirementSet set) const {
+    const PythonVersion on = status().base_version;
+    if (!on.known() || python_range(set).contains(on)) {
+        return {};
+    }
+    return "the Python environment at " + dir_.string() + " is on Python " + on.str() +
+           ", and the '" + std::string{to_string(set)} + "' set runs on " +
+           python_range(set).describe() +
+           " -- rebuild it on a Python that fits: apogee train setup --rebuild --with " +
+           std::string{to_string(set)};
+}
+
 std::string PythonEnv::rebuild(const std::filesystem::path& base_python,
                                const PythonVersion& version,
                                const harness::CancellationToken& cancellation) {
     const std::vector<std::string> sets = status().sets;
     std::error_code code;
     const std::filesystem::path aside = dir_.string() + ".previous";
-    std::filesystem::remove_all(aside, code);
+    // The environment is several gigabytes, a folder a user may move to
+    // another drive and link back: a link set aside goes as itself, never
+    // what it points at (57k).
+    platform::remove_tree(aside, code);
     if (exists()) {
         std::filesystem::rename(dir_, aside, code);
         if (code) {
@@ -941,7 +995,7 @@ std::string PythonEnv::rebuild(const std::filesystem::path& base_python,
             return restore(std::move(failure));
         }
     }
-    std::filesystem::remove_all(aside, code);
+    platform::remove_tree(aside, code);
     return {};
 }
 

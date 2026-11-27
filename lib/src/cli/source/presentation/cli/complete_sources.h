@@ -1,6 +1,8 @@
 #pragma once
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "cli/complete_protocol.h"
 
@@ -22,5 +24,14 @@ namespace apogee::commands {
 
 /// `list_names`, as the protocol takes it.
 [[nodiscard]] CompletionSources default_completion_sources();
+
+/// The tools that write which `--allow`, `--deny` and a task's grant take on
+/// this build under this config (`OFFERED_TOOL`): those of
+/// `tools::destructive_tool_names()` a session's registry holds, registered
+/// as a session registers them -- so no shell or git tool where no program
+/// can be started (57k, `child_processes` false) and none of a toolset
+/// `tools.disabled` switches off (`disabled`).
+[[nodiscard]] std::vector<std::string> offered_tool_names(bool child_processes,
+                                                          const std::vector<std::string>& disabled);
 
 }  // namespace apogee::commands

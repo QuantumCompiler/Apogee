@@ -41,19 +41,24 @@ struct StoreView: View {
             pendingTitle, isPresented: Binding(get: { store.pending != nil }, set: { if !$0 { store.dismissPending() } }),
             titleVisibility: .visible
         ) {
-            switch store.pending {
-            case .deleteSet, .deleteModel:
-                Button("Delete", role: .destructive) { Task { store.andBackends = false; await store.confirm() } }
-                // Only where the CLI's plan names a backend pointing in.
-                if store.offersAndBackends {
-                    Button("Delete it and the backends that run from it", role: .destructive) { Task { store.andBackends = true; await store.confirm() } }
+            // The answer is captured where the button is built, the person's
+            // choice of the backends with it: the dialog's closing clears the
+            // question before the Task runs (GUI M20).
+            if let answer = store.pending {
+                switch answer {
+                case .deleteSet, .deleteModel:
+                    Button("Delete", role: .destructive) { Task { await store.confirm(answer, andBackends: false) } }
+                    // Only where the CLI's plan names a backend pointing in.
+                    if store.offersAndBackends {
+                        Button("Delete it and the backends that run from it", role: .destructive) {
+                            Task { await store.confirm(answer, andBackends: true) }
+                        }
+                    }
+                case .removeBackend:
+                    Button("Remove the backend", role: .destructive) { Task { await store.confirm(answer) } }
+                case .registerAll:
+                    Button("Register them") { Task { await store.confirm(answer) } }
                 }
-            case .removeBackend:
-                Button("Remove the backend", role: .destructive) { Task { await store.confirm() } }
-            case .registerAll:
-                Button("Register them") { Task { await store.confirm() } }
-            case nil:
-                EmptyView()
             }
             Button("Cancel", role: .cancel) { store.dismissPending() }
         } message: {

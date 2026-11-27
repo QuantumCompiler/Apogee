@@ -19,7 +19,16 @@ apogee_add_module(platform
     platform/platform.cpp
     platform/system_info.h
     platform/system_info.cpp
+    platform/termination.h
+    platform/termination.cpp
+    platform/xcode.h
+    platform/xcode.cpp
 )
+if(WIN32)
+    # The Documents known folder (57k): SHGetKnownFolderPath, and
+    # CoTaskMemFree for the path it hands back.
+    target_link_libraries(apogee_infrastructure_platform PRIVATE shell32 ole32)
+endif()
 
 # A leaf: includes nothing else from the project, so anything may publish.
 apogee_add_module(events
@@ -31,6 +40,8 @@ target_link_libraries(apogee_infrastructure_events PUBLIC nlohmann_json::nlohman
 apogee_add_module(ansi
     ansi/ansi.h
     ansi/ansi.cpp
+    ansi/inert.h
+    ansi/inert.cpp
     ansi/text_width.h
     ansi/text_width.cpp
 )

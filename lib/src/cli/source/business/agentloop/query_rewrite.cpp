@@ -1,6 +1,7 @@
 #include "agentloop/query_rewrite.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <exception>
 #include <string_view>
@@ -40,27 +41,53 @@ constexpr std::string_view kPrompt =
     return std::string{text.substr(0, cut)} + " ...";
 }
 
-/// The reply's query: its first line with anything on it, without the quotes,
-/// backticks or "Query:" a model sometimes wraps one in.
+/// The quotes, backticks and emphasis a model sometimes wraps a query in.
+constexpr std::string_view kTrim = " \t\r\"'`*";
+
+/// Whether `line` leads in to the query rather than being it -- `Sure! Here
+/// is the standalone search query:`, a bare `Query:` -- by ending in a colon,
+/// emphasis aside (57r).
+[[nodiscard]] bool lead_in(std::string_view line) {
+    const std::size_t last = line.find_last_not_of(" \t\r*");
+    return last != std::string_view::npos && line[last] == ':';
+}
+
+/// `line` without the label a model puts before a query, `Query:` or
+/// `Search query:` in any case, emphasis before it aside; `line` itself when
+/// it has none.
+[[nodiscard]] std::string_view without_label(std::string_view line) {
+    const std::size_t first = line.find_first_not_of(kTrim);
+    if (first == std::string_view::npos) {
+        return line;
+    }
+    const std::string_view text = line.substr(first);
+    for (const std::string_view label :
+         {std::string_view{"search query:"}, std::string_view{"query:"}}) {
+        if (text.size() >= label.size() &&
+            std::ranges::equal(text.substr(0, label.size()), label, [](char a, char b) {
+                return std::tolower(static_cast<unsigned char>(a)) == b;
+            })) {
+            return text.substr(label.size());
+        }
+    }
+    return line;
+}
+
+/// The reply's query: its first line with anything on it that is not a
+/// lead-in (57r), without its label and wrapping. Later lines are ignored; a
+/// reply of lead-ins alone has none.
 [[nodiscard]] std::string query_of(std::string_view reply) {
     std::string_view line;
     while (!reply.empty()) {
         const std::size_t end = reply.find('\n');
-        line = reply.substr(0, end);
+        const std::string_view candidate = reply.substr(0, end);
         reply = end == std::string_view::npos ? std::string_view{} : reply.substr(end + 1);
-        const std::size_t first = line.find_first_not_of(" \t\r");
-        if (first != std::string_view::npos) {
-            line.remove_prefix(first);
-            break;
+        if (candidate.find_first_not_of(" \t\r") == std::string_view::npos || lead_in(candidate)) {
+            continue;
         }
-        line = {};
+        line = without_label(candidate);
+        break;
     }
-    for (const std::string_view label : {"Query:", "query:", "Search query:"}) {
-        if (line.starts_with(label)) {
-            line.remove_prefix(label.size());
-        }
-    }
-    constexpr std::string_view kTrim = " \t\r\"'`*";
     const std::size_t begin = line.find_first_not_of(kTrim);
     if (begin == std::string_view::npos) {
         return {};

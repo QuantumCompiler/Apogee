@@ -4,9 +4,11 @@ import DataPreferences
 import Foundation
 import InfrastructureProcess
 import Observation
+import PresentationShell
 
 /// Settings: General, Appearance, Backends & keys, Video & voice,
-/// Permissions -- each over the verbs a person types, each change read back.
+/// Permissions, Xcode -- each over the verbs a person types, each change read
+/// back.
 ///
 /// SwiftUI-free (ADR 0002). **A key never touches the app's state**: it is
 /// written to `auth add`'s standard input and dropped -- no property, no
@@ -20,6 +22,10 @@ public final class SettingsViewModel {
         case backends
         case media
         case permissions
+        /// Apogee and Xcode (GUI 5a): `check`'s Xcode rows, Xcode's tools for
+        /// Apogee's agents, and the fields Xcode's Add an Agent takes. Always
+        /// listed, last: how a person finds the route.
+        case xcode
 
         public var id: String { rawValue }
 
@@ -30,6 +36,7 @@ public final class SettingsViewModel {
             case .backends: "Backends & keys"
             case .media: "Video & voice"
             case .permissions: "Permissions"
+            case .xcode: "Xcode"
             }
         }
 
@@ -40,6 +47,7 @@ public final class SettingsViewModel {
             case .backends: "key"
             case .media: "film"
             case .permissions: "hand.raised"
+            case .xcode: "hammer"
             }
         }
     }
@@ -147,6 +155,9 @@ public final class SettingsViewModel {
     public private(set) var allowedHostsUnread: String?
     public private(set) var checks: [CheckRow] = []
     public private(set) var checkSummary: String?
+    /// Whether `check` printed its document yet: until it has, nothing is
+    /// said of what it holds (the Xcode pane's rows among it).
+    public private(set) var checkRead = false
     /// What Health draws of `check`, in order: what fails, what to look at,
     /// then each row skipped with what brings it -- an optional ability not
     /// set up, its remedy the command (GUI 4f; the captions' `ffmpeg-full`
@@ -162,11 +173,21 @@ public final class SettingsViewModel {
     /// Config values read through `config get`: absent is the default.
     public private(set) var webSearch: String?
     public private(set) var recall: String?
+    /// The change running now, in a few words; a change made meanwhile
+    /// waits its turn (GUI 6c).
     public private(set) var working: String?
     /// A long fix running now: `check --fix`, `bootstrap`.
     public private(set) var fixing: JobProgress?
     public private(set) var failure: String?
+    /// The main window's toast, which the composition sets: where a line
+    /// goes while the Settings window is not the active one (`tell`, GUI
+    /// M19).
     public var say: (@MainActor (String) -> Void)?
+    /// The install another place runs now, as the children registry labels
+    /// it, or `nil`: `bootstrap` runs `train setup`, so it starts only when
+    /// none does -- one install into the one environment at a time (4f,
+    /// 6c). `check --fix` installs nothing and never asks.
+    public var installElsewhere: @MainActor () -> String? = { nil }
     /// Whether the build has the CLI's 52e: `config set` and `chats recall --forget`.
     public var hasTrack52: @MainActor () -> Bool = { false }
     /// Whether the binary has said what it can do -- its vocabulary read at
@@ -182,6 +203,9 @@ public final class SettingsViewModel {
     /// The summaries themselves, where the binary lists them (the CLI's
     /// M31): what Forget erases, named in its question. `nil` read as text.
     public private(set) var recallListing: RecallListing?
+    /// Why the last read of what recall holds failed, in the CLI's words:
+    /// Forget's question says so in place of an earlier read's (GUI 6b).
+    public private(set) var recallUnread: String?
     /// Forgetting recall waits on the person's word, its holdings shown.
     public var forgetting = false
     /// The binary's vocabulary date, as the app read it at launch
@@ -190,10 +214,17 @@ public final class SettingsViewModel {
     public var vocabulary: @MainActor () -> String? = { nil }
 
     public let theme: ThemeSettings
+    /// The Xcode pane's reads and changes (GUI 5a), its `check` rows this
+    /// view-model's own.
+    public let xcode: XcodeSettings
     private let runner: any CommandRunning
     private let starter: any JobStarting
     private let preferences: Preferences
     private var binaryURL: URL?
+    /// The running fix, for Stop (GUI 6c).
+    private var fixJob: (any JobRunning)?
+    /// The change made last: the next one waits for it (GUI 6c).
+    private var lastChange: Task<Void, Never>?
 
     public static let keyProviders = ["anthropic", "openai", "google"]
 
@@ -209,7 +240,11 @@ public final class SettingsViewModel {
         self.starter = starter
         self.preferences = preferences
         theme = ThemeSettings(preferences: preferences)
+        xcode = XcodeSettings(runner: runner)
         binaryOverride = preferences.binaryOverride?.path
+        xcode.checkRows = { [weak self] in self?.checkRead == true ? self?.checks : nil }
+        xcode.rereadCheck = { [weak self] in await self?.rereadCheck() }
+        xcode.say = { [weak self] in self?.tell($0) }
     }
 
     /// The binary this launch found, and -- when discovery passed the
@@ -219,6 +254,7 @@ public final class SettingsViewModel {
         self.binary = binary?.path
         self.version = version
         self.skippedOverride = skippedOverride
+        xcode.use(binary: binary)
         await refresh()
     }
 
@@ -250,7 +286,7 @@ public final class SettingsViewModel {
     public func setBinaryOverride(_ url: URL?) {
         preferences.binaryOverride = url
         binaryOverride = url?.path
-        say?(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
+        tell(url == nil ? "The app looks for apogee where it is installed, from its next launch" : "The app uses \(url!.path) from its next launch")
     }
 
     // MARK: - General: the children's PATH (M6)
@@ -394,6 +430,7 @@ public final class SettingsViewModel {
         guard hasTrack52() else {
             recallHolds = nil
             recallListing = nil
+            recallUnread = nil
             return
         }
         let asks = ProseReads.asksDocuments(vocabulary: vocabulary())
@@ -401,12 +438,15 @@ public final class SettingsViewModel {
         case .document(let listing):
             recallListing = listing
             recallHolds = listing.countLine
+            recallUnread = nil
         case .text(let text):
             recallListing = nil
             recallHolds = RecallListing.countLine(in: text)
-        case .failed:
+            recallUnread = nil
+        case .failed(let why):
             recallListing = nil
             recallHolds = nil
+            recallUnread = why
         }
     }
 
@@ -433,13 +473,24 @@ public final class SettingsViewModel {
             let failures = document.value["failures"]?.intValue ?? 0
             let warnings = document.value["warnings"]?.intValue ?? 0
             checkSummary = failures == 0 && warnings == 0 ? "Everything checks out" : "\(failures) failing, \(warnings) to look at"
+            checkRead = true
         }
     }
 
-    /// A config value, or `nil` when the config does not set it (the default).
+    /// `check` alone, again: after the Xcode pane's change, so its rows and
+    /// Health follow the config -- one read, not every pane's.
+    func rereadCheck() async {
+        guard let binary = binaryURL else { return }
+        await readCheck(binary)
+    }
+
+    /// A config value, or `nil` when the config does not set it (the
+    /// default): `config get` of an unset key prints an empty line and exits
+    /// 0, so an empty answer is unset (GUI 6c), as a refusal is.
     private func value(_ binary: URL, _ key: String) async -> String? {
         if case .done(let text) = await runner.command(binary: binary, ["config", "get", key]) {
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
         }
         return nil
     }
@@ -497,17 +548,27 @@ public final class SettingsViewModel {
         await change(binary, ["config", "set-default-video", pipeline ?? "off"], done: nil)
     }
 
-    /// A plain config key (52e's `config set`): the web search address, recall.
+    /// A plain config key (52e's `config set`): the web search address,
+    /// recall. An empty value sets nothing (GUI 6c): `config set <key> ''`
+    /// would clear the key with no word, and clearing stays a console
+    /// command.
     public func setConfig(_ key: String, _ value: String) async {
-        guard let binary = binaryURL, hasTrack52() else { return }
+        guard let binary = binaryURL, hasTrack52(), Self.canSet(value) else { return }
         await change(binary, ["config", "set", key, value], done: "\(key) is \(value)")
     }
 
+    /// Whether `value` can be set: anything but empty or blank -- what the
+    /// web search address's Set is offered for (GUI 6c).
+    public static func canSet(_ value: String) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Forget's question: how many summaries go and which, named, where the
-    /// binary lists them (GUI M15); the count line where it doesn't.
+    /// binary lists them (GUI M15); the count line where it doesn't; that
+    /// recall could not be read, where the read just failed -- in the words
+    /// the Sessions inspector asks it in (GUI 6b).
     public var forgetMessage: String {
-        let what = recallListing.map { "These go: \($0.forgetting). " } ?? recallHolds.map { "Now: \($0). " } ?? ""
-        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+        RecallListing.forgetQuestion(listing: recallListing, countLine: recallHolds, unread: recallUnread)
     }
 
     /// Whether Forget has anything to erase: where the binary lists the
@@ -565,9 +626,11 @@ public final class SettingsViewModel {
     /// and every line kept where it said more (`registered`); `config
     /// add-backend`'s output, its last line the toast and every line kept
     /// where it says a role the CLI moved (the CLI's M33).
+    /// A registration made while a change runs waits its turn, as a change
+    /// does (GUI 6c).
     public func register(_ provider: Provider, model: String = "") async {
         registering = nil
-        guard let binary = binaryURL, provider.registers, canRegister(provider, model: model), working == nil else { return }
+        guard let binary = binaryURL, provider.registers, canRegister(provider, model: model) else { return }
         registered = nil
         let arguments = registration(for: provider, model: model)
         let title = "Registered \(provider.provider)"
@@ -577,6 +640,11 @@ public final class SettingsViewModel {
             }
             return
         }
+        await inTurn { [weak self] in await self?.registerOne(binary, arguments, title: title) }
+    }
+
+    /// `providers register <id>`, read as its document, the pane read back.
+    private func registerOne(_ binary: URL, _ arguments: [String], title: String) async {
         working = arguments.prefix(3).joined(separator: " ")
         let outcome = await runner.read(binary: binary, arguments)
         working = nil
@@ -584,12 +652,12 @@ public final class SettingsViewModel {
         guard let document = outcome.document, let done = ProviderRegistration(document: document) else {
             let failure = outcome.failure ?? "apogee printed no registration"
             self.failure = failure
-            say?("That didn't work: \(failure)")
+            tell("That didn't work: \(failure)")
             return
         }
         failure = nil
         registered = done.lines.count > 1 ? Said(title: title, lines: done.lines) : nil
-        say?(done.lines.first ?? title)
+        tell(done.lines.first ?? title)
     }
 
     /// Takes the last registration's words away, once read.
@@ -598,43 +666,142 @@ public final class SettingsViewModel {
     }
 
     /// Runs a change and reads every pane back, its result said; what it
-    /// printed, when it succeeded.
+    /// printed, when it succeeded. A change made while another runs is
+    /// queued and made once the one before it has ended, with its own toast
+    /// and read-back -- never dropped (GUI 6c): a permission set straight
+    /// after another is set too.
     @discardableResult
     private func change(_ binary: URL, _ arguments: [String], input: Data? = nil, done: String?) async -> String? {
-        guard working == nil else { return nil }
+        await inTurn { [weak self] in await self?.made(binary, arguments, input: input, done: done) ?? nil }
+    }
+
+    /// Runs `body` once every change made before it has ended: the changes,
+    /// one after another, in the order they were made (GUI 6c).
+    private func inTurn<Result: Sendable>(_ body: @escaping @MainActor () async -> Result) async -> Result {
+        let before = lastChange
+        let turn = Task { @MainActor in
+            await before?.value
+            return await body()
+        }
+        lastChange = Task { _ = await turn.value }
+        return await turn.value
+    }
+
+    /// One change, made: `change`'s, in its turn.
+    private func made(_ binary: URL, _ arguments: [String], input: Data?, done: String?) async -> String? {
         working = arguments.prefix(3).joined(separator: " ")
         let outcome = await runner.command(binary: binary, arguments, input: input)
         working = nil
         await refresh()
         if let failure = outcome.failure {
             self.failure = failure
-            say?("That didn't work: \(failure)")
+            tell("That didn't work: \(failure)")
             return nil
         } else if let done {
-            say?(done)
+            tell(done)
         } else if case .done(let stdout) = outcome {
-            say?(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
+            tell(stdout.split(separator: "\n").last.map(String.init) ?? "Done")
         }
         if case .done(let stdout) = outcome { return stdout }
         return nil
     }
 
-    /// `check --fix` or `bootstrap`: what a remedy says to run, supervised.
+    /// `check --fix` or `bootstrap`: what a remedy says to run, supervised
+    /// -- its job kept for Stop -- and Health read again. Every end gives
+    /// both buttons back (GUI 6c): done is said finished, a stop stopped,
+    /// and a failure failed, in the CLI's words, which stay as the red line
+    /// until the next read. `bootstrap` runs `train setup`, so while another
+    /// place installs it starts nothing and says what runs.
     public func fix(_ arguments: [String]) {
         guard let binary = binaryURL, fixing == nil else { return }
+        let command = arguments.joined(separator: " ")
+        if arguments.first == "bootstrap", let running = installElsewhere() {
+            tell("\(running) is already running: run \(command) again once it has finished")
+            return
+        }
         fixing = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false)
+        fixJob = job
         Task {
             for await update in job.updates { fixing?.apply(update) }
             let status = fixing?.status
+            fixJob = nil
             await refresh()
-            if case .failed(let message)? = status { failure = message } else { fixing = nil }
-            say?(status == .done ? "\(arguments.joined(separator: " ")) finished" : "\(arguments.joined(separator: " ")) stopped")
+            fixing = nil
+            switch status {
+            case .done?:
+                tell("\(command) finished")
+            case .failed(let message)?:
+                failure = message
+                tell("\(command) failed: \(message)")
+            case .stopped?:
+                tell("\(command) stopped")
+            case .running?, nil:
+                tell("\(command) ended without saying how")
+            }
         }
+    }
+
+    /// Whether the running fix can be stopped: it has not ended yet.
+    public var canStopFix: Bool { fixJob != nil }
+
+    /// Stops the running fix as Ctrl-C does, given the media install cards'
+    /// grace before it is terminated (GUI 6c); its end gives the buttons
+    /// back.
+    public func stopFix() async {
+        await fixJob?.stop(grace: .seconds(10))
     }
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    // MARK: - The Settings window's own toast (GUI M19)
+
+    /// Whether the Settings window is the active one -- in front, taking the
+    /// keyboard -- as its view last said; `false` until it says, and once it
+    /// closes, as at launch.
+    public private(set) var windowIsActive = false
+
+    /// The one line at the bottom of the Settings window, if one is showing:
+    /// the shell's `Toast`, kept as the shell keeps its own.
+    public private(set) var toast: Toast?
+
+    private var nextToast = 0
+
+    /// The window says whether it is the active one, on every change, the
+    /// first included. A toast showing when it stops being active stays for
+    /// its own time: the window still draws it.
+    public func windowActive(_ active: Bool) {
+        windowIsActive = active
+    }
+
+    /// The window closed: not active, and a toast showing is dropped with it.
+    public func windowClosed() {
+        windowIsActive = false
+        toast = nil
+    }
+
+    /// The window's toast `id` has had its time; a newer one stays.
+    public func dismissToast(_ id: Int) {
+        if toast?.id == id {
+            toast = nil
+        }
+    }
+
+    /// The one route for every line Settings says -- its own and the Xcode
+    /// pane's: the window's toast while the window is active, where the
+    /// person pressed what said it; otherwise the main window's, through
+    /// `say`, so a line said with Settings closed or behind is still seen.
+    /// Never the only place something is said: the pane that did it shows
+    /// it too.
+    func tell(_ text: String) {
+        guard windowIsActive else {
+            say?(text)
+            return
+        }
+        nextToast += 1
+        toast = Toast(id: nextToast, text: text)
     }
 }
 

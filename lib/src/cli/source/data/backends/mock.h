@@ -44,7 +44,10 @@ struct MockTurn {
     /// tool definitions the request carried (26r), `{{tool_names}}` their
     /// names, comma-separated in the request's order (27o). `{{model}}` is
     /// the model the provider was built to run -- its entry's `model:`, or a
-    /// roster model pinned on it (33).
+    /// roster model pinned on it (33). `{{max_tokens}}` is the bound the
+    /// request carried, or `none` (54b). `{{first_user}}` is the first user
+    /// message as it was sent, and `{{tool_call_ids}}` the ids of every tool
+    /// call the request's messages carry, comma-separated (57q).
     std::string text{};
 
     /// Tool calls to attach to the response.
@@ -61,7 +64,19 @@ struct MockTurn {
     /// on the thinking channel, in the same chunks and with the same pause,
     /// never in the answer.
     std::string reasoning{};
+
+    /// Held until its call is cancelled (`"until_cancelled": true` in a
+    /// script, 57r): the call -- `chat` or `stream_chat` -- waits for its
+    /// token and then throws `CancelledError`, as a long compaction or a hung
+    /// judge does once Stop reaches it. Bounded (`kMockHoldBound`): a call
+    /// whose token never comes answers after it, so a test whose cancel does
+    /// not arrive fails rather than hangs.
+    bool until_cancelled = false;
 };
+
+/// How long a turn held `until_cancelled` waits for its cancel before it
+/// answers anyway.
+inline constexpr std::chrono::seconds kMockHoldBound{10};
 
 /// Turns from a JSON script: `{"turns": [{"text": "...", "tool_calls":
 /// [{"name": "git_diff", "arguments": "{}"}]}, ...]}`. A call's `id` is
@@ -155,6 +170,22 @@ public:
     /// conversation -- what lets a surface's save be seen end to end.
     void save_conversation(std::string_view conversation_id,
                            const harness::StatusSink& on_status) override;
+
+    /// How many times any mock in this process was asked to save a
+    /// conversation's state: how a surface that shows nothing of the save --
+    /// machine mode's -- is seen to save none (57a: a chat deleted while its
+    /// session ran).
+    [[nodiscard]] static std::size_t conversations_saved() noexcept;
+
+    /// How many calls any mock in this process holds `until_cancelled` right
+    /// now (57r): how a test knows a side call is under way before it sends
+    /// the cancel -- through the real binary's own provider, which it cannot
+    /// reach otherwise.
+    [[nodiscard]] static std::size_t calls_held() noexcept;
+
+    /// How many held calls, in this process, ended because their token was
+    /// cancelled -- never by the bound: the proof the call saw the cancel.
+    [[nodiscard]] static std::size_t holds_cancelled() noexcept;
 
     /// How many turns have been served.
     [[nodiscard]] std::size_t turn_count() const noexcept {

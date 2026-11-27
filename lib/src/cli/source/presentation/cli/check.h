@@ -16,6 +16,8 @@
 #include "contracts/config.h"
 #include "contracts/paths.h"
 #include "operations/suites.h"
+#include "platform/child_process.h"
+#include "platform/xcode.h"
 #include "views/status_line.h"
 
 /// `apogee check` — the install doctor.
@@ -111,6 +113,12 @@ struct CheckInputs {
     /// own. Set by a test, so the off-platform answer is checked on any host.
     std::string host_target;
 
+    /// Whether this build can start other programs (57k). Without it the git
+    /// and shell tools are not offered, and the Tools section's `git` row is
+    /// skipped, saying why, rather than "found on PATH" or a remedy that
+    /// cannot help. This build's answer, unless a test names its own.
+    bool child_processes = platform::supports_child_processes();
+
     /// The drivers' earlier versions the script rows know (27c): this
     /// build's list, unless a test names its own, so a stale copy is
     /// checked without one in the repository.
@@ -126,6 +134,19 @@ struct CheckInputs {
     /// and a missing one is said as such; a test scripts its own.
     std::function<std::optional<std::string>(std::string_view flag, std::string& error)>
         ffmpeg_listing;
+
+    /// Why this process may read a non-ASCII argument, path or environment
+    /// value wrongly (57j): `platform::text_encoding_gap`'s answer, empty when
+    /// Windows reads its text as UTF-8. Null asks this process; a test hands
+    /// its own. Asked on Windows only (`host_target`) -- the one platform with
+    /// a code page to get wrong -- so macOS and Linux show no row for it.
+    std::function<std::string()> encoding_probe;
+
+    /// What Xcode's command-line tools say of the Xcode on this Mac (56d):
+    /// `platform::xcode_facts`' answer -- nullopt with the reason when Xcode
+    /// could not be asked. Null asks the real one, bounded; a test scripts
+    /// its own. Asked on macOS only (`host_target`).
+    std::function<std::optional<platform::XcodeFacts>(std::string& error)> xcode_probe;
 
     /// What the Providers section sees of the filesystem (28c): whether a
     /// vendor CLI is on PATH and its evidence files exist -- never a read,

@@ -55,6 +55,52 @@ public struct TaskView: Sendable, Equatable {
         public let detail: String
     }
 
+    /// One gated tool call a round let through or refused: what `task status`
+    /// prints as `round 1: write_file on report.txt -- nobody present to
+    /// allow it`, and its document carries as `{"tool","target","by"}`
+    /// (`view.cpp`'s `uses_json`).
+    ///
+    /// Decoded field by field, a field it does not know passed over (the
+    /// CLI's ADR 0006); an entry that is a bare string -- an older or a
+    /// different writer's -- is kept as the tool's name, never dropped and
+    /// never shown as JSON.
+    public struct Use: Sendable, Equatable {
+        public init(tool: String, target: String = "", by: String = "") {
+            self.tool = tool
+            self.target = target
+            self.by = by
+        }
+
+        /// The tool called: `write_file`, `run_command` ...
+        public let tool: String
+        /// What it was called on -- a path, a command line -- as the model
+        /// gave it; empty when the call named none.
+        public let target: String
+        /// On whose authority: `grant`, `person` or `config` for a call let
+        /// through; `config`, `nobody` or `person` for a refusal -- a string
+        /// that may grow, empty when the entry did not say.
+        public let by: String
+
+        /// The entry `value` holds: an object read by its fields, a string
+        /// as the tool's name; `nil` for any other shape, which names no
+        /// tool.
+        public init?(_ value: JSONValue) {
+            if let name = value.stringValue {
+                self.init(tool: name)
+                return
+            }
+            guard value.objectValue != nil else { return nil }
+            self.init(
+                tool: value["tool"]?.stringValue ?? "", target: value["target"]?.stringValue ?? "",
+                by: value["by"]?.stringValue ?? "")
+        }
+
+        /// The entries of a turn's `allowed` or `denied`.
+        static func list(_ value: JSONValue?) -> [Use] {
+            (value?.arrayValue ?? []).compactMap(Use.init)
+        }
+    }
+
     /// One turn of the task: the plan (round 0) or a round.
     public struct Round: Sendable, Equatable {
         public let round: Int
@@ -64,24 +110,23 @@ public struct TaskView: Sendable, Equatable {
         public let outcome: String
         public let checksPassed: Int
         public let selfReport: String
-        public let allowed: [String]
-        public let denied: [String]
+        /// The gated calls this turn let through, each with its authority.
+        public let allowed: [Use]
+        /// The gated calls this turn refused, each with why.
+        public let denied: [Use]
         public let tokens: Int
         public let tokensEstimated: Bool
         public let startedAt: String
         public let endedAt: String
 
         init(_ value: JSONValue) {
-            func strings(_ key: String) -> [String] {
-                (value[key]?.arrayValue ?? []).map { $0.stringValue ?? $0.serialized }
-            }
             round = value["round"]?.intValue ?? 0
             kind = value["kind"]?.stringValue ?? ""
             outcome = value["outcome"]?.stringValue ?? ""
             checksPassed = value["checks_passed"]?.intValue ?? 0
             selfReport = value["self_report"]?.stringValue ?? ""
-            allowed = strings("allowed")
-            denied = strings("denied")
+            allowed = Use.list(value["allowed"])
+            denied = Use.list(value["denied"])
             tokens = value["tokens"]?.intValue ?? 0
             tokensEstimated = value["tokens_estimated"]?.boolValue ?? false
             startedAt = value["started_at"]?.stringValue ?? ""
@@ -101,7 +146,8 @@ public struct TaskView: Sendable, Equatable {
     public let conversation: String
     public let folder: String
     public let tools: Bool
-    /// The tools granted up front.
+    /// The tools granted up front: `policy.grants`, which the CLI writes
+    /// only for a task with tools -- empty for one granted none.
     public let grants: [String]
     public let createdAt: String
     public let updatedAt: String

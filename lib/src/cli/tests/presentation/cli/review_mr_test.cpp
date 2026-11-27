@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -275,4 +276,73 @@ TEST_CASE("a re-review reads its own markers, compares from the head it read, po
     CHECK(again.document["mode"] == "already reviewed");
     CHECK(twice.passes.empty());
     CHECK(twice.cli.commands.size() == 5);
+}
+
+TEST_CASE(
+    "a pull request's title and a finding's claim are drawn as lines; the document keeps them",
+    "[cli][review][mr][57p]") {
+    // The sweep's entry 7: an outside contributor's title cleared the screen,
+    // and the reviewer read only what was drawn after it.
+    const std::string title = "Fix typo\x1b]0;pwned\x07\x1b[2J\x1b[Hlooks clean";
+    nlohmann::json pull = nlohmann::json::parse(kPull);
+    pull["title"] = title;
+    Review review;
+    review.hunt["findings"][0]["claim"] =
+        "Injection.\r\x1b[2K  [low] app/other.py:1 (security) nothing to see";
+    review.cli.replies = first_review(fixture("security.defect.diff"));
+    review.cli.replies.front().out = pull.dump();
+    const ReviewMrResult result = review.run(/*dry_run=*/true);
+    REQUIRE(result.document["findings"].size() == 1);
+    for (const std::string& line : result.lines) {
+        INFO(line);
+        CHECK(line.find('\x1b') == std::string::npos);
+        CHECK(line.find('\x07') == std::string::npos);
+        CHECK(line.find('\r') == std::string::npos);
+    }
+    CHECK_THAT(result.lines.front(),
+               ContainsSubstring("Fix typo\xEF\xBF\xBD]0;pwned\xEF\xBF\xBD\xEF\xBF\xBD[2J"));
+    CHECK(std::ranges::any_of(result.lines, [](const std::string& line) {
+        return line.find("Injection.\xEF\xBF\xBD\xEF\xBF\xBD[2K  [low]") != std::string::npos;
+    }));
+    // The JSON form keeps the true text.
+    CHECK(result.document["title"] == title);
+    CHECK(result.document["findings"][0]["claim"].get<std::string>().find("\r\x1b[2K") !=
+          std::string::npos);
+}
+
+TEST_CASE("a forge's refusal is said as one line: its CLI's words drawn, never obeyed",
+          "[cli][review][mr][57p]") {
+    // `gh`'s own stderr rides the error `review mr` prints: a CR and an
+    // erase drew `apogee review: ...` over the failure, an OSC retitled the
+    // terminal.
+    const std::string fffd = "\xEF\xBF\xBD";
+    const auto refused = [](Review& review) -> std::string {
+        try {
+            (void)review.run();
+        } catch (const apogee::forge::ForgeError& e) {
+            // The error itself keeps the forge's words as written.
+            CHECK(std::string{e.what()}.find('\x1b') != std::string::npos);
+            return apogee::commands::forge_failure(e);
+        }
+        FAIL("the forge's refusal was not thrown");
+        return {};
+    };
+    Review failed;
+    failed.cli.replies = {
+        {"", "HTTP 502: Bad Gateway\r\x1b[2Kreviewed, 0 findings\x1b]0;x\x07", 1}};
+    const std::string api = refused(failed);
+    CHECK_THAT(api, ContainsSubstring("HTTP 502: Bad Gateway" + fffd + fffd +
+                                      "[2Kreviewed, 0 findings" + fffd + "]0;x" + fffd));
+    // Logged out: the remedy follows on the same line.
+    Review logged_out;
+    logged_out.cli.replies = {{"", "HTTP 401: Bad credentials\n\x1b[8mhidden", 1}};
+    const std::string login = refused(logged_out);
+    CHECK_THAT(login, ContainsSubstring("HTTP 401: Bad credentials" + fffd + fffd + "[8mhidden"));
+    CHECK(login.ends_with(" -- gh auth login"));
+    for (const std::string& line : {api, login}) {
+        INFO(line);
+        for (const char control : {'\x1b', '\x07', '\r', '\n'}) {
+            CHECK(line.find(control) == std::string::npos);
+        }
+    }
 }

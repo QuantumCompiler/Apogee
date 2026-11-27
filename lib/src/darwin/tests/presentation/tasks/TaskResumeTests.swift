@@ -118,3 +118,89 @@ struct TaskResumeTests {
         #expect(jobs.starts.count == 2)
     }
 }
+
+/// GUI 6g, entries 5 and 7: a resume is its task's run from the click --
+/// the id after `task resume`, before its stream names it -- so Resume can't
+/// start a second one while the first starts up (the CLI takes the task
+/// lock, then builds its providers and tools, and only then emits
+/// `task_started`), the stops are offered in that window (the CLI keeps
+/// them since its 57u), and a resume the CLI refuses keeps its words on the
+/// task's page. Recorded from `apogee-dev` on the mock backend over a
+/// sandbox home: a task stalled after two rounds (`task-status-stalled.json`)
+/// and one granted `write_file` and stalled (`task-status-stalled-granted.json`)
+/// whose resume the config then refused (`task-resume-refused.err`).
+@Suite("One resume per click, and a refused one said (GUI 6g)", .timeLimit(.minutes(1)))
+@MainActor
+struct ResumeStartingTests {
+    static let binary = URL(fileURLWithPath: "/Users/someone/.local/bin/apogee")
+    static let stalled = "task-20261109-021224"
+    static let granted = "task-20261109-021236"
+
+    func model(_ jobs: [ScriptedJob]) async -> (TasksViewModel, ScriptedRunner, ScriptedJobs) {
+        let runner = ScriptedRunner()
+        runner.reading(["task", "list"], taskFixture("task-list-all.json"))
+        runner.reading(["task", "status", Self.stalled], taskFixture("task-status-stalled.json"))
+        runner.reading(["task", "status", Self.granted], taskFixture("task-status-stalled-granted.json"))
+        let jobs = ScriptedJobs(jobs)
+        let model = TasksViewModel(runner: runner, starter: jobs)
+        await model.connect(binary: Self.binary)
+        return (model, runner, jobs)
+    }
+
+    @Test("while a resume starts up, Resume is not offered, the page says Resuming, and a second click starts nothing")
+    func onePerClick() async throws {
+        let job = ScriptedJob()
+        let (model, _, jobs) = await model([job, ScriptedJob()])
+        await model.select(Self.stalled)
+        #expect(model.resumable(Self.stalled) && !model.resuming(Self.stalled))
+        model.resume(Self.stalled)
+        #expect(jobs.starts.count == 1)
+        let run = try #require(model.run(for: Self.stalled), "its run from the click")
+        #expect(run.target == Self.stalled && run.state.taskID == nil)
+        #expect(!model.resumable(Self.stalled) && model.resuming(Self.stalled))
+        #expect(model.inFlight(Self.stalled) && model.starting.isEmpty, "its own row's, never a Starting a task row")
+        model.resume(Self.stalled)
+        await model.resumeRow(Self.stalled)
+        #expect(jobs.starts.count == 1, "the scripted starter was asked once")
+        #expect(model.shown?.status == "stalled", "the read stands until the stream names the task")
+        job.say(streamed("task-resume.jsonl", prefix: 2)[1])
+        #expect(await eventually { model.following(Self.stalled) != nil })
+        #expect(!model.resuming(Self.stalled) && !model.resumable(Self.stalled))
+        #expect(model.stoppable(Self.stalled))
+        job.end()
+    }
+
+    @Test("the stops are offered while the resume starts up, sent as task halt and task cancel of the task")
+    func stopsWhileStarting() async throws {
+        let job = ScriptedJob()
+        let (model, runner, _) = await model([job])
+        await model.select(Self.stalled)
+        #expect(!model.stoppable(Self.stalled), "stalled: nothing runs it")
+        model.resume(Self.stalled)
+        #expect(model.stoppable(Self.stalled))
+        await model.halt(Self.stalled)
+        #expect(runner.calls.contains("run task halt \(Self.stalled)"))
+        await model.cancel(Self.stalled)
+        #expect(runner.calls.contains("run task cancel \(Self.stalled)"))
+        job.end(status: 130)
+    }
+
+    @Test("a resume the CLI refuses: the alert says its words, and the line stays in that task's Activity")
+    func refusedResume() async throws {
+        let job = ScriptedJob()
+        let (model, _, jobs) = await model([job])
+        var said: [String] = []
+        model.say = { said.append($0) }
+        await model.select(Self.granted)
+        model.resume(Self.granted)
+        #expect(jobs.starts.first?.arguments == ["task", "resume", Self.granted, "--output-format", "stream-json"])
+        job.end(status: 1, stderr: taskFixture("task-resume-refused.err"))
+        let line = "apogee task: task \(Self.granted) cannot resume: --allow write_file: the config says permissions.write_file: deny -- a task's grant is never wider than the config (its grants are held to the config and its agent as they are now)"
+        #expect(await eventually { model.failure == line })
+        #expect(said == ["That didn't work: \(line)"])
+        let run = try #require(model.run(for: Self.granted), "the refused resume is that task's run")
+        #expect(!run.isRunning && run.state.activity == [line])
+        #expect(model.shown?.status == "stalled" && model.resumable(Self.granted), "the ledger is as it was: Resume offered again")
+        #expect(model.grants(of: Self.granted) == "write_file")
+    }
+}

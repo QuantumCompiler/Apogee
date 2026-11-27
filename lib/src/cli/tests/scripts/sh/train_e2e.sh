@@ -19,7 +19,10 @@
 # repointed in place, retained, and an mlx run's adapter refused on a
 # llamacpp entry naming both formats. Then (55h), the pipeline and the cycle
 # as streams and their reads as documents; last (M30), the named specs' reads,
-# a pass halted while held on its lock, and a failed pass's stderr.
+# a pass halted while held on its lock, and a failed pass's stderr. And
+# (57g) one process owning a run: a held pass's pipeline not resumable under
+# it, SIGTERM unwinding a pass, two pipeline runs at once kept apart, and
+# two promotions into one backend keeping both versions.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -595,5 +598,134 @@ for event in held + failed:
     errors = list(valid.iter_errors(event))
     assert not errors, f"{json.dumps(event)[:200]} -- {errors[0].message}"
 PY2
+
+# --- 57g: one process owns a run --------------------------------------------------
+# A pass held on its stream FIFO, as above. Its pipeline is that process's:
+# `pipeline status` says it runs and offers no resume, and a resume is
+# refused naming the process, the manifest untouched (probe pC). Then
+# SIGTERM, launchd's stop: the pass unwinds -- exit 143, no cycle.lock, its
+# manifest no longer `running` -- and the next pass is not refused (pJ).
+"$APOGEE_BIN" train cycle resume </dev/null >/dev/null || fail "resume after the failed pass"
+rm -f "$WORK_DIR/queue/day5.jsonl"
+printf '{"mock": {"iters": 2000}}\n' > "$WORK_DIR/queue/day6.jsonl"
+mkfifo "$WORK_DIR/term.fifo"
+( exec 3<"$WORK_DIR/term.fifo"; exec sleep 60 ) </dev/null >/dev/null 2>&1 &
+HOLDER=$!
+"$APOGEE_BIN" train cycle run --output-format stream-json </dev/null >"$WORK_DIR/term.fifo" 2>"$WORK_DIR/term.err" &
+PASS=$!
+trap 'kill "$PASS" "$HOLDER" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+HELD=""
+for _ in $(seq 1 100); do
+    HELD=$(ls "$TRAINING"/pipelines/*/pipeline.lock 2>/dev/null | head -1)
+    [ -n "$HELD" ] && break
+    sleep 0.1
+done
+sleep 1
+[ -n "$HELD" ] || fail "the held pass never took its pipeline's lock: $(cat "$WORK_DIR/term.err")"
+[ -f "$TRAINING/cycle/cycle.lock" ] || fail "the held pass never took the cycle's lock"
+kill -0 "$PASS" 2>/dev/null || fail "the pass was not held: $(cat "$WORK_DIR/term.err")"
+HELD_ID=$(basename "$(dirname "$HELD")")
+case "$HELD_ID" in cycle-*) ;; *) fail "the held pipeline is not the pass's: $HELD_ID" ;; esac
+"$APOGEE_BIN" train pipeline status "$HELD_ID" </dev/null >"$WORK_DIR/held-status.out" 2>&1 || fail "pipeline status of a held pass: $(cat "$WORK_DIR/held-status.out")"
+grep -q "This pipeline is running now (process " "$WORK_DIR/held-status.out" || fail "held pipeline status: $(cat "$WORK_DIR/held-status.out")"
+if grep -q "Resume from stage" "$WORK_DIR/held-status.out"; then
+    fail "a live pass's pipeline offered a resume: $(cat "$WORK_DIR/held-status.out")"
+fi
+if "$APOGEE_BIN" train pipeline resume "$HELD_ID" </dev/null >/dev/null 2>"$WORK_DIR/held-resume.err"; then
+    fail "a live pass's pipeline was resumed under it"
+fi
+grep -q "pipeline $HELD_ID is running now (process " "$WORK_DIR/held-resume.err" || fail "held resume refusal: $(cat "$WORK_DIR/held-resume.err")"
+grep -q '"status": "running"' "$TRAINING/pipelines/$HELD_ID/manifest.json" || fail "the refused resume moved the manifest"
+"$APOGEE_BIN" train status </dev/null >"$WORK_DIR/held-train-status.out" 2>&1 || fail "train status while held"
+grep -q "Cycle: running now" "$WORK_DIR/held-train-status.out" || fail "held status cycle line: $(cat "$WORK_DIR/held-train-status.out")"
+grep -q "Pipeline: $HELD_ID RUNNING" "$WORK_DIR/held-train-status.out" || fail "held status pipeline line: $(cat "$WORK_DIR/held-train-status.out")"
+kill -TERM "$PASS"
+cat "$WORK_DIR/term.fifo" >"$WORK_DIR/term.jsonl"
+TERM_CODE=0
+wait "$PASS" || TERM_CODE=$?
+kill "$HOLDER" 2>/dev/null || true
+wait "$HOLDER" 2>/dev/null || true
+[ "$TERM_CODE" = 143 ] || fail "a pass stopped by SIGTERM exited $TERM_CODE: $(cat "$WORK_DIR/term.err")"
+[ ! -f "$TRAINING/cycle/cycle.lock" ] || fail "SIGTERM left the cycle locked"
+[ ! -f "$HELD" ] || fail "SIGTERM left the pipeline locked"
+grep -q '"status": "aborted"' "$TRAINING/pipelines/$HELD_ID/manifest.json" || fail "SIGTERM left the manifest: $(grep '"status"' "$TRAINING/pipelines/$HELD_ID/manifest.json")"
+"$APOGEE_BIN" train status </dev/null >"$WORK_DIR/term-status.out" 2>&1 || fail "train status after SIGTERM"
+grep -q "Cycle: idle" "$WORK_DIR/term-status.out" || fail "status after SIGTERM: $(cat "$WORK_DIR/term-status.out")"
+rm -f "$WORK_DIR/queue/day6.jsonl"
+"$APOGEE_BIN" train cycle run </dev/null >"$WORK_DIR/after-term.out" 2>&1 || fail "the pass after a SIGTERM was refused: $(cat "$WORK_DIR/after-term.out")"
+grep -q "cycle skipped" "$WORK_DIR/after-term.out" || fail "the pass after a SIGTERM: $(cat "$WORK_DIR/after-term.out")"
+
+# Two pipeline runs started together (probe pI): two ids, two directories,
+# each its own record.
+"$APOGEE_BIN" train pipeline run --pipeline nightly </dev/null >"$WORK_DIR/pi1.out" 2>"$WORK_DIR/pi1.err" &
+PI1=$!
+"$APOGEE_BIN" train pipeline run --pipeline nightly </dev/null >"$WORK_DIR/pi2.out" 2>"$WORK_DIR/pi2.err" &
+PI2=$!
+wait "$PI1" || fail "the first of two pipeline runs: $(cat "$WORK_DIR/pi1.err")"
+wait "$PI2" || fail "the second of two pipeline runs: $(cat "$WORK_DIR/pi2.err")"
+ID1=$(sed -n 's/^\[pipeline\] nightly as \(pipe-[0-9-]*\):.*/\1/p' "$WORK_DIR/pi1.err")
+ID2=$(sed -n 's/^\[pipeline\] nightly as \(pipe-[0-9-]*\):.*/\1/p' "$WORK_DIR/pi2.err")
+[ -n "$ID1" ] && [ -n "$ID2" ] || fail "the two runs did not name their ids: $(cat "$WORK_DIR/pi1.err" "$WORK_DIR/pi2.err")"
+[ "$ID1" != "$ID2" ] || fail "two pipeline runs shared the id $ID1"
+for id in "$ID1" "$ID2"; do
+    grep -q "\"pipeline_run_id\": \"$id\"" "$TRAINING/pipelines/$id/manifest.json" || fail "$id's record is not its own"
+    grep -q '"status": "complete"' "$TRAINING/pipelines/$id/manifest.json" || fail "$id did not complete"
+done
+
+# Two promotions into one backend while a third process holds its promotion
+# lock: each waits and says so, then promotes after the other -- both
+# versions in the ledger, the config at the later one, every GGUF tracked.
+"$APOGEE_BIN" train run tiny --dataset starter --trainer mock --iters 2 </dev/null >/dev/null 2>"$WORK_DIR/pair-run.err" || fail "the pair's run: $(cat "$WORK_DIR/pair-run.err")"
+PAIR_RUN=$(sed -n 's/^\[train\] run \([0-9-]*\): .*/\1/p' "$WORK_DIR/pair-run.err" | head -1)
+[ -n "$PAIR_RUN" ] || fail "the pair's run named no id: $(cat "$WORK_DIR/pair-run.err")"
+"$APOGEE_BIN" train eval "$PAIR_RUN" --suite "$WORK_DIR/suite.jsonl" --force </dev/null >/dev/null 2>&1 || fail "the pair's eval"
+mkdir -p "$TRAINING/versions"
+P1=""
+P2=""
+python3 - "$TRAINING/versions/pair.promote.lock" "$WORK_DIR/pair.held" "$WORK_DIR/pair.release" <<'PY' &
+import fcntl, os, sys, time
+lock = open(sys.argv[1], "a+")
+fcntl.flock(lock, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+deadline = time.time() + 60
+while not os.path.exists(sys.argv[3]) and time.time() < deadline:
+    time.sleep(0.05)
+PY
+LOCKER=$!
+trap 'kill "$LOCKER" $P1 $P2 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
+for _ in $(seq 1 100); do
+    [ -f "$WORK_DIR/pair.held" ] && break
+    sleep 0.1
+done
+[ -f "$WORK_DIR/pair.held" ] || fail "the promotion lock's holder never held it"
+"$APOGEE_BIN" train promote "$PAIR_RUN" --as pair </dev/null >"$WORK_DIR/p1.out" 2>"$WORK_DIR/p1.err" &
+P1=$!
+"$APOGEE_BIN" train promote "$PAIR_RUN" --as pair </dev/null >"$WORK_DIR/p2.out" 2>"$WORK_DIR/p2.err" &
+P2=$!
+for _ in $(seq 1 200); do
+    if grep -q "waiting for another promotion into pair" "$WORK_DIR/p1.err" 2>/dev/null &&
+        grep -q "waiting for another promotion into pair" "$WORK_DIR/p2.err" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+for p in p1 p2; do
+    grep -q "^\[promote\] waiting for another promotion into pair$" "$WORK_DIR/$p.err" || fail "$p did not say it waited: $(cat "$WORK_DIR/$p.err")"
+done
+touch "$WORK_DIR/pair.release"
+wait "$LOCKER" || true
+wait "$P1" || fail "the first waiting promotion: $(cat "$WORK_DIR/p1.err")"
+wait "$P2" || fail "the second waiting promotion: $(cat "$WORK_DIR/p2.err")"
+"$APOGEE_BIN" train versions pair --output-format json </dev/null >"$WORK_DIR/pair.json" || fail "train versions pair"
+PAIR_SERVED=$(served pair) || fail "pair is not registered"
+python3 - "$WORK_DIR/pair.json" "$PAIR_SERVED" <<'PY' || fail "two promotions into one backend lost a version: $(cat "$WORK_DIR/pair.json")"
+import json, os, sys
+ledger = json.load(open(sys.argv[1]))
+versions = [v["version"] for v in ledger["versions"]]
+assert versions == [1, 2], versions
+assert ledger["active_version"] == 2, ledger
+assert all(os.path.isfile(v["gguf_path"]) for v in ledger["versions"]), ledger
+assert ledger["versions"][1]["gguf_path"] == sys.argv[2], (ledger, sys.argv[2])
+PY
 
 echo "apogee train end-to-end: OK"

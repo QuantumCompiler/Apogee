@@ -1,0 +1,1 @@
+apogee mcp: the 'xcode' preset cannot run here: xcrun, which comes with macOS's developer tools, is not on PATH

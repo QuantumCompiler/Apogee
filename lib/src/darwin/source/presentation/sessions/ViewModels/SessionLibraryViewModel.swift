@@ -1,3 +1,4 @@
+import BusinessJobs
 import BusinessReads
 import BusinessSession
 import DataDiscovery
@@ -115,7 +116,10 @@ public final class SessionLibraryViewModel {
     /// The open session.
     public private(set) var current: SessionViewModel
     public private(set) var pending: Pending?
-    /// The roles, as `models status` reads them, for the inspector.
+    /// The roles, as `models status` reads them under the open session's own
+    /// suite (GUI 6b), for the inspector -- never the suite and its
+    /// footprint, which the Suite line says. A read that fails leaves none of
+    /// an earlier one: its suite may not be the one the Suite line says.
     public private(set) var roles: [Field] = []
     public private(set) var rolesFailure: String?
     /// The last change that failed, in the CLI's words.
@@ -126,6 +130,13 @@ public final class SessionLibraryViewModel {
     public var renaming: ChatSummary?
     public var inspectorOpen: Bool {
         didSet { preferences.inspectorOpen = inspectorOpen }
+    }
+    /// The inspector's width in points, as the person last dragged it.
+    public private(set) var inspectorWidth: Double
+
+    public func setInspectorWidth(_ width: Double) {
+        inspectorWidth = min(max(width, 280), 560)
+        preferences.inspectorWidth = inspectorWidth
     }
     /// Says one line in the window's toast.
     public var say: (@MainActor (String) -> Void)?
@@ -157,6 +168,14 @@ public final class SessionLibraryViewModel {
     /// stood -- so its vocabulary is asked again (GUI 4k). A test hands in
     /// its own.
     public var fingerprint: @Sendable (URL) -> BinaryFingerprint? = { BinaryFingerprint(of: $0) }
+    /// A binary the library adopted after launch -- one a session's own
+    /// locate found, Try again's, while the library had none or another
+    /// (GUI 6b) -- handed up so every place is given it, as at launch.
+    public var binaryAdopted: (@MainActor (URL) async -> Void)?
+    /// The saved chats being compacted, by their id: each one's run as its
+    /// supervised job said it (GUI 6b). A row in it is busy, and can be
+    /// stopped.
+    public private(set) var compactions: [String: JobProgress] = [:]
     /// The person's override, passed over by discovery while another binary
     /// answered -- its path and why -- so the app says it runs another binary
     /// than the one it was pointed at: once at launch, and in Settings ›
@@ -166,6 +185,9 @@ public final class SessionLibraryViewModel {
 
     private let starter: any ChatStarting
     private let runner: any CommandRunning
+    /// Where a saved chat's compaction runs: the app's jobs core, so it is
+    /// supervised, listed for the monitor and stopped by quit (GUI 6b).
+    private let jobs: any JobStarting
     private let preferences: Preferences
     private let now: () -> Date
     private var found: FoundBinary?
@@ -183,11 +205,33 @@ public final class SessionLibraryViewModel {
     private var lastSchema: String?
     /// The binary's file when its vocabulary was asked (`__machine-schema`).
     private var askedOf: BinaryFingerprint?
+    /// The vocabulary ask in flight, which every `checkBinary` joins (GUI
+    /// 6b): a place changed meanwhile waits for it rather than running on
+    /// the flags it cleared.
+    private var asking: Task<Void, Never>?
+    /// The suite the roles were last asked under -- `.some(nil)` plain, as
+    /// the config resolves them -- and `nil` before the first read: a session
+    /// that comes to run under another suite has them read again (GUI 6b).
+    private var rolesSuite: String??
+    /// Which roles read is the latest: an earlier one landing after it is
+    /// let go.
+    private var rolesAsked = 0
+    /// The inspector appeared while the library had no binary -- before the
+    /// launch's discovery answered, or with nothing installed -- so its one
+    /// read read nothing: it is made once a binary is the library's (GUI 6b).
+    private var inspectorOwed = false
+    /// Each running compaction's job, by its chat's id, for its Stop.
+    private var compactJobs: [String: any JobRunning] = [:]
     /// The model the next new session starts on, once.
     private var nextModel: String?
     /// The suite the next new session starts under, once, and whether forced
     /// past the CLI's memory refusal.
     private var nextSuite: (name: String, force: Bool)?
+    /// The suite a switch to a new chat was asked under, with the question it
+    /// waited on: the dialog's closing clears `nextSuite` with the question
+    /// (`dismissPending()`) before its yes runs, so the yes takes the suite
+    /// back from here (GUI M20).
+    private var suiteAsked: (question: Pending, suite: (name: String, force: Bool))?
     private var inView = false
     /// The open session leaves view mid-turn: pause it when the turn ends.
     private var pauseWhenIdle = false
@@ -219,27 +263,40 @@ public final class SessionLibraryViewModel {
     /// `chats delete` runs once per chat. Each answers its failure, if any.
     private var deletions: [String: Task<String?, Never>] = [:]
 
-    /// The library; `clock` is what a quit's wait on a child is measured on.
+    /// The library; `jobs` runs its long acts -- a saved chat's compaction --
+    /// and `clock` is what a quit's wait on a child is measured on.
     public init(
-        starter: any ChatStarting, runner: any CommandRunning, preferences: Preferences,
+        starter: any ChatStarting, runner: any CommandRunning, preferences: Preferences, jobs: any JobStarting,
         now: @escaping () -> Date = Date.init, clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.starter = starter
         self.runner = runner
+        self.jobs = jobs
         self.preferences = preferences
         self.now = now
         self.clock = clock
         inspectorOpen = preferences.inspectorOpen
+        inspectorWidth = preferences.inspectorWidth
         current = SessionViewModel(starter: starter, launch: ChatLaunch(), reader: runner)
+    }
+
+    /// The library, its long acts run on the app's own jobs core -- real
+    /// processes, listed in the app's registry.
+    public convenience init(
+        starter: any ChatStarting, runner: any CommandRunning, preferences: Preferences,
+        now: @escaping () -> Date = Date.init, clock: any Clock<Duration> = ContinuousClock()
+    ) {
+        self.init(starter: starter, runner: runner, preferences: preferences, jobs: JobStarter(), now: now, clock: clock)
     }
 
     // MARK: - The place
 
     /// The app started, or its window opened again: find the binary, read
     /// the list, and -- when Sessions is in view -- open the session left open
-    /// last time, else a new one. Ordered after the shutdown in flight: a
-    /// window closed and opened again within the grace starts nothing until
-    /// the child before it has gone.
+    /// last time, else a new one; an inspector that appeared before the
+    /// binary was found has its reads made then. Ordered after the shutdown
+    /// in flight: a window closed and opened again within the grace starts
+    /// nothing until the child before it has gone.
     public func start(inView: Bool) async {
         await closeCurrent()
         shut = false
@@ -263,6 +320,7 @@ public final class SessionLibraryViewModel {
         await readModels()
         let last = preferences.openChat.flatMap { id in chats.contains { $0.id == id } ? id : nil }
         await replace(with: last.map(Target.chat) ?? .new, starter: located)
+        await readOwedInspector()
     }
 
     /// Sessions came into view: resume the open session, read the list again
@@ -284,10 +342,13 @@ public final class SessionLibraryViewModel {
     /// idle, else once its turn ends. A conversation nothing of which is
     /// written is never paused -- no `--resume` could carry it on, and the
     /// CLI refuses `--private` with one -- so it stays the one live child
-    /// until it is closed.
+    /// until it is closed. One already closing -- a switch, a delete -- is
+    /// passed over: it has nothing to pause, and the next place's reads never
+    /// wait on its child's exit (a pause would wait for it, GUI 6a); the
+    /// session the switch opens starts only once Sessions is back in view.
     public func leftView() async {
         inView = false
-        guard !current.isLostIfEnded else { return }
+        guard !current.isShutDown, !current.isLostIfEnded else { return }
         if busy {
             pauseWhenIdle = true
         } else {
@@ -318,16 +379,20 @@ public final class SessionLibraryViewModel {
     /// locating called off, its child asked to go and terminated if it will
     /// not -- then the delete its private fallback promised runs. The child is
     /// waited for at most the session's grace, on the library's clock: one
-    /// that will not end by then is given up, so the app still quits, and its
-    /// stop's escalation carries on. A close already in flight -- a switch's,
-    /// the window's -- is joined, never repeated.
+    /// that will not end by then is given up, so the app still quits -- but
+    /// only once its stop's SIGTERM has been sent, now rather than at the
+    /// stop's own deadline just after (GUI 6a), and the promised delete runs
+    /// only after that signal. A close already in flight -- a switch's, the
+    /// window's -- is joined, never repeated.
     public func quit() async -> ShutdownReport {
         shut = true
         let session = current
         let ended = await finishes(within: SessionViewModel.grace) { await session.shutDown() }
+        if !ended { await session.terminateNow() }
         let failure = await deletePromised(of: session)
         if session === current { closed = true }
-        return ShutdownReport(ended: ended, deleteFailure: failure)
+        let deleted = session.privateMode == .deletedOnClose && session.savedChatID != nil && failure == nil
+        return ShutdownReport(ended: ended, deleteFailure: failure, deletedWhileEnding: !ended && deleted)
     }
 
     /// Waits for `work` at most `limit` on the library's clock: whether it
@@ -358,9 +423,17 @@ public final class SessionLibraryViewModel {
     /// screen runs on a fallback against a capable binary. What was known of
     /// an earlier binary goes first, so a binary that doesn't answer leaves
     /// them unknown -- the fallback, never asserted -- until a session says
-    /// (its `session` event, the refresh).
+    /// (its `session` event, the refresh). The ask is held while it runs,
+    /// so a `checkBinary` made meanwhile waits for its answer (GUI 6b).
     private func learnCapabilities() async {
         guard let found else { return }
+        let ask = Task { await self.ask(found) }
+        asking = ask
+        await ask.value
+        if asking == ask { asking = nil }
+    }
+
+    private func ask(_ found: FoundBinary) async {
         lastAccepts = nil
         lastEvents = nil
         lastSchema = nil
@@ -376,10 +449,34 @@ public final class SessionLibraryViewModel {
     /// Asks the binary again when its file changed since it was asked --
     /// another build installed where it stood -- so a place never runs on
     /// what the earlier build could do. Otherwise nothing runs: the file's
-    /// attributes are compared.
+    /// attributes are compared. An ask already in flight is waited for
+    /// first, never passed by: its file was the one compared, so returning
+    /// at once would let a place run on the flags it cleared (GUI 6b).
     public func checkBinary() async {
+        if let asking { await asking.value }
         guard let found, fingerprint(found.url) != askedOf else { return }
         await learnCapabilities()
+    }
+
+    /// A binary a session's own locate found -- Try again, after nothing was
+    /// found at launch -- while the library had none, or another, made the
+    /// library's (`found`, set as the session found it) and taken up as the
+    /// launch takes one (GUI 6b): its capabilities asked, the list and the
+    /// models read -- and the inspector's reads, which found no binary when
+    /// it appeared -- then handed up, so every place has it. A session that
+    /// is to be known by the chat that appears is measured against the list
+    /// read now: its child has written nothing yet.
+    private func adopted(_ binary: FoundBinary, for session: SessionViewModel) async {
+        await learnCapabilities()
+        await refresh()
+        if session === current, listedBeforeNew == nil, listing == .read, session.chatID == nil,
+            session.privateMode != .nothingWritten, !session.hasTurns
+        {
+            listedBeforeNew = Set(chats.map(\.id))
+        }
+        await readModels()
+        await readOwedInspector()
+        await binaryAdopted?(binary.url)
     }
 
     /// Whether the binary has said what it can do -- its vocabulary, or a
@@ -401,7 +498,7 @@ public final class SessionLibraryViewModel {
         }
         chats = ChatSummary.list(from: document)
         listing = .read
-        identifyNewSession()
+        identifyNewSession(closed: false)
         if chats.contains(where: { $0.backend != nil }) && !modelsRead {
             await readModels()
         }
@@ -448,16 +545,67 @@ public final class SessionLibraryViewModel {
         return Int(digits).flatMap { $0 > 0 ? $0 : nil }
     }
 
-    /// Reads `models status` for the inspector.
+    /// Reads the roles for the inspector, as the open session resolves them
+    /// (GUI 6b): `models status --suite <name>` under the suite it runs
+    /// under -- `--suite off` for none -- the CLI's word where its `session`
+    /// event says it, else its launch's flag; plain `models status`, the
+    /// config's default suite, only where neither says. The `suite` and
+    /// `footprint` fields are left out: the Suite line says the suite, and
+    /// neither is a role. A read that fails clears what an earlier one read
+    /// -- perhaps under the suite the session left -- so the inspector shows
+    /// the failure alone, as recall's does.
     public func refreshRoles() async {
         guard let found else { return }
-        let outcome = await runner.read(binary: found.url, ["models", "status"])
+        let suite = current.runningSuite
+        rolesSuite = .some(suite)
+        rolesAsked += 1
+        let asked = rolesAsked
+        let outcome = await runner.read(binary: found.url, ["models", "status"] + (suite.map { ["--suite", $0] } ?? []))
+        // A read for a suite the session has since left is let go.
+        guard asked == rolesAsked else { return }
         if let document = outcome.document {
-            roles = Field.list(from: document)
+            roles = Field.list(from: document).filter { !Self.notRoles.contains($0.label) }
             rolesFailure = nil
         } else {
+            roles = []
             rolesFailure = outcome.failure
         }
+    }
+
+    /// The inspector's reads as it appears: the roles, then what recall
+    /// holds -- once a vocabulary ask in flight has answered, so recall is
+    /// never passed over on flags the ask cleared. With no binary yet --
+    /// the launch's discovery still running, or nothing installed -- they
+    /// are owed instead, and made once a binary is the library's: the
+    /// launch's, or the one a session's Try again found (GUI 6b).
+    public func refreshInspector() async {
+        if let asking { await asking.value }
+        guard found != nil else {
+            inspectorOwed = true
+            return
+        }
+        inspectorOwed = false
+        await refreshRoles()
+        await refreshRecall()
+    }
+
+    /// The inspector's reads, if it appeared with no binary to read with.
+    private func readOwedInspector() async {
+        guard inspectorOwed else { return }
+        await refreshInspector()
+    }
+
+    /// The fields `models status` writes beside the roles under a suite:
+    /// the suite's name and its footprint.
+    static let notRoles: Set<String> = ["suite", "footprint"]
+
+    /// The roles read again when the open session has come to run under
+    /// another suite than they were read under -- `/suite`, the header, a
+    /// `session` event naming its own, another session opened. Unread, they
+    /// wait for the inspector.
+    private func rolesFollowSuite() {
+        guard let read = rolesSuite, read != current.runningSuite else { return }
+        Task { await refreshRoles() }
     }
 
     /// Which saved conversation the open session is, as the list just read
@@ -471,19 +619,33 @@ public final class SessionLibraryViewModel {
     /// A binary before M28 names none, and saves a new session under an id
     /// the app did not choose: the one id that appeared since it opened --
     /// against the list read afresh once the session before it had closed
-    /// (`replace`) -- is it. A chat with no turns is passed over: it can't be
-    /// a session that has run a turn, and an older binary saves an unsent
-    /// session's chat empty when it closes. Two at once (another session
-    /// saved meanwhile) name none, rather than guess. `includingEmpty` takes
-    /// an empty chat too: a closing private session's own, whose promised
-    /// delete must find it.
-    private func identifyNewSession(includingEmpty: Bool = false) {
+    /// (`replace`) -- whose turns are the turns the session has had answered
+    /// (GUI 6a). Nothing is guessed before its own turn is answered: a chat
+    /// written elsewhere meanwhile -- a terminal's `apogee chat` -- would be
+    /// taken, renamed, resumed and, for the private fallback, deleted as its
+    /// own. One that appears while the session has sent nothing is counted
+    /// among those listed before, so it is never a candidate later. Two at
+    /// once (another session saved meanwhile) name none, rather than guess.
+    /// `closed`: the session's child has gone, so its own chat is saved --
+    /// an unsent one empty, as an older binary saves it on closing -- and is
+    /// guessed whatever it has answered: a closing private session's own,
+    /// whose promised delete must find it.
+    private func identifyNewSession(closed: Bool) {
         if let named = current.chatID {
             if !current.isSaved, chats.contains(where: { $0.id == named }) { current.identify(named) }
             return
         }
         guard current.privateMode != .nothingWritten, let before = listedBeforeNew else { return }
-        let appeared = chats.filter { !before.contains($0.id) && (includingEmpty || $0.turns > 0) }.map(\.id)
+        let answered = current.transcript.answeredTurns
+        guard closed || answered > 0 else {
+            // Unsent and not closing, its own chat not written yet: whatever
+            // appears now is someone else's. Once it is shut down, the chat
+            // that appears may be the one its close saved, which `closed`
+            // then finds.
+            if !current.hasTurns && !current.isShutDown { listedBeforeNew = before.union(chats.map(\.id)) }
+            return
+        }
+        let appeared = chats.filter { !before.contains($0.id) && $0.turns == answered }.map(\.id)
         if appeared.count == 1, let id = appeared.first {
             current.identify(id)
             listedBeforeNew = nil
@@ -501,11 +663,11 @@ public final class SessionLibraryViewModel {
     public func open(_ target: Target) async {
         if case .chat(let id) = target, current.chatID == id { return }
         if current.isLostIfEnded {
-            pending = .endPrivate(for: target)
+            askToSwitch(.endPrivate(for: target))
             return
         }
         if current.transcript.turnInFlight {
-            pending = .stopTurn(for: target)
+            askToSwitch(.stopTurn(for: target))
             return
         }
         await switchTo(target)
@@ -655,10 +817,34 @@ public final class SessionLibraryViewModel {
         searchRequests += 1
     }
 
-    public func confirm() async {
-        guard let pending else { return }
-        self.pending = nil
-        switch pending {
+    /// Asks before a switch, keeping the suite a new chat was asked under
+    /// with the question, for its yes. Only a question that opens a new chat
+    /// takes the suite: a newer one for another chat, asked while it waits,
+    /// leaves the suite with the question it was asked with, so that
+    /// question's yes still opens under it and the newer one's never carries
+    /// it to a later new chat.
+    private func askToSwitch(_ question: Pending) {
+        pending = question
+        switch question {
+        case .stopTurn(for: .new), .endPrivate(for: .new): suiteAsked = nextSuite.map { (question, $0) }
+        default: break
+        }
+    }
+
+    /// The person's yes to `answer`, the question the dialog showed: the
+    /// switch, the delete, the compaction or the forgetting it asked about.
+    /// The dialog's own closing clears `pending` (`dismissPending()`) before
+    /// its button's action runs, so the answer is handed in, never read back
+    /// (GUI M20); `pending` is cleared only while it is still `answer`, so a
+    /// newer question stays to be answered, and a new chat asked under a
+    /// suite opens under it.
+    public func confirm(_ answer: Pending) async {
+        if pending == answer { pending = nil }
+        if let asked = suiteAsked, asked.question == answer {
+            nextSuite = asked.suite
+            suiteAsked = nil
+        }
+        switch answer {
         case .stopTurn(let target), .endPrivate(let target): await switchTo(target)
         case .delete(let chat): await delete(chat)
         case .compact(let chat): await compact(chat)
@@ -765,12 +951,24 @@ public final class SessionLibraryViewModel {
             preferences.openChat = nil
         }
         current.observer = { [weak self] event in self?.observe(event) }
+        // A suite move held over a turn is made once the list read after the
+        // turn has said whether it is written (GUI 6a).
+        current.movesAfterReadBack = true
         // A session that locates for itself -- none was found at launch --
-        // may find a binary while passing the override over: said too.
-        current.onLocated = { [weak self] outcome in
-            guard let self, let skip = outcome.skippedOverride else { return }
-            skippedOverride = (skip.candidate.url.path, skip.reason)
-            sayOnce(outcome)
+        // may find a binary while passing the override over: said too. The
+        // binary it found is the library's from then on (GUI 6b), so the
+        // list, its acts and every other place run on it.
+        let session = current
+        current.onLocated = { [weak self, weak session] outcome in
+            guard let self else { return }
+            if let skip = outcome.skippedOverride {
+                skippedOverride = (skip.candidate.url.path, skip.reason)
+                sayOnce(outcome)
+            }
+            if case .found(let binary, _) = outcome, binary != found, let session {
+                found = binary
+                Task { await self.adopted(binary, for: session) }
+            }
         }
         current.onAction = { [weak self] action in self?.act(action) }
         current.modelChoices = backends
@@ -796,7 +994,7 @@ public final class SessionLibraryViewModel {
         if session.savedChatID == nil {
             await refresh()
             // Closed unsent, an older binary saved it empty: its own still.
-            if session === current { identifyNewSession(includingEmpty: true) }
+            if session === current { identifyNewSession(closed: true) }
         }
         guard let id = session.savedChatID else { return nil }
         if let begun = deletions[id] { return await begun.value }
@@ -857,6 +1055,7 @@ public final class SessionLibraryViewModel {
             lastAccepts = info.capabilities?.accepts ?? []
             lastEvents = info.capabilities?.events ?? []
             lastSchema = info.capabilities?.schema
+            rolesFollowSuite()
             let session = current
             if let id = info.chatID, session.chatID == id, session.privateMode == nil {
                 // The session names its chat (the CLI's M28): it is that
@@ -886,11 +1085,15 @@ public final class SessionLibraryViewModel {
         }
     }
 
-    /// A turn ended: what it changed is read back, a rename that waited for
-    /// it is made, and a session out of view is paused now it is idle.
+    /// A turn ended: what it changed is read back, a suite move held over it
+    /// made -- carried on or not as the list just read says (GUI 6a) -- a
+    /// rename that waited for it is made, and a session out of view is paused
+    /// now it is idle.
     private func turnEnded() {
+        let session = current
         Task {
             await refresh()
+            if session === current { await session.runHeldMove() }
             if let waiting = renameWhenIdle {
                 renameWhenIdle = nil
                 await rename(waiting.chat, to: waiting.name)
@@ -990,12 +1193,25 @@ public final class SessionLibraryViewModel {
     }
 
     /// Whether `chat` can be compacted from here: on a binary with the CLI's
-    /// 52d (`chats compact`), and -- the open session's own conversation,
-    /// its child running -- by a session that takes the `compact` line, so
-    /// the CLI never rewrites a file the running session saves over.
+    /// 52d (`chats compact`), not while a compaction of it runs, and -- the
+    /// open session's own conversation, its child running -- by a session
+    /// that takes the `compact` line, so the CLI never rewrites a file the
+    /// running session saves over.
     public func canCompact(_ chat: ChatSummary) -> Bool {
-        guard hasTrack52 else { return false }
+        guard hasTrack52, !isCompacting(chat) else { return false }
         return compactsInSession(chat) ? current.canCompact : true
+    }
+
+    /// Whether a compaction of `chat` runs now, as a job: its row is busy.
+    public func isCompacting(_ chat: ChatSummary) -> Bool {
+        compactions[chat.id] != nil
+    }
+
+    /// Stops `chat`'s compaction as its job is stopped -- an interrupt, then
+    /// termination if it will not go. The CLI saves a compaction only once
+    /// it has finished.
+    public func stopCompacting(_ chat: ChatSummary) async {
+        await compactJobs[chat.id]?.stop(grace: .seconds(10))
     }
 
     /// Asks before compacting: it rewrites the saved history as a summary.
@@ -1014,6 +1230,11 @@ public final class SessionLibraryViewModel {
     /// is the one running (the session's `compact` line, held while a turn
     /// runs), else `chats compact <id> --yes` -- the CLI asks nothing on a
     /// pipe without `--yes`, and refuses -- read back, its own words said.
+    ///
+    /// A saved chat's compaction is a model turn over its whole history, so
+    /// it runs as a supervised job (GUI 6b): no read's timeout ends it, it is
+    /// listed for the monitor and stopped by quit, its row is busy until it
+    /// ends, and Stop interrupts it. Returns once it has.
     private func compact(_ chat: ChatSummary) async {
         guard let found else { return }
         if compactsInSession(chat) {
@@ -1021,22 +1242,38 @@ public final class SessionLibraryViewModel {
             say?("Compacting \(chat.name) in its session")
             return
         }
-        let outcome = await runner.command(binary: found.url, ["chats", "compact", chat.id, "--yes"])
+        guard compactJobs[chat.id] == nil else { return }
+        let job = jobs.startJob(binary: found.url, arguments: ["chats", "compact", chat.id, "--yes"], streaming: false)
+        compactJobs[chat.id] = job
+        compactions[chat.id] = JobProgress()
+        for await update in job.updates { compactions[chat.id]?.apply(update) }
+        compactJobs[chat.id] = nil
+        let progress = compactions.removeValue(forKey: chat.id)
         await refresh()
         if info?.chat.id == chat.id { await showInfo(chat) }
-        if let failure = outcome.failure {
-            self.failure = failure
-            say?("Not compacted: \(failure)")
-        } else if case .done(let stdout) = outcome {
+        switch progress?.status {
+        case .done?:
             failure = nil
-            say?(Self.lastLine(stdout) ?? "Compacted \(chat.name)")
+            say?(progress?.lastSaid.flatMap(Self.lastLine) ?? "Compacted \(chat.name)")
+        case .failed(let why)?:
+            failure = why
+            say?("Not compacted: \(why)")
+        case .stopped?:
+            say?("Not compacted: stopped")
+        case .running?, nil:
+            // Its updates ended with no word of how it ended.
+            say?("Not compacted: it ended without saying how")
         }
     }
 
     /// `chats recall` -- what recall holds -- on a binary with the CLI's 52e;
     /// nothing on one without. On a binary that lists the summaries (the
     /// CLI's M31) its document: each summary, and the count line said from
-    /// it; else the count line the text prints.
+    /// it; else the count line the text prints. A read that fails clears what
+    /// an earlier one listed -- the count line, the summaries, the one
+    /// chosen -- so the inspector shows the failure alone, and Forget never
+    /// names, or is held off by, summaries no read just saw (GUI 6b), as
+    /// Settings has it.
     public func refreshRecall() async {
         guard let found, hasTrack52 else {
             recall = nil
@@ -1055,6 +1292,9 @@ public final class SessionLibraryViewModel {
             recall = RecallListing.countLine(in: text)
             recallFailure = nil
         case .failed(let why):
+            recallListing = nil
+            recall = nil
+            recallSelection = nil
             recallFailure = why
         }
         if let chosen = recallSelection, recallListing?.summaries.contains(where: { $0.chat == chosen }) != true {
@@ -1088,10 +1328,11 @@ public final class SessionLibraryViewModel {
     }
 
     /// Forget's question: how many summaries go and which, named, where the
-    /// binary lists them (GUI M15); the count line where it doesn't.
+    /// binary lists them (GUI M15); the count line where it doesn't; that
+    /// recall could not be read, where the read just failed (GUI 6b) -- in
+    /// the words Settings asks it in.
     public var forgetRecallMessage: String {
-        let what = recallListing.map { "These go: \($0.forgetting). " } ?? recall.map { "Now: \($0). " } ?? ""
-        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+        RecallListing.forgetQuestion(listing: recallListing, countLine: recall, unread: recallFailure)
     }
 
     /// `chats recall --forget --yes` once the person said yes -- every
@@ -1197,15 +1438,19 @@ public final class SessionLibraryViewModel {
 /// What a quit did, for the app's log.
 public struct ShutdownReport: Equatable, Sendable {
     /// Whether the open session's child ended within the grace. One that
-    /// would not is given up, so the app can quit; its stop's escalation
-    /// carries on.
+    /// would not is given up, so the app can quit -- its stop's SIGTERM sent
+    /// first (GUI 6a).
     public let ended: Bool
     /// The private fallback's promised delete, when it failed: the CLI's words.
     public let deleteFailure: String?
+    /// The promised delete ran while the given-up child was still ending: a
+    /// binary before the CLI's 55b may write the chat back as it exits.
+    public let deletedWhileEnding: Bool
 
-    public init(ended: Bool, deleteFailure: String?) {
+    public init(ended: Bool, deleteFailure: String?, deletedWhileEnding: Bool = false) {
         self.ended = ended
         self.deleteFailure = deleteFailure
+        self.deletedWhileEnding = deletedWhileEnding
     }
 }
 

@@ -1,0 +1,2 @@
+added backend 'Gemma4-26B-Instruct-mixed_4_8' to /Users/someone/.apogee/config/config.json
+added backend 'Llama3.2-1B-Instruct-F16' to /Users/someone/.apogee/config/config.json

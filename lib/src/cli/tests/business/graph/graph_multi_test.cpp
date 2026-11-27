@@ -148,9 +148,47 @@ TEST_CASE("membership converges: a member dropped from the list has its rows rec
     CHECK(f.graph.find_nodes("Atlas").front().mention_count == 2);
     CHECK(f.graph.source_states("meetings").empty());
     CHECK(f.graph.graph_members() == std::vector<std::string>{"docs"});
-    // Weight is not recomputed by reconcile -- the meetings corroboration
-    // stays until the edge is re-derived.
-    CHECK(f.graph.node_neighbors(f.graph.find_nodes("Atlas").front().id).front().weight == 3);
+    // Reconcile recounts (57t, inverting the M-era "stays until re-derived"):
+    // the meetings chunk is gone with its member, so it no longer counts.
+    CHECK(f.graph.node_neighbors(f.graph.find_nodes("Atlas").front().id).front().weight == 2);
+}
+
+TEST_CASE("a relation's weight is the chunks that state it, however often they are extracted",
+          "[graph][multi][weight][57t]") {
+    apogee::testing::TempDir dir{"graph-weight-" + std::to_string(std::random_device{}())};
+    Store graph{dir.path() / "work.db"};
+    Store notes{dir.path() / "notes.db"};
+    notes.replace_source("a.md", {"first chunk", "second chunk"});
+    FakeExtractor fake;
+    const Relation stores{.source = "Atlas", .target = "Vault", .relation = "stores readings in"};
+    fake.answers["first chunk"] = about({"Atlas", "Vault"}, {stores});
+    fake.answers["second chunk"] = about({"Atlas", "Vault"}, {stores});
+    const std::vector<Member> members{Member{.collection = "notes", .store = &notes}};
+    const auto weight = [&] {
+        const std::vector<apogee::embedstore::GraphNode> atlas = graph.find_nodes("Atlas");
+        if (atlas.empty()) {
+            return std::int64_t{-1};
+        }
+        const auto neighbors = graph.node_neighbors(atlas.front().id);
+        return neighbors.empty() ? std::int64_t{0} : neighbors.front().weight;
+    };
+    BuildOptions forced = Fixture::opts();
+    forced.force = true;
+    for (int run = 0; run < 3; ++run) {
+        (void)apogee::graph::build_multi(graph, members, fake.fn(), nullptr, forced);
+        CHECK(weight() == 2);  // x2, never x6
+    }
+    // The second chunk stops stating it: once that chunk is extracted again,
+    // it stops counting.
+    fake.answers["second chunk"] = about({"Atlas", "Vault"});
+    (void)apogee::graph::build_multi(graph, members, fake.fn(), nullptr, forced);
+    CHECK(weight() == 1);
+    // A re-ingest of the document (new chunk ids) that states it in both
+    // chunks again: the dead ids are reconciled away, the new ones counted.
+    fake.answers["second chunk"] = about({"Atlas", "Vault"}, {stores});
+    notes.replace_source("a.md", {"first chunk", "second chunk"});
+    (void)apogee::graph::build_multi(graph, members, fake.fn(), nullptr, Fixture::opts());
+    CHECK(weight() == 2);
 }
 
 TEST_CASE("the limit stops across members and the next build resumes with the rest",

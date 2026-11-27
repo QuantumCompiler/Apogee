@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -38,6 +39,7 @@
 #include "operations/graph_dedupe_pass.h"
 #include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
+#include "platform/file_lock.h"
 #include "views/status_line.h"
 
 namespace apogee::commands {
@@ -293,6 +295,19 @@ void print_reconcile(const embedstore::ReconcileResult& reconcile) {
               << reconcile.states_pruned << " source state(s).\n";
 }
 
+/// The embed phase's line and its warning. True since 57t: the next build
+/// with an embedder embeds every entity still without a vector, whatever
+/// left it so.
+void print_embed_summary(const graph::BuildResult& result) {
+    if (result.nodes_embedded > 0) {
+        std::cout << "  Entities embedded: " << result.nodes_embedded << "\n";
+    }
+    if (!result.embed_error.empty()) {
+        std::cout << "Warning: entity embedding stopped early (" << result.embed_error
+                  << ") -- affected entities stay full-text searchable; re-run to embed them.\n";
+    }
+}
+
 void print_build_summary(const std::string& name, const graph::BuildResult& result) {
     if (result.dry_run) {
         std::cout << "\nDry run over \"" << name << "\": " << result.chunks_done
@@ -312,9 +327,11 @@ void print_build_summary(const std::string& name, const graph::BuildResult& resu
     if (result.files_planned == 0) {
         std::cout << "Nothing to extract -- every source in \"" << name
                   << "\" is up to date. (--force re-extracts everything.)\n";
-        // The record pass still ran, and a reconcile can still have done
-        // real work with nothing planned.
+        // The record pass still ran, a reconcile can still have done real
+        // work with nothing planned, and the embed phase still heals every
+        // entity an earlier build left without a vector (57t).
         print_record_summary(result);
+        print_embed_summary(result);
         print_reconcile(result.reconcile);
         return;
     }
@@ -330,13 +347,7 @@ void print_build_summary(const std::string& name, const graph::BuildResult& resu
     std::cout << "  Edges upserted:    " << result.edges_upserted << "\n";
     std::cout << "  Mentions linked:   " << result.mentions_added << "\n";
     print_record_summary(result);
-    if (result.nodes_embedded > 0) {
-        std::cout << "  Entities embedded: " << result.nodes_embedded << "\n";
-    }
-    if (!result.embed_error.empty()) {
-        std::cout << "Warning: entity embedding stopped early (" << result.embed_error
-                  << ") -- affected entities stay full-text searchable; re-run to embed them.\n";
-    }
+    print_embed_summary(result);
     print_reconcile(result.reconcile);
     if (result.limit_hit) {
         std::cout << "Chunk limit reached -- the interrupted file will re-extract on the next "
@@ -774,6 +785,14 @@ void print_code_summary(const std::string& name, const GraphSourceBuild& build, 
             std::cout << "      " << file << "\n";
         }
     }
+    if (!result.mended.empty()) {
+        std::cout << "  Mended:           " << result.mended.size()
+                  << " file(s) used with bytes that are not UTF-8:\n";
+        for (const graph::MendedFile& file : result.mended) {
+            std::cout << "      " << file.member << "/" << file.file << ": "
+                      << graph::mended_reason(file) << "\n";
+        }
+    }
     const graph::ResolveCounts& counts = result.counts;
     std::cout << "  References:       " << counts.resolved() << " resolved, " << counts.unresolved()
               << " unresolved (calls " << counts.calls_resolved << "/" << counts.calls << ", types "
@@ -1001,10 +1020,16 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     }
     // The graph database is created by the first real build. A dry run over
     // a graph that does not exist yet plans against an in-memory store, so
-    // its footprint is zero -- not even the file.
-    std::error_code code;
+    // its footprint is zero -- not even the file. A real build holds the
+    // graph's build lock for its whole run (57t), so a delete is refused
+    // while it runs and it never builds into a file a delete removed.
+    std::optional<platform::FileLock> lock;
     if (!request.dry_run) {
-        std::filesystem::create_directories(target.db_path.parent_path(), code);
+        std::string refusal;
+        lock = lock_graph_build(target.db_path, target.name, refusal);
+        if (!lock.has_value()) {
+            fail_user(refusal);
+        }
     }
     const bool built = file_exists(target.db_path);
     embedstore::Store store{request.dry_run && !built ? std::filesystem::path{":memory:"}
@@ -1087,8 +1112,13 @@ void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
                   target.name + "`; its collections are extracted by `apogee graph build " +
                   target.name + "`");
     }
-    std::error_code code;
-    std::filesystem::create_directories(target.db_path.parent_path(), code);
+    // The build lock, as every build of a named graph holds it (57t).
+    std::string refusal;
+    const std::optional<platform::FileLock> lock =
+        lock_graph_build(target.db_path, target.name, refusal);
+    if (!lock.has_value()) {
+        fail_user(refusal);
+    }
     embedstore::Store store{target.db_path};
     build_code(store, target, named, flags.force, false, flags.quiet, flags.show_skipped, true);
     if (!named.collections.empty()) {
@@ -1717,7 +1747,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     auto d_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     add_read_format(dedupe, d_format);
     dedupe->callback([&context, d, d_format]() {
-        if (d->threshold <= 0.0 || d->threshold > 1.0) {
+        // A NaN compares false both ways, so the range alone let `nan` in
+        // (57t): a threshold is a finite number in (0, 1].
+        if (!std::isfinite(d->threshold) || d->threshold <= 0.0 || d->threshold > 1.0) {
             fail_user("--threshold must be in (0, 1]");
         }
         std::filesystem::path config_path;
@@ -1781,6 +1813,12 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         if (d->dry_run) {
             std::cout << "Dry run -- nothing was changed.\n";
         } else {
+            if (const std::size_t cleared = pass.vectors_cleared(); cleared > 0) {
+                std::cout << cleared
+                          << " survivor(s) took a merged description and lost their vector -- "
+                             "full-text searchable until `apogee graph build "
+                          << target.name << "` embeds them again.\n";
+            }
             std::cout << "Note: community memberships changed -- re-run `apogee graph communities "
                       << target.name << "` to refresh the summaries.\n";
         }
@@ -1800,24 +1838,22 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         const harness::Config config = load_config_strict(context, config_path);
         const Target target = resolve_target(config, *d_name);
         if (target.named != nullptr) {
-            if (!file_exists(target.db_path)) {
-                std::cout << "No graph to delete for \"" << target.name << "\".\n";
-                return;
+            // Under the graph build lock, the HTTP twin's one delete (57t):
+            // refused while a build of the graph runs, so no build goes on
+            // writing to a file this removed and then says it built it.
+            const NamedGraphDeletion deletion = delete_named_graph(target.db_path, target.name);
+            switch (deletion.outcome) {
+                case NamedGraphDeletion::Outcome::Absent:
+                    std::cout << "No graph to delete for \"" << target.name << "\".\n";
+                    return;
+                case NamedGraphDeletion::Outcome::Building:
+                    fail_user(deletion.message);
+                case NamedGraphDeletion::Outcome::Failed:
+                    fail_backend(deletion.message);
+                case NamedGraphDeletion::Outcome::Deleted:
+                    break;
             }
-            embedstore::GraphStats st;
-            {
-                const embedstore::Store store{target.db_path};
-                st = store.graph_stats();
-            }
-            std::error_code code;
-            if (!std::filesystem::remove(target.db_path, code) || code) {
-                fail_backend("could not delete the graph database " + target.db_path.string() +
-                             ": " + code.message());
-            }
-            // Absent unless SQLite left one behind.
-            for (const char* sidecar : {"-wal", "-shm"}) {
-                std::filesystem::remove(target.db_path.string() + sidecar, code);
-            }
+            const embedstore::GraphStats& st = deletion.stats;
             std::cout << "Deleted graph \"" << target.name << "\": " << st.nodes << " node(s), "
                       << st.edges << " edge(s), " << st.mentions
                       << " mention(s). The graphs: config entry is untouched (`apogee config "

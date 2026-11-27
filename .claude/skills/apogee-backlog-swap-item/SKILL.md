@@ -5,23 +5,23 @@ description: Move an Apogee backlog item between index tables — a release tabl
 
 # Swap a backlog item between tables
 
-The backlog index gives every item an identity shaped by its table: release items carry their release's track prefix and a letter (`26q`, `28c`), standing-queue items carry `M<n>` or `A<n>`. Moving an item between tables therefore means a **re-identification**, not just a moved row: a new id from the destination's sequence, the gap in the source's sequence closed, the document `git mv`'d into the destination's directory, and every reference — index, preambles, ROADMAP, the documents' own scope notes and cross-links — updated. Ids are identities and a renumber is a deliberate act, so **this skill runs only on the user's explicit instruction**, and the result records the move, dated, as the user's call.
+The backlog index gives every item an identity shaped by its table: release items carry their release's track prefix and a letter (`26q`, `28c`), standing-queue items carry `M<n>` or `A<n>`. Moving an item between tables therefore means a **re-identification**, not just a moved row: a new id from the destination's sequence, the gap in the source's sequence closed, the document `git mv`'d into the destination's directory, and every reference — index, preambles, ROADMAP, the documents' own headers and cross-links — updated. Ids are identities and a renumber is a deliberate act, so **this skill runs only on the user's explicit instruction**, and the result records the move, dated, as the user's call.
 
 ## 0. Which application?
 
-Apogee's documentation is per application ([the router](../../../lib/documentation/CLAUDE.md)): the CLI's home is [`lib/documentation/cli/`](../../../lib/documentation/cli/README.md), the GUI's [`lib/documentation/gui/`](../../../lib/documentation/gui/README.md), and the mod's (the Claude plugin) [`lib/documentation/mod/`](../../../lib/documentation/mod/README.md). Resolve which queue this invocation means before touching anything, in order:
+Apogee's documentation is split by kind, then by platform ([the router](../../../lib/documentation/CLAUDE.md)): `lib/documentation/{assistant,backlog,adrs,reference}/<app>/`, where `<app>` is **`cli`** (the harness), **`darwin`** (the Apple apps, macOS, iPadOS and iOS, with an item for one OS under `darwin/macos/`, `darwin/ipados/` or `darwin/ios/`, and what binds every GUI app under `gui/`), **`mod`** (the Claude plugin), or **`design`** (the design prototype at `lib/design/`, the reference every GUI app is built from). `unix/` and `windows/` hold the apps not yet built. Resolve which application this invocation means before touching anything, in order:
 
 1. **The arguments.** An id or table names its queue — the CLI's version tables (`v0.1.<x>`, `v0.2.0`) with their numeric tracks (`52a`) and the standing `M<n>`/`A<n>` queues; the GUI's and the mod's indexes with their lettered tracks. A named document resolves by which backlog holds it. A bare version can mean any queue — they all carry work per release.
-2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens, windows and the design are the GUI's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
-3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, or the mod) — before anything is treated as decided. Never guess between them.
+2. **The conversation.** What the work touches: the harness's commands, backends and seams are the CLI's; screens and windows an app builds are the GUI's; the design prototype itself (`lib/design/`, drawing a screen before an app builds it) is the design's; the Claude plugin (panes, slash commands, `$`-API work, `lib/src/mod/`) is the mod's. Work that spans queues gets cross-queue siblings, gated both ways.
+3. **Still ambiguous? Ask.** One AskUserQuestion — which application's queue (the CLI, the GUI, the mod, or the design) — before anything is treated as decided. Never guess between them.
 
-Everything below reads from the chosen home, written `<home>`: its backlog README is the authority on that queue's tables, numbering, document format and link depths, and its assistant docs (`<home>/assistant/CLAUDE.md` first) carry the invariants. Where this skill says `<home>`, substitute the chosen application's directory.
+Everything below reads from the chosen application's folders, written `<app>`: its backlog index (`lib/documentation/backlog/<app>/README.md`) is the authority on that queue's tables, numbering, document format and link depths, and its contributor docs (`lib/documentation/assistant/<app>/CLAUDE.md` first) carry the invariants. Where this skill says `<app>`, substitute the chosen application's folder name.
 
 ## 1. Ground in the live state first
 
 Parallel sessions build and ship while you work:
 
-1. Re-read `<home>/backlog/README.md` (`<home>/backlog/README.md`) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
+1. Re-read `lib/documentation/backlog/<app>/README.md` (`lib/documentation/backlog/<app>/README.md`) and check `git status` — know which items are 🚧 (an in-flight document gets id-reference edits only, nothing else; moving a 🚧 item itself is worth flagging to the user first), and whether recent ships changed the tables since you last looked.
 2. **Survey every reference before editing**: grep the moving item's id and its filename across `lib/documentation/`, and the ids of every trailing item in the source table (they will slide). List the hits; you will edit each as a targeted string.
 3. **Bare ids are landmines.** `M3`/`M4` match the **M3 Max chip** in MILESTONES' performance records; bare numbers match dates (`\b28\b` hits `2026-09-28`) and model names (`27B`). Never blind-replace an id — every occurrence is replaced as part of a longer exact string, or hand-verified first.
 
@@ -30,19 +30,20 @@ Parallel sessions build and ship while you work:
 - **Into a release table:** the item takes the release's track prefix and the **next letter ever assigned** in that track — shipped letters count and are never reused (26m shipped, so after 26q comes 26r).
 - **Into Maintenance / Architecture:** the next `M<n>` / `A<n>` ever assigned, same rule.
 - A next-in-sequence id naturally **appends at the end of the table**, which keeps rows ascending. If the user wants the item higher in the build order than its id allows, that is a wider renumber of the destination's rows — confirm it with them before doing it.
-- Gates are table-agnostic (they name ordering among pending items wherever they sit): the moved item keeps its gate, and any item whose gate names the moved id gets the new id.
+- Gates are table-agnostic (they name ordering among pending items wherever they sit): the moved item keeps its gate, and any item whose gate names the moved id gets the new id, in its row and in its header's **Blocked by** / **Blocks**.
 
 ## 3. Close the gap the item leaves
 
-Trailing items in the source sequence slide down one (M5→M4, M6→M5; or a release tail re-letters, the 26n/26o → M1/M2 precedent) — **only over ids nothing ever shipped under**; a shipped id is permanently spent (grep MILESTONES to confirm, minding the false positives above). Each slid item needs the same sweep as the moved one: index row, ROADMAP link label, its own scope note — where the old id is kept as dated history, "(M6 until 2026-10-03's re-number)" style, never silently erased.
+Trailing items in the source sequence slide down one (M5→M4, M6→M5; or a release tail re-letters, the 26n/26o → M1/M2 precedent) — **only over ids nothing ever shipped under**; a shipped id is permanently spent (grep MILESTONES to confirm, minding the false positives above). Each slid item needs the same sweep as the moved one: index row, ROADMAP link label, its own header (the KEY-id H1, and any **Blocked by** / **Blocks** naming a slid id) — where the old id is kept as dated history in its Decision log, "(M6 until 2026-10-03's re-number)" style, never silently erased.
 
 ## 4. The move mechanics
 
 Per the index's own moving-rows rule, all of a piece:
 
-1. **The document:** `git mv` into the destination table's directory (plain `mv` for an untracked file). Fix its links for the new location: same-table links become bare filenames, cross-table ones `../<table-dir>/<file>`; out-of-backlog links (`../../assistant/…`) keep their depth — every table directory sits at the same level.
-2. **The document's content:** the scope note gets the new identity and the destination's wording — `earmarked for v0.1.<x>` with its position, or `Maintenance item M<n>; claimable at any time by name` — and **Decisions made** gains a dated entry recording the move, the new id, who called it, and what it re-numbered.
+1. **The document:** `git mv` into the destination table's directory (plain `mv` for an untracked file). Fix its links for the new location: same-table links become bare filenames, cross-table ones `../<table-dir>/<file>`; out-of-backlog links (`../../../assistant/<app>/…` from a table directory such as `backlog/cli/v0.2.2/`, one `../` more from a platform's own folder such as `backlog/darwin/macos/v0.2.4/`) keep their depth when the item stays at the same level, and gain or lose one `../` when it moves into or out of a platform folder (the index's moving-rows rule).
+2. **The document's content:** the header restates the new row — the KEY-id H1 with the new id (and the destination queue's key, `CLI`/`APP`/`DSN`/`MOD`, and **Project** on a cross-queue move), **Status**, **Fix version** (`v0.1.<x>`, `Maintenance (any time)` or `Architecture`), **Epic** (the destination table's track, or — for a standing queue), **Blocked by** and **Blocks**, with the links in **Links** to match — and the **Decision log** gains a dated row recording the move, the new id, who called it, and what it re-numbered.
 3. **The index:** the row moves to the destination table (new id, new Version cell — `v0.1.<x>`, `maint.`, or `arch.`), the source table's trailing rows re-id, and **both tables' preambles** tell the story (the precedents: "moved to the Maintenance table as M1 and M2 …, re-lettering this tail"; "specced into Maintenance as M4 … and moved here later that day").
+   - **The overview:** the row moves in [the release overview](../../../lib/documentation/backlog/README.md#keeping-this-page-true) too, with its new id, section and counts; the slid trailing ids re-id there too, and any "Waits on" naming a moved or slid id follows.
 4. **ROADMAP:** the item's line moves between sections (a release board ↔ the Maintenance/Architecture section), restyled to the destination's line conventions; slid items' link labels update in place.
 5. **MILESTONES** changes only if it carries a forward-looking reference to a moved or slid id (rare for item moves); shipped history is never rewritten.
 
@@ -51,8 +52,10 @@ Per the index's own moving-rows rule, all of a piece:
 The standard scripted routine, never by eye:
 
 - Index tables parse; rows ↔ documents on disk both ways; each row's Version cell matches its directory where a Version column exists; File display names equal their basenames.
+- The release overview matches both tables: the moved row under its new id and section, slid ids and any "Waits on" naming them updated, the counts right.
 - Every per-table sequence ascends and the source's gap is closed (M-, A-, and each release's letters).
 - Every 🔒 gate names a real pending id — including gates that named the moved item.
+- Each touched document's header (KEY-id H1, Status, Fix version, Epic, Blocked by, Blocks) agrees with its row.
 - Full relative-link sweep (the two illustrative `](url)` / `](absolute URL)` lines in MILESTONES are known false positives).
 - Stale greps: the old id appears only inside deliberate dated history notes; the old `<table-dir>/<file>` path appears nowhere.
 

@@ -1,0 +1,3 @@
+stored a key for anthropic in /Users/someone/.apogee/config/credentials.json
+stored a key for openai in /Users/someone/.apogee/config/credentials.json
+stored a key for google in /Users/someone/.apogee/config/credentials.json

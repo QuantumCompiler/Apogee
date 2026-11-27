@@ -109,7 +109,7 @@ footprint: suite fast
 {"type":"user","text":"/symphonies"}
 --- exit 0
 --- stdout
-{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-10-26","tools":false},"chat_id":"<chat-id>","model":"root","next_turn":1,"orchestrating":false,"protocol_version":1,"suite":"duo","type":"session"}
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":false,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":false},"chat_id":"<chat-id>","model":"root","next_turn":1,"orchestrating":false,"protocol_version":1,"suite":"duo","type":"session"}
 {"text":"suite duo: no member holds memory on this machine","type":"notice"}
 {"text":"stage 1/2 first — asking utility (helper): One: hello","turn":1,"type":"tool_status"}
 {"text":"stage 2/2 second — asking chat (root): Two: HELPER<One: hello>","turn":1,"type":"tool_status"}
@@ -158,8 +158,8 @@ Options:
   --think TEXT:{on,off,auto}  Whether a reasoning model thinks first: on, off, or auto (per question)
   --no-recall                 Recall no earlier chats in this run
   --private                   Write nothing of this chat: no transcript, no recall, its attachments indexed in a place gone with the run
-  --allow TOOL                Allow a tool for this chat without asking (repeatable, with --tools)
-  --deny TOOL                 Refuse a tool or website for this chat without asking (repeatable)
+  --allow OFFERED_TOOL        Allow a tool for this chat without asking (repeatable, with --tools)
+  --deny OFFERED_TOOL         Refuse a tool or website for this chat without asking (repeatable)
   --allow-host TEXT           Allow fetching from a website for this chat without asking (repeatable)
   --permission-mode TEXT:{manual,accept-edits,plan,dont-ask,bypass}
                               How much runs without asking: manual, accept-edits, plan, dont-ask or bypass

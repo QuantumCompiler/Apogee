@@ -2,7 +2,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <random>
 #include <string>
+
+#include "support/env_guard.h"
 
 /// The provenance/integrity record.
 ///
@@ -143,4 +149,55 @@ TEST_CASE("the published fields are always written, even when empty", "[models][
     const std::string text = serialize(empty);
     CHECK(text.find("published_digest") != std::string::npos);
     CHECK(text.find("published_size") != std::string::npos);
+}
+
+TEST_CASE("a GGUF's record follows its source's folder under a rename, byte for byte",
+          "[models][sidecar][rename]") {
+    // 57i: a conversion's and a quantization's sidecar name their source by
+    // a handle; a rename of that model's folder rewrites it where it stands,
+    // only when the record re-serializes byte for byte as it reads.
+    using apogee::models::BaseRename;
+    using apogee::models::rename_sidecar_ref;
+    const apogee::testing::TempDir dir{"sidecar-rename-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path model = dir.path() / "text-Q4_K_M.gguf";
+    std::ofstream{model} << "GGUF";
+    const auto slurp = [&model] {
+        std::ifstream in{apogee::models::sidecar_path_for(model), std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    };
+    Sidecar record;
+    record.ref = "org--text/gguf/111111111111";
+    record.source = "quantize";
+    record.transform = "quantize";
+    record.transform_note = "Q4_K_M";
+    record.verification.header_checked = true;
+    record.verification.header_parsed = true;
+    REQUIRE(apogee::models::write_sidecar(model, record));
+    const std::string before = slurp();
+
+    REQUIRE(rename_sidecar_ref(model, "org--text", "Text") == BaseRename::Renamed);
+    std::string expected = before;
+    const std::string named = "\"org--text/gguf/111111111111\"";
+    REQUIRE(expected.find(named) != std::string::npos);
+    expected.replace(expected.find(named), named.size(), "\"Text/gguf/111111111111\"");
+    CHECK(slurp() == expected);
+    CHECK(apogee::models::load_sidecar(model)->ref == "Text/gguf/111111111111");
+
+    // Another model's rename: nothing written. No record: nothing at all.
+    CHECK(rename_sidecar_ref(model, "org--text", "Other") == BaseRename::Unnamed);
+    CHECK(slurp() == expected);
+    CHECK(rename_sidecar_ref(dir.path() / "absent.gguf", "a", "b") == BaseRename::Unnamed);
+
+    // A pull's ref is a repository or an Ollama tag: never touched.
+    record.ref = "org/text-GGUF:text.gguf";
+    REQUIRE(apogee::models::write_sidecar(model, record));
+    CHECK(rename_sidecar_ref(model, "org--text", "Text") == BaseRename::Unnamed);
+
+    // A record this build would not write back as it reads -- one written
+    // with other spacing, or a field it does not know -- is left, failed.
+    const std::string foreign = R"({"ref": "Text/gguf/111111111111", "source": "quantize"})";
+    std::ofstream{apogee::models::sidecar_path_for(model), std::ios::binary | std::ios::trunc}
+        << foreign;
+    CHECK(rename_sidecar_ref(model, "Text", "Text2") == BaseRename::Failed);
+    CHECK(slurp() == foreign);
 }

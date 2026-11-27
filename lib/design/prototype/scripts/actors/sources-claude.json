@@ -1,0 +1,7 @@
+{
+ "turns": [
+  {
+   "text": "Because one flush pays for many commits. A transaction is durable once its log record reaches disk, and a single `fsync()` makes every record appended before it durable, so transactions that commit inside the same flush window share one write [1].\n\nUnder load the window fills on its own: while one flush is in flight, the next commits queue behind it and go out together [1]. `commit_delay` widens the window on purpose, trading up to that much latency per commit for fewer flushes; it’s 0, so off, until you set it [2][3].\n\n- **Light load:** little to gain; each commit still waits for its own flush.\n- **Many writers:** flushes per second stay flat while commits per second climb."
+  }
+ ]
+}

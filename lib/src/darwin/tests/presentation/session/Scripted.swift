@@ -68,6 +68,7 @@ func shape(_ transcript: Transcript) -> [String] {
         case .question(let card): "question: \(card.answers?.joined(separator: ",") ?? "waiting")"
         case .permission(let card): "permission: \(card.answer ?? "waiting")"
         case .error(let message): "error: \(message)"
+        case .notSent(let text): "not sent: \(text)"
         case .stopped: "stopped"
         case .unanswered: "unanswered"
         case .divider(let text): "divider: \(text)"
@@ -165,6 +166,7 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
     private struct Life {
         var ended = false
         var released = false
+        var inputClosed = false
         var waiting: [CheckedContinuation<Void, Never>] = []
     }
 
@@ -212,7 +214,12 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
         waiting.forEach { $0.resume() }
     }
 
+    /// Its input closed under it, as a stop closes a real child's first: a
+    /// turn written from now on is refused, as `MachineSession` refuses it.
+    func closeInput() { life.withLock { $0.inputClosed = true } }
+
     func send(user text: String) async throws -> Int {
+        if life.withLock({ $0.inputClosed }) { throw SessionError.notRunning }
         log.withLock { $0.append("user: \(text)") }
         return turns.withLock { $0 += 1; return $0 }
     }
@@ -241,6 +248,12 @@ final class ScriptedSession: ChatSession, @unchecked Sendable {
         }
         if isLive { end(.finished) }
         ledger?.note("\(name): ended")
+    }
+
+    /// The stop's SIGTERM sent now: recorded.
+    func terminateNow() async {
+        log.withLock { $0.append("terminate") }
+        ledger?.note("\(name): terminate")
     }
 }
 

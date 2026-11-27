@@ -96,14 +96,22 @@ struct TaskRunRequest {
 /// `task halt <id>` (`request` Halt) or `task cancel <id>` (37e): the request
 /// file a running task's watcher reads, or the transition written under the
 /// lock for one no process runs -- what the command does, its line returned.
-/// Throws std::runtime_error in the command's words for a task it refuses.
+/// A run still starting is a running one (57u): the lock names its task from
+/// the moment it is taken, and the request is written for it -- a new task's
+/// before its ledger exists, `it stops before it starts` -- and honoured
+/// before any model call. An empty `id` is the running task, or else the
+/// newest. Throws std::runtime_error in the command's words for a task it
+/// refuses.
 [[nodiscard]] std::string request_task_stop(const std::string& id, tasks::Request request);
 
 /// Whether `task halt` (`request` Halt) or `task cancel` takes `task`:
 /// never a finished one, and a halt only one still holding its session --
-/// planning, running, or halted already. The verbs' refusal and their
-/// completion both ask this.
-[[nodiscard]] bool task_stoppable(const tasks::Task& task, tasks::Request request) noexcept;
+/// planning, running, or halted already -- or one a process runs now
+/// (`running`: the lock's live holder names it), whose ledger a resume still
+/// starting has not yet moved on from where it stopped (57u). The verbs'
+/// refusal, their completion and the Task view's keys all ask this.
+[[nodiscard]] bool task_stoppable(const tasks::Task& task, tasks::Request request,
+                                  bool running) noexcept;
 
 /// Why `task resume`, run in the folder `here`, refuses `task` by its record:
 /// finished, or started in another folder -- each compared as its real path.

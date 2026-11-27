@@ -1,8 +1,15 @@
 #include "mcp/serve_stdio.h"
 
+#include <exception>
 #include <istream>
+#include <memory>
 #include <ostream>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
+
+#include "contracts/utf8.h"
 
 namespace apogee::mcp {
 namespace {
@@ -98,8 +105,9 @@ std::vector<ServedTool> read_only_tools(const agent::ToolRegistry& registry) {
     return out;
 }
 
-Dispatch dispatch_through(const agent::ToolRegistry& registry) {
-    return [&registry](std::string_view name, const nlohmann::json& args) {
+Dispatch dispatch_through(const agent::ToolRegistry& registry, agent::PermissionChecker websites) {
+    return [&registry, websites = std::move(websites)](std::string_view name,
+                                                       const nlohmann::json& args) {
         const agent::Tool* tool = registry.find(name);
         ToolCallResult result;
         if (tool == nullptr || tool->writes) {
@@ -111,14 +119,76 @@ Dispatch dispatch_through(const agent::ToolRegistry& registry) {
         call.id = "stdio";
         call.name = std::string{name};
         call.arguments = args.dump();
-        // No permission context: only read-only tools are served, and the
-        // gate never consults it for those.
-        const agent::ToolOutcome outcome =
-            agent::dispatch(registry, call, agent::DispatchContext{});
+        // Only read-only tools are served, and the gate never asks about
+        // their own calls; a website one reaches while it runs (57x) is the
+        // checker's to decide, with nobody to ask.
+        agent::DispatchContext context;
+        context.permission = websites;
+        const agent::ToolOutcome outcome = agent::dispatch(registry, call, context);
         result.text = outcome.content;
         result.is_error = outcome.is_error;
         return result;
     };
+}
+
+namespace {
+
+/// `tools` and `dispatch` grown by `answers`, each listed after them with
+/// `read_only` as its hint -- the one body `with_reads` and `with_calls`
+/// share.
+[[nodiscard]] ServedSet grown(std::vector<ServedTool> tools, Dispatch dispatch,
+                              std::vector<ServedRead> answers, bool read_only) {
+    std::set<std::string> names;
+    for (const ServedTool& tool : tools) {
+        names.insert(tool.name);
+    }
+    for (const ServedRead& answer : answers) {
+        if (!names.insert(answer.name).second) {
+            throw std::invalid_argument("the " + std::string{read_only ? "read" : "call"} + " '" +
+                                        answer.name + "' would shadow a tool of the same name");
+        }
+        ServedTool served;
+        served.name = answer.name;
+        served.description = answer.description;
+        served.input_schema = answer.input_schema.is_object() ? answer.input_schema
+                                                              : nlohmann::json{{"type", "object"}};
+        served.read_only = read_only;
+        tools.push_back(std::move(served));
+    }
+    auto shared = std::make_shared<const std::vector<ServedRead>>(std::move(answers));
+    Dispatch dispatched = [shared, fallback = std::move(dispatch)](std::string_view name,
+                                                                   const nlohmann::json& args) {
+        for (const ServedRead& answer : *shared) {
+            if (answer.name != name) {
+                continue;
+            }
+            ToolCallResult result;
+            try {
+                result = answer.answer(args);
+            } catch (const std::exception& e) {
+                result.text = std::string{"Error: "} + e.what();
+                result.is_error = true;
+            }
+            // Text enters the server here, so it is mended here: a frame
+            // that is not UTF-8 would end the server at the reply's dump.
+            result.text = harness::valid_utf8(result.text);
+            return result;
+        }
+        return fallback(name, args);
+    };
+    return ServedSet{std::move(tools), std::move(dispatched)};
+}
+
+}  // namespace
+
+ServedSet with_reads(std::vector<ServedTool> tools, Dispatch dispatch,
+                     std::vector<ServedRead> reads) {
+    return grown(std::move(tools), std::move(dispatch), std::move(reads), /*read_only=*/true);
+}
+
+ServedSet with_calls(ServedSet set, std::vector<ServedCall> calls) {
+    return grown(std::move(set.tools), std::move(set.dispatch), std::move(calls),
+                 /*read_only=*/false);
 }
 
 }  // namespace apogee::mcp

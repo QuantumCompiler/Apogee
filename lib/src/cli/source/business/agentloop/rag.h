@@ -176,7 +176,10 @@ struct RagTurn {
 /// optionally rerank, and package the transient prefix. Never throws for an
 /// ordinary problem; `error` is set when the user asked for something that
 /// cannot run (an explicit vector search with no vectors), which the surface
-/// must fail rather than substitute.
+/// must fail rather than substitute. A cancel is not an ordinary problem
+/// (57r): `cancellation` reaches the embedder and the judge, and a
+/// `CancelledError` goes on up through every catch that degrades a search --
+/// never said as "searched lexical only" or "using raw retrieval order".
 [[nodiscard]] RagResult retrieve_for_turn(const RagTurn& turn);
 
 /// Retrieves for `question` from the collection at `store_path`.

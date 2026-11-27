@@ -42,6 +42,55 @@ bool names_a_configured_backend(const harness::Config& config, std::string_view 
     return !configured_backend_key(config, model).empty();
 }
 
+std::string named_backend_refusal(const harness::Config& config, const backends::BuildResult& built,
+                                  std::string_view name) {
+    if (name.empty()) {
+        return {};
+    }
+    const std::string key = configured_backend_key(config, name);
+    if (key.empty()) {
+        std::string known;
+        for (const std::string& backend : config.backend_names()) {
+            known += (known.empty() ? "" : ", ") + backend;
+        }
+        return "no backend named '" + std::string{name} + "'" +
+               (known.empty() ? std::string{} : " (configured: " + known + ")");
+    }
+    const auto skipped =
+        std::ranges::find_if(built.statuses, [&key](const backends::BackendStatus& status) {
+            return status.name == key && !status.constructed;
+        });
+    if (skipped == built.statuses.end()) {
+        return {};
+    }
+    // The provider's own words open with `<name>: `; the refusal has named
+    // the backend already, so they follow it once (M26).
+    const std::string prefix = key + ": ";
+    const std::string reason = skipped->reason.starts_with(prefix)
+                                   ? skipped->reason.substr(prefix.size())
+                                   : skipped->reason;
+    std::vector<std::string> started;
+    for (const backends::BackendStatus& status : built.statuses) {
+        if (status.constructed) {
+            started.push_back(status.name);
+        }
+    }
+    std::ranges::sort(started);
+    std::string message = "backend '" + key + "'";
+    if (name != key) {
+        message += " (for '" + std::string{name} + "')";
+    }
+    message += " is configured but could not be started: " + reason;
+    if (started.empty()) {
+        return message + " (no backend started; 'apogee check' says why)";
+    }
+    std::string list;
+    for (const std::string& backend : started) {
+        list += (list.empty() ? "" : ", ") + backend;
+    }
+    return message + " (started backends: " + list + ")";
+}
+
 RosterResolution resolve_roster_model(const harness::Config& config, std::string_view model) {
     RosterResolution out;
     const backends::RosterCache cache = backends::known_rosters();

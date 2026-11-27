@@ -6,6 +6,7 @@
 #include "backends/claude_cli_events.h"
 #include "backends/provider_status.h"
 #include "backends/provider_table.h"
+#include "backends/restore_on_exit.h"
 #include "contracts/errors.h"
 
 namespace apogee::backends {
@@ -69,6 +70,25 @@ std::string claude_effort(const harness::Thinking& thinking) {
         return {};
     }
     return std::string{harness::to_string(*thinking.effort)};
+}
+
+std::string claude_cli_failure(const TurnComplete& complete, bool login_hint) {
+    std::string message = "the Claude CLI reported ";
+    message += complete.error_subtype.empty() || complete.error_subtype == "success"
+                   ? std::string{"an error"}
+                   : complete.error_subtype;
+    // Claude Code's words: its result, else the kind it named (M34).
+    const std::string& words =
+        complete.final_text.empty() ? complete.error_type : complete.final_text;
+    if (!words.empty()) {
+        message += ": " + words;
+    }
+    // The way back in, for the one kind whose way out is outside Apogee --
+    // and only where the Claude login is what failed: never under `--bare`.
+    if (login_hint && complete.error_type == "authentication_failed") {
+        message += " -- run claude in a terminal and sign in again with /login";
+    }
+    return message;
 }
 
 std::vector<std::string> build_arguments(const ClaudeCliInvocation& invocation) {
@@ -259,6 +279,8 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
 
     std::string chunk;
     bool done = false;
+    // A failure's kind named on a message before the result (M34), this turn's.
+    std::string message_error;
 
     // Parsing only. Consumption happens below, so a feed that carries past the
     // terminal event leaves the remainder queued instead of misattributing it.
@@ -303,10 +325,17 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::pump_turn(platform::ChildProce
                     }
                 } else if constexpr (std::is_same_v<T, TurnComplete>) {
                     outcome.complete = event;
+                    // The kind a message named this turn, kept on a failed
+                    // outcome (M34): the result says why, the message what.
+                    if (outcome.complete.is_error && outcome.complete.error_type.empty()) {
+                        outcome.complete.error_type = message_error;
+                    }
                     if (!event.session_id.empty()) {
                         session_id_ = event.session_id;
                     }
                     done = true;
+                } else if constexpr (std::is_same_v<T, MessageError>) {
+                    message_error = event.kind;
                 } else if constexpr (std::is_same_v<T, Notice>) {
                     if (options.on_status) {
                         harness::StatusEvent status;
@@ -392,17 +421,31 @@ ClaudeCliProvider::TurnOutcome ClaudeCliProvider::run_one_shot(
     child->close_stdin();
 
     // A one-shot gets its own framer: a half-line from this child must never
-    // prefix the session child's next event.
-    JsonlFramer saved_framer = std::move(framer_);
-    std::deque<CliEvent> saved_pending = std::move(pending_);
-    framer_ = JsonlFramer{};
-    pending_.clear();
+    // prefix the session child's next event. And its terminal event names its
+    // own session, which `pump_turn` records: the conversation's is put back,
+    // or the next respawn -- an effort change, a dead child -- would resume
+    // the one-shot's session and answer with no history (57b). Each is put
+    // back however this scope ends: returned, cancelled, thrown.
+    const RestoreOnExit<JsonlFramer> framer{framer_, JsonlFramer{}};
+    const RestoreOnExit<std::deque<CliEvent>> pending{pending_, std::deque<CliEvent>{}};
+    const RestoreOnExit<std::string> session{session_id_};
     TurnOutcome outcome = pump_turn(*child, options, suppress_text);
-    framer_ = std::move(saved_framer);
-    pending_ = std::move(saved_pending);
 
     (void)child->wait_for_exit(options_.shutdown_timeout);
     return outcome;
+}
+
+void ClaudeCliProvider::throw_if_failed(const TurnOutcome& outcome) const {
+    if (outcome.timed_out) {
+        throw harness::ProviderError(options_.backend_name,
+                                     "the Claude CLI did not finish in time");
+    }
+    if (outcome.complete.is_error) {
+        // `--bare` never reads the Claude login, so /login cannot mend it there.
+        throw harness::ProviderError(
+            options_.backend_name,
+            claude_cli_failure(outcome.complete, options_.mode == ClaudeCliMode::Subscription));
+    }
 }
 
 harness::ChatResponse ClaudeCliProvider::chat(const harness::ChatRequest& request,
@@ -432,6 +475,10 @@ harness::ChatResponse ClaudeCliProvider::stream_chat(const harness::ChatRequest&
         std::string error;
         const TurnOutcome outcome =
             run_one_shot(invocation, replay_text(request.messages), options, false, error);
+        // Failed before any of its words are used (57b): an expired login's
+        // sentence must not become a chat's title, and a partial answer cut
+        // off at the deadline is not a result.
+        throw_if_failed(outcome);
         if (outcome.child_died && outcome.answer.empty()) {
             throw harness::ProviderError(
                 options_.backend_name,
@@ -527,17 +574,7 @@ harness::ChatResponse ClaudeCliProvider::stream_chat(const harness::ChatRequest&
         }
     }
 
-    if (outcome.timed_out) {
-        throw harness::ProviderError(options_.backend_name,
-                                     "the Claude CLI did not finish in time");
-    }
-    if (outcome.complete.is_error) {
-        throw harness::ProviderError(
-            options_.backend_name,
-            "the Claude CLI reported " + (outcome.complete.error_subtype.empty()
-                                              ? std::string{"an error"}
-                                              : outcome.complete.error_subtype));
-    }
+    throw_if_failed(outcome);
 
     harness::ChatResponse response;
     response.message = harness::ChatMessage::assistant(
@@ -569,6 +606,10 @@ std::string ClaudeCliProvider::complete_structured(std::string_view prompt,
     std::string error;
     // suppress_text: the prose pre-answer is held, not shown.
     const TurnOutcome outcome = run_one_shot(invocation, prompt, options, true, error);
+    // Before the structured value or the held prose is considered (57b): the
+    // fallback below would otherwise hand a clerk Claude Code's error
+    // sentence as if it were the answer.
+    throw_if_failed(outcome);
 
     if (!outcome.complete.structured_output.empty()) {
         return outcome.complete.structured_output;

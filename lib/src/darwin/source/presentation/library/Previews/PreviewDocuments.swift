@@ -542,5 +542,10 @@ apogee mcp: /Users/someone/.apogee/config/config.json: not valid JSON: line 4, c
     static let mcpDelete = #"""
 removed MCP server 'notes' from /Users/someone/.apogee/config/config.json
 """#
+    /// tests/business/reads/Fixtures/symphony-show-unknown-key.err (GUI 6f's
+    /// recording: `notes-digest` with an unknown key in its second stage)
+    static let symphonyShowUnknownKey = #"""
+apogee symphonies: /Users/someone/.apogee/symphonies/notes-digest.yaml: stages[1]: unknown key 'temprature' (accepted: name, role, play, prompt, input, schema, image, brief_tokens, answer_tokens)
+"""#
 }
 #endif

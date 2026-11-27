@@ -133,6 +133,13 @@ enum SessionPreview {
         SessionViewModel(starter: PreviewChats(missing: passedOver))
     }
 
+    /// "Apogee Dev" with no `apogee-dev` installed (GUI M18): the dev
+    /// channel's one place passed over, its install line the CLI's dev
+    /// install; not started.
+    static func missingDev() -> SessionViewModel {
+        SessionViewModel(starter: PreviewChats(missing: [passedOver[1]], channel: .dev))
+    }
+
     /// Every place the app looks, on a Mac with no apogee installed: each
     /// candidate discovery names for the home, passed over as it says of a
     /// file that is not there (`BinaryDiscovery.candidates`, `locate`).
@@ -353,6 +360,36 @@ enum SessionPreview {
         model.detach("Documents/report.md")
     }
 
+    /// `holdingASetting`, then the card answered and the child dying before
+    /// its turn ends -- over a chat that ends badly once every line is said
+    /// (`session(setBetweenTurns, silentFrom: "result", ending: wentAway)`):
+    /// both lines still held, for the session started again
+    /// (SessionLinesTests' `heldSurvivesADeath`).
+    static func heldWhenItDied(_ model: SessionViewModel) async {
+        await holdingASetting(model)
+        if let card = waiting(model) { model.answer(card, with: [noteAnswers[0]]) }
+        await until { model.transcript.status == .ended }
+    }
+
+    /// A ready chat moved to another suite, its child being stopped -- over
+    /// a chat whose stop never ends (`holdsStop`) -- and an attach made
+    /// meanwhile: held for the next child (SessionLinesTests'
+    /// `linesDuringARestart`).
+    static func heldWhileRestarting(_ model: SessionViewModel) async {
+        await ready(model)
+        Task { await model.switchSuite(to: "pair") }
+        await until { model.transcript.status == .restarting }
+        model.attach("report.pdf")
+    }
+
+    /// A new session started and an attach made while it locates its
+    /// binary -- over a chat that never speaks: held for its first child
+    /// (SessionLinesTests' `heldBeforeTheFirstChild`).
+    static func heldBeforeItStarts(_ model: SessionViewModel) {
+        model.start()
+        model.attach("report.pdf")
+    }
+
     // MARK: - Transcripts, folded as the window folds them
 
     /// What `lines` fold to, short of the first line of type `silentFrom`:
@@ -514,6 +551,15 @@ enum SessionPreview {
         ] {
             transcript.apply(.event(EventDecoder.decode(line: line)))
         }
+        return transcript
+    }
+
+    /// A turn whose line never reached the child -- a stop had closed its
+    /// input first -- drawn not sent under it (SessionLinesTests'
+    /// `turnNotSent`).
+    static var notSent: Transcript {
+        var transcript = folded([bareSession], typed: resumedTurn)
+        transcript.notSent(resumedTurn)
         return transcript
     }
 

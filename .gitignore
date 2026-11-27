@@ -1,5 +1,6 @@
 # Build output. One directory per preset/target (build/macos-arm64, build/lint, …).
 build/
+.build/
 
 # Xcode's per-user state inside a project (window layout, breakpoints, user
 # schemes). The shared scheme lives in xcshareddata/ and is committed.
@@ -26,3 +27,30 @@ buildServer.json
 # Python bytecode from running the shipped drivers, the asset generator, or the tests.
 __pycache__/
 *.pyc
+
+# The design prototype's npm install, Vite's scratch build and Playwright's output
+# (lib/documentation/assistant/design/DEVELOPER.md). Its one built file,
+# lib/design/main.html, is committed.
+lib/design/prototype/node_modules/
+lib/design/prototype/dist/
+lib/design/prototype/test-results/
+lib/design/prototype/playwright-report/
+# The old prototype's baseline images (design 1c): re-made by npm run baseline from
+# parity/baseline.json's recorded revision, never committed.
+lib/design/prototype/.parity/
+
+# The mod's npm install (its checks' TypeScript, pinned in package-lock.json), and
+# the API declarations the engine lays beside the mod each time it loads it from a
+# folder (lib/documentation/assistant/mod/DEVELOPER.md). tsc never emits: the
+# engine loads the TypeScript itself, so the mod's one build output is its
+# pipeline's artifact, the plugin zipped by `npm run package` (build/, since 1d).
+lib/src/mod/node_modules/
+lib/src/mod/.claude-plugin/types/
+lib/src/mod/build/
+
+# Superpowers (the repository enables it; see CLI CLAUDE.md -> Superpowers fits the
+# docs-first lifecycle): its plan workspaces and brainstorm mockups, the item
+# worktrees under .claude/worktrees/, and each machine's own settings.
+.superpowers/
+.claude/worktrees/
+.claude/settings.local.json

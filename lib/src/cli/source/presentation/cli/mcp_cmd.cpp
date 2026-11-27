@@ -11,18 +11,16 @@
 #include <string>
 #include <vector>
 
-#include "agent/tool.h"
 #include "cli/helpers.h"
+#include "cli/mcp_serve.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
-#include "mcp/serve_stdio.h"
 #include "operations/mcp_presets.h"
 #include "operations/read_views.h"
 #include "scaffold/mcp_server.h"
-#include "tools/toolsets.h"
 #include "version/version.h"
 
 namespace apogee::commands {
@@ -126,6 +124,9 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         if (preset != nullptr) {
             std::cout << "Test it:  apogee mcp test " << result.name << " " << preset->try_tool
                       << " '" << preset->try_arguments << "'\n";
+            if (!preset->note.empty()) {
+                std::cout << preset->note << "\n";
+            }
         } else {
             std::cout << "Test it:  apogee mcp test " << result.name
                       << " echo '{\"text\":\"hi\"}'\n";
@@ -245,6 +246,9 @@ void bind_presets(CLI::App& parent, const RootContext& context) {
                 std::cout << indent << "not runnable here: " << resolution.missing
                           << (resolution.remedy.empty() ? "" : " -- " + resolution.remedy) << "\n";
             }
+            if (!preset.note.empty()) {
+                std::cout << indent << "note:     " << preset.note << "\n";
+            }
         }
     });
 }
@@ -310,6 +314,32 @@ void bind_enable(CLI::App& parent, const RootContext& context, bool enabled) {
     });
 }
 
+/// One server behind both spellings: `mcp serve` and its alias.
+void serve_or_fail(const RootContext& context) {
+    const int status = serve_mcp(context, std::cin, std::cout, std::cerr);
+    if (status != 0) {
+        throw CLI::RuntimeError(status);
+    }
+}
+
+void bind_serve(CLI::App& parent, const RootContext& context) {
+    CLI::App* cmd = parent.add_subcommand(
+        "serve",
+        "Serve Apogee's read-only tools and status reads as an MCP server on stdio, for another "
+        "MCP host to spawn");
+    cmd->footer(
+        "Speaks MCP's JSON-RPC on stdin and stdout until stdin ends: the read-only native tools "
+        "(files, git, notes, document search, graph navigation) and the status reads "
+        "(models_list, models_status, train_status, train_versions, check), each answering with "
+        "the command's own --output-format json document. Nothing writes, and no port is "
+        "opened. A model generates only where the config lists complete under a backend's "
+        "mcp_serve -- one local and unmetered by its own provider's word, its calls bounded "
+        "(apogee config set-backend <name> --mcp-serve complete). search_documents may embed "
+        "the query through the collection's embedder: one small call per search, which a paid "
+        "embedder bills, as a chat's search does. The entry a host takes: apogee mcp presets.");
+    cmd->callback([&context]() { serve_or_fail(context); });
+}
+
 }  // namespace
 
 nlohmann::json mcp_list_document(const RootContext& context) {
@@ -333,6 +363,7 @@ void McpCommand::bind(CLI::App& root, const RootContext& context) {
     bind_test(*cmd, context);
     bind_enable(*cmd, context, true);
     bind_enable(*cmd, context, false);
+    bind_serve(*cmd, context);
 }
 
 std::string_view McpToolsServerCommand::name() const noexcept {
@@ -340,35 +371,16 @@ std::string_view McpToolsServerCommand::name() const noexcept {
 }
 
 std::string_view McpToolsServerCommand::summary() const noexcept {
-    return "Serve the read-only native toolsets as an MCP server on stdio (internal)";
+    return "The hidden alias of 'mcp serve', kept for hosts registered with it";
 }
 
 void McpToolsServerCommand::bind(CLI::App& root, const RootContext& context) {
     CLI::App* cmd = root.add_subcommand(std::string{name()}, std::string{summary()});
-    cmd->group("");  // hidden from --help: another program spawns it
-    cmd->callback([&context]() {
-        // The native toolsets only, never the MCP registry: a config that
-        // listed this very command as a server would otherwise spawn itself
-        // without end.
-        harness::Config config;
-        try {
-            config = harness::load_config(config_path_for(context));
-        } catch (const std::exception&) {
-            // No config is fine: the defaults sandbox to the launch folder.
-        }
-        agent::ToolRegistry registry;
-        tools::ToolsetOptions options;
-        options.config = &config;
-        options.fs_root = harness::expand_env(config.tools.fs_root);
-        options.disabled = config.tools.disabled;
-        tools::register_native_toolsets(registry, options);
-        const int status =
-            mcp::serve_stdio(std::cin, std::cout, "apogee-tools", std::string{version::semantic()},
-                             mcp::read_only_tools(registry), mcp::dispatch_through(registry));
-        if (status != 0) {
-            throw CLI::RuntimeError(status);
-        }
-    });
+    // Hidden from --help and completion: `mcp serve` is the public spelling
+    // (54a), and this one is kept, indefinitely, for the hosts registered
+    // with it before.
+    cmd->group("");
+    cmd->callback([&context]() { serve_or_fail(context); });
 }
 
 }  // namespace apogee::commands

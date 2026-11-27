@@ -15,10 +15,11 @@
 /// and `disable` flip one line of the config. Servers connect at startup, so
 /// every change says "restart to take effect".
 ///
-/// The hidden `__mcp-tools` subcommand is the other side: it serves the
-/// read-only native toolsets over this process's own stdin/stdout, so any
-/// MCP client -- or Apogee's own test fleet -- can use them with nothing to
-/// install.
+/// `serve` is the other side (54a, `cli/mcp_serve`): Apogee's own read-only
+/// tools and status reads over this process's own stdin/stdout, so any MCP
+/// host -- or Apogee's own test fleet -- can use them with nothing to
+/// install. The hidden `__mcp-tools` is its alias, kept for the hosts
+/// registered with it before the verb was public.
 namespace apogee::commands {
 
 /// `mcp list --output-format json` (28h): every configured server connected
@@ -34,8 +35,8 @@ public:
     void bind(CLI::App& root, const RootContext& context) override;
 };
 
-/// `apogee __mcp-tools`: an MCP server over stdio exposing the read-only
-/// native toolsets.
+/// `apogee __mcp-tools`: the hidden alias of `apogee mcp serve` (54a), the
+/// same server behind the spelling hosts were registered with before.
 class McpToolsServerCommand final : public Command {
 public:
     [[nodiscard]] std::string_view name() const noexcept override;

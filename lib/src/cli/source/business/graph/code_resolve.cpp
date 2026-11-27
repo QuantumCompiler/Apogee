@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -28,7 +29,9 @@ struct Binding {
 
 struct FileContext {
     const CodeLanguage* language = nullptr;
-    std::map<std::string, Binding> bindings;
+    /// By local name; looked up by a prefix of a written path in place,
+    /// with no copy (57t), so a path of any length costs its length.
+    std::map<std::string, Binding, std::less<>> bindings;
     std::vector<std::string> roots;
 };
 
@@ -448,14 +451,28 @@ private:
 
     /// An import binding covering the longest leading part of `path`: the
     /// name it stands for, the rest appended.
+    ///
+    /// The path is joined once and each leading part looked up as a view
+    /// of it (57t): building every leading part afresh cost the square of
+    /// the path's length, and a Rust use tree nested 100000 deep spent 42 s
+    /// here after its expansion had become linear.
     [[nodiscard]] std::optional<std::string> rebind(std::size_t file,
                                                     const std::vector<std::string>& path) const {
         const FileContext& context = contexts_[file];
         const std::string_view sep = context.language->separator;
+        // `join_segments(path, sep)`, and where each leading part of it ends.
+        std::string joined;
+        std::vector<std::size_t> ends;
+        ends.reserve(path.size());
+        for (const std::string& segment : path) {
+            if (!joined.empty()) {
+                joined += sep;
+            }
+            joined += segment;
+            ends.push_back(joined.size());
+        }
         for (std::size_t k = path.size(); k > 0; --k) {
-            const std::vector<std::string> head(path.begin(),
-                                                path.begin() + static_cast<std::ptrdiff_t>(k));
-            const auto it = context.bindings.find(join_segments(head, sep));
+            const auto it = context.bindings.find(std::string_view{joined}.substr(0, ends[k - 1]));
             if (it == context.bindings.end()) {
                 continue;
             }

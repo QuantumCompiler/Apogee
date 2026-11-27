@@ -1,0 +1,81 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-111551-8425","model":"root","next_turn":1,"protocol_version":1,"type":"session"}
+{"turn":1,"type":"thinking"}
+{"text":"They wan","turn":1,"type":"thinking_delta"}
+{"text":"t the pl","turn":1,"type":"thinking_delta"}
+{"text":"ace and ","turn":1,"type":"thinking_delta"}
+{"text":"the cost","turn":1,"type":"thinking_delta"}
+{"text":". n_ctx ","turn":1,"type":"thinking_delta"}
+{"text":"at conte","turn":1,"type":"thinking_delta"}
+{"text":"xt creat","turn":1,"type":"thinking_delta"}
+{"text":"ion; the","turn":1,"type":"thinking_delta"}
+{"text":" table f","turn":1,"type":"thinking_delta"}
+{"text":"or three","turn":1,"type":"thinking_delta"}
+{"text":" windows","turn":1,"type":"thinking_delta"}
+{"text":".","turn":1,"type":"thinking_delta"}
+{"turn":1,"type":"answer_start"}
+{"text":"### Wher","turn":1,"type":"answer_delta"}
+{"text":"e it’s","turn":1,"type":"answer_delta"}
+{"text":" sized\n\n","turn":1,"type":"answer_delta"}
+{"text":"When the","turn":1,"type":"answer_delta"}
+{"text":" context","turn":1,"type":"answer_delta"}
+{"text":" is crea","turn":1,"type":"answer_delta"}
+{"text":"ted. `ll","turn":1,"type":"answer_delta"}
+{"text":"ama_init","turn":1,"type":"answer_delta"}
+{"text":"_from_mo","turn":1,"type":"answer_delta"}
+{"text":"del()` r","turn":1,"type":"answer_delta"}
+{"text":"eads `n_","turn":1,"type":"answer_delta"}
+{"text":"ctx` fro","turn":1,"type":"answer_delta"}
+{"text":"m the co","turn":1,"type":"answer_delta"}
+{"text":"ntext pa","turn":1,"type":"answer_delta"}
+{"text":"rameters","turn":1,"type":"answer_delta"}
+{"text":" and all","turn":1,"type":"answer_delta"}
+{"text":"ocates t","turn":1,"type":"answer_delta"}
+{"text":"he cache","turn":1,"type":"answer_delta"}
+{"text":" for tha","turn":1,"type":"answer_delta"}
+{"text":"t many t","turn":1,"type":"answer_delta"}
+{"text":"okens up","turn":1,"type":"answer_delta"}
+{"text":" front, ","turn":1,"type":"answer_delta"}
+{"text":"for ever","turn":1,"type":"answer_delta"}
+{"text":"y layer.","turn":1,"type":"answer_delta"}
+{"text":" Nothing","turn":1,"type":"answer_delta"}
+{"text":" grows l","turn":1,"type":"answer_delta"}
+{"text":"ater.\n\n#","turn":1,"type":"answer_delta"}
+{"text":"## What ","turn":1,"type":"answer_delta"}
+{"text":"it costs","turn":1,"type":"answer_delta"}
+{"text":" on this","turn":1,"type":"answer_delta"}
+{"text":" Mac\n\n| ","turn":1,"type":"answer_delta"}
+{"text":"Window |","turn":1,"type":"answer_delta"}
+{"text":" Cache, ","turn":1,"type":"answer_delta"}
+{"text":"8-bit | ","turn":1,"type":"answer_delta"}
+{"text":"With wei","turn":1,"type":"answer_delta"}
+{"text":"ghts |\n|","turn":1,"type":"answer_delta"}
+{"text":"---|---:","turn":1,"type":"answer_delta"}
+{"text":"|---:|\n|","turn":1,"type":"answer_delta"}
+{"text":" 8K | 0.","turn":1,"type":"answer_delta"}
+{"text":"2 GB | 1","turn":1,"type":"answer_delta"}
+{"text":"2.3 GB |","turn":1,"type":"answer_delta"}
+{"text":"\n| 32K |","turn":1,"type":"answer_delta"}
+{"text":" 0.6 GB ","turn":1,"type":"answer_delta"}
+{"text":"| 12.7 G","turn":1,"type":"answer_delta"}
+{"text":"B |\n| 12","turn":1,"type":"answer_delta"}
+{"text":"8K | 2.4","turn":1,"type":"answer_delta"}
+{"text":" GB | 14","turn":1,"type":"answer_delta"}
+{"text":".5 GB |\n","turn":1,"type":"answer_delta"}
+{"text":"\nApogee ","turn":1,"type":"answer_delta"}
+{"text":"picks 32","turn":1,"type":"answer_delta"}
+{"text":"K on thi","turn":1,"type":"answer_delta"}
+{"text":"s machin","turn":1,"type":"answer_delta"}
+{"text":"e and ke","turn":1,"type":"answer_delta"}
+{"text":"eps the ","turn":1,"type":"answer_delta"}
+{"text":"cache 8-","turn":1,"type":"answer_delta"}
+{"text":"bit. `ap","turn":1,"type":"answer_delta"}
+{"text":"ogee mod","turn":1,"type":"answer_delta"}
+{"text":"els info","turn":1,"type":"answer_delta"}
+{"text":" gpt-oss","turn":1,"type":"answer_delta"}
+{"text":"-20b` pr","turn":1,"type":"answer_delta"}
+{"text":"ints the","turn":1,"type":"answer_delta"}
+{"text":" same ar","turn":1,"type":"answer_delta"}
+{"text":"ithmetic","turn":1,"type":"answer_delta"}
+{"text":".","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"### Where it’s sized\n\nWhen the context is created. `llama_init_from_model()` reads `n_ctx` from the context parameters and allocates the cache for that many tokens up front, for every layer. Nothing grows later.\n\n### What it costs on this Mac\n\n| Window | Cache, 8-bit | With weights |\n|---|---:|---:|\n| 8K | 0.2 GB | 12.3 GB |\n| 32K | 0.6 GB | 12.7 GB |\n| 128K | 2.4 GB | 14.5 GB |\n\nApogee picks 32K on this machine and keeps the cache 8-bit. `apogee models info gpt-oss-20b` prints the same arithmetic.","turn":1,"type":"result"}

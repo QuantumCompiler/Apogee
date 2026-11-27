@@ -1,6 +1,7 @@
 #if DEBUG
 import BusinessJobs
 import Foundation
+import InfrastructureProcess
 
 /// The Tasks place's view-model for its previews, over the recorded documents
 /// (ADR 0004): nothing starts the binary.
@@ -69,6 +70,60 @@ enum TasksPreview {
 
     static func tasks(listing list: String = listed, said: [JobUpdate] = []) -> TasksViewModel {
         TasksViewModel(runner: runner(listing: list), starter: PreviewJobs(said: said), now: { recorded })
+    }
+
+    /// GUI 6g's tasks, recorded from `apogee-dev` on the mock backend over
+    /// a sandbox home (2026-11-08): one with a call its grant let through
+    /// and one refused with nobody present; one stalled after its plan and
+    /// two rounds, then resumed to done; one granted a write and stalled,
+    /// whose resume the config then refused; one halted after round 1 by
+    /// the app's run, then finished from a terminal after round 3; and 56
+    /// more, so the ledger holds 60.
+    static let uses = "task-20261109-021211"
+    static let stalled = "task-20261109-021224"
+    static let stalledGranted = "task-20261109-021236"
+    static let halted = "task-20261109-021308"
+
+    /// The clock at those recordings.
+    static let swept = Date(timeIntervalSince1970: 1_794_190_400)
+
+    /// Tasks over 6g's recordings: the newest 50 of 60, every one on Show
+    /// all, and each recorded task's `task status`.
+    static func sweep(said: [JobUpdate] = []) -> TasksViewModel {
+        let runner = PreviewRunner(reads: [
+            (["task", "list"], TasksDocuments.listNewest50),
+            (["task", "list", "--all"], TasksDocuments.listAll),
+            (["task", "status", uses], TasksDocuments.statusUses),
+            (["task", "status", stalled], TasksDocuments.statusStalled),
+            (["task", "status", stalledGranted], TasksDocuments.statusStalledGranted),
+            (["task", "status", halted], TasksDocuments.statusHaltedDone),
+        ])
+        return TasksViewModel(runner: runner, starter: PreviewJobs(said: said), now: { swept })
+    }
+
+    /// The first `count` lines of a recorded stream -- all of it when
+    /// `nil` -- decoded as the jobs core decodes a streaming job's stdout.
+    static func stream(_ text: String, prefix count: Int? = nil) -> [JobUpdate] {
+        let lines = text.split(separator: "\n").map(String.init)
+        return lines.prefix(count ?? lines.count).map { .event(JobEvent.decode(line: $0)) }
+    }
+
+    /// A run that ended `status` with `stderr` as its tail: a refusal, in
+    /// machine mode, writes nothing else.
+    static func ended(_ status: Int32, stderr: String = "") -> JobUpdate {
+        var tail = BoundedTail()
+        tail.append(Data(stderr.utf8))
+        return .ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: tail, interrupted: false))
+    }
+
+    /// The new-task sheet filled as the refused run was recorded -- "Allow
+    /// it to write and edit files" ticked, `--tools --allow write_file
+    /// --allow edit_file`, against a config whose `permissions.write_file`
+    /// is `deny` -- and started.
+    static func startRefused(_ tasks: TasksViewModel) {
+        tasks.form.goal = "x"
+        tasks.form.allowWrites = true
+        tasks.start()
     }
 
     /// The new-task sheet filled as the recorded run was typed (`task run

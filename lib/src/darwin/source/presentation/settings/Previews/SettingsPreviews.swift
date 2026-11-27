@@ -1,4 +1,5 @@
 #if DEBUG
+import BusinessJobs
 import BusinessReads
 import DataPreferences
 import Foundation
@@ -24,6 +25,24 @@ enum SettingsPreview {
             commands: [(["config", "get", "permissions"], permissions), (["chats", "recall"], SettingsDocuments.chatsRecall)],
             refused: [["config", "get"]])
     }
+
+    /// The panes' reads on a fresh config, as the binary answers an unset
+    /// key (GUI 6c; the build tree's `apogee` 0.2.0, 07e26c6d, over a
+    /// sandbox `APOGEE_HOME` after `config init`, 2026-11-08): `config get
+    /// tools.search.url` prints an empty line and exits 0.
+    static let unsetAddressRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], SettingsDocuments.modelsList),
+            (["auth", "list"], authList),
+            (["providers", "scan"], providersScan),
+            (["check"], check),
+        ],
+        commands: [
+            (["config", "get", "permissions"], permissions),
+            (["config", "get", "tools.search.url"], "\n"),
+            (["chats", "recall"], SettingsDocuments.chatsRecall),
+        ],
+        refused: [["config", "get"]])
 
     /// The branch's binary over GUI 4k's sandbox: a claude-cli, an anthropic
     /// and an openai entry -- the anthropic one consenting to both of its
@@ -93,6 +112,56 @@ enum SettingsPreview {
             once: ["providers", "register", "codex"])
     }
 
+    /// GUI 5a's sandbox, recorded from the branch's `apogee-dev` on a Mac with
+    /// Xcode 27.1 (the home written `/Users/someone`): `check` with its
+    /// Xcode section, `mcp presets` with the `xcode` row, `acp
+    /// registration`'s fields, and `config get mcp_servers.xcode` --
+    /// `registered`, its command; else the CLI's `no such config key`.
+    /// `check` and `presets` stand for the other recordings: Xcode absent
+    /// (a stub `xcode-select` that fails), `xcrun` off `PATH`.
+    static func xcodeRunner(
+        registered: Bool = false, check: String? = nil, presets: String = SettingsDocuments.xcodeMCPPresets
+    ) -> PreviewRunner {
+        PreviewRunner(
+            reads: [
+                (["models", "list"], SettingsDocuments.modelsList),
+                (["auth", "list"], authList),
+                (["providers", "scan"], providersScan),
+                (["check"], check ?? (registered ? SettingsDocuments.xcodeCheckRegistered : SettingsDocuments.xcodeCheck)),
+                (["mcp", "presets"], presets),
+                (["acp", "registration"], SettingsDocuments.xcodeACPRegistration),
+            ],
+            commands: [
+                (["config", "get", "permissions"], permissions),
+                (["mcp", "create", "xcode", "--from", "xcode"], SettingsDocuments.xcodeMCPCreate),
+            ] + (registered ? [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGet)] : []),
+            refused: [["config", "get"]],
+            refusals: registered ? [] : [(["config", "get", "mcp_servers.xcode"], SettingsDocuments.xcodeConfigGetNone)])
+    }
+
+    /// A binary before the CLI's 56d, in its recordings: `check` with no
+    /// Xcode section (GUI 4f's), two presets and no `xcode` (2e's), and `acp
+    /// registration` refused in its parser's words (the build tree's release
+    /// binary of 2026-10-26, GUI 5a's).
+    static let xcodeOlderRunner = PreviewRunner(
+        reads: [
+            (["models", "list"], SettingsDocuments.modelsList),
+            (["auth", "list"], authList),
+            (["providers", "scan"], providersScan),
+            (["check"], SettingsDocuments.checkCaptionsSkipped),
+            (["mcp", "presets"], SettingsDocuments.mcpPresetsOlder),
+        ],
+        commands: [(["config", "get", "permissions"], permissions)],
+        refused: [["config", "get"]],
+        readRefusals: [(["acp", "registration"], SettingsDocuments.xcodeACPRegistrationOlder)])
+
+    /// The Xcode pane's home as Register changes it: unregistered until `mcp
+    /// create` is asked, registered -- `check`'s bridge row naming it -- from
+    /// then on.
+    static func xcodeRegistering() -> PreviewChanging {
+        PreviewChanging(xcodeRunner(), after: xcodeRunner(registered: true), once: ["mcp", "create"])
+    }
+
     /// Reads the panes, then registers `provider` as its row's Register…
     /// does, once the person said yes.
     static func register(_ model: SettingsViewModel, _ provider: String) async {
@@ -133,15 +202,16 @@ enum SettingsPreview {
     /// `known` when the binary has said what it can do (its vocabulary read
     /// at launch, GUI 4k), `childPath` what the app's resolver answers,
     /// `override` the binary the person pointed the app at, `check` the
-    /// document `check` answers with, and `runner` the binary's answers.
+    /// document `check` answers with, `runner` the binary's answers, and
+    /// `jobs` how a fix runs -- still running, unless given another.
     static func settings(
         _ pane: SettingsViewModel.Pane = .general, track52: Bool = false, known: Bool = true,
         childPath: ShellPath.Resolution = shellPath, override: String? = nil, check: String = check,
-        runner: (any CommandRunning)? = nil, vocabulary: String? = nil
+        runner: (any CommandRunning)? = nil, vocabulary: String? = nil, jobs: any JobStarting = PreviewJobs()
     ) -> SettingsViewModel {
         let preferences = Preferences(store: MemoryStore())
         preferences.binaryOverride = override.map { URL(fileURLWithPath: $0) }
-        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check) as any CommandRunning, starter: PreviewJobs(), preferences: preferences)
+        let model = SettingsViewModel(runner: runner ?? Self.runner(check: check) as any CommandRunning, starter: jobs, preferences: preferences)
         model.pane = pane
         model.hasTrack52 = { track52 }
         model.capabilitiesKnown = { known }

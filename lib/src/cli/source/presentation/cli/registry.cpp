@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "cli/acp_cmd.h"
 #include "cli/agents_cmd.h"
 #include "cli/analyze.h"
 #include "cli/auth_cmd.h"
@@ -24,6 +25,7 @@
 #include "cli/mcp_cmd.h"
 #include "cli/models.h"
 #include "cli/providers_cmd.h"
+#include "cli/quantize_child_cmd.h"
 #include "cli/reset.h"
 #include "cli/review_cmd.h"
 #include "cli/serve_cmd.h"
@@ -81,6 +83,7 @@ void CommandRegistry::bind_all(CLI::App& root, const RootContext& context) {
 
 CommandRegistry default_registry(ShellEntry shell) {
     CommandRegistry registry;
+    registry.add(std::make_unique<AcpCommand>());
     registry.add(std::make_unique<AgentsCommand>());
     registry.add(std::make_unique<AnalyzeCommand>());
     registry.add(std::make_unique<AuthCommand>());
@@ -113,6 +116,8 @@ CommandRegistry default_registry(ShellEntry shell) {
     registry.add(std::make_unique<CompleteProtocolCommand>());
     registry.add(std::make_unique<McpToolsServerCommand>());
     registry.add(std::make_unique<MachineSchemaCommand>());
+    // Hidden too: a quantization run as a child of models quantize (57i).
+    registry.add(std::make_unique<QuantizeChildCommand>());
     registry.add(std::make_unique<TrainCommand>());
     return registry;
 }

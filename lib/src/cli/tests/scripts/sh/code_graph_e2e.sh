@@ -13,6 +13,9 @@
 # parsed relation marked extracted. Last, the attachment code graph (27n): a
 # machine-mode chat attaching the same tree gets one notice and, in its own
 # index, row for row the graph a direct build holds; `chats delete` takes it.
+# And real trees (57t): a Latin-1 file, 200000 nested parentheses around a
+# syntax error and a 500 KB nested Rust use tree each build, report, update
+# and attach.
 #
 # POSIX only, like the other shell checks.
 set -eu
@@ -205,6 +208,44 @@ grep -q '"text":"attached src: ' "$WORK_DIR/options.jsonl" || fail "no attach li
 if grep -q '"text":"graph: ' "$WORK_DIR/options.jsonl"; then
     fail "graph off said a graph: $(cat "$WORK_DIR/options.jsonl")"
 fi
+
+# --- real trees (57t) -------------------------------------------------------------
+# The second sweep's probes: a Latin-1 file failed the whole build at the
+# facts' dump; 200000 nested parentheses around a syntax error crashed the
+# parser (SIGSEGV); a Rust use tree nested 100000 deep (500 KB) ran for
+# minutes. Each now builds, the first named as mended.
+mkdir -p "$SRC_ROOT/real"
+python3 - "$SRC_ROOT/real" <<'PY' || fail "could not write the real tree"
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+(root / "m.py").write_bytes(b"def caf\xe9_atlas():\n    return 1\n")
+(root / "lib.py").write_bytes(b"def helper():\n    return 2\n")
+depth = 200000
+(root / "d.py").write_bytes(b"x = " + b"(" * depth + b"1 +" + b")" * depth + b"\n")
+nested = 100000
+(root / "lib.rs").write_bytes(b"use a::" + b"{b::" * nested + b"c" + b"}" * nested + b";\n")
+PY
+"$APOGEE_BIN" graph build --source "$SRC_ROOT/real" --graph real </dev/null >"$WORK_DIR/real.txt" 2>"$WORK_DIR/real.err" || fail "a real tree failed the build: $(cat "$WORK_DIR/real.txt" "$WORK_DIR/real.err")"
+if grep -q "json.exception" "$WORK_DIR/real.txt" "$WORK_DIR/real.err"; then
+    fail "a JSON exception reached the user: $(cat "$WORK_DIR/real.txt" "$WORK_DIR/real.err")"
+fi
+grep -q "Files used:       4 (python 3, rust 1)" "$WORK_DIR/real.txt" || fail "the real tree's files were not all used: $(cat "$WORK_DIR/real.txt")"
+grep -q "real/m.py: not UTF-8 -- 1 byte(s) shown as U+FFFD" "$WORK_DIR/real.txt" || fail "the Latin-1 file was not named: $(cat "$WORK_DIR/real.txt")"
+"$APOGEE_BIN" graph report --graph real </dev/null >"$WORK_DIR/real-report.md" 2>&1 || fail "graph report on the real tree: $(cat "$WORK_DIR/real-report.md")"
+grep -q "Graph report: real" "$WORK_DIR/real-report.md" || fail "no report: $(cat "$WORK_DIR/real-report.md")"
+"$APOGEE_BIN" graph update real </dev/null >"$WORK_DIR/real-update.txt" 2>&1 || fail "graph update over the real tree: $(cat "$WORK_DIR/real-update.txt")"
+grep -q "0 parsed, 4 unchanged" "$WORK_DIR/real-update.txt" || fail "an unchanged mended file was parsed again: $(cat "$WORK_DIR/real-update.txt")"
+# A chat attaching the folder gets its graph, the file named -- never a
+# Failed graph carrying the exception.
+(cd "$SRC_ROOT" && printf '{"type":"attach","path":"real"}\n{"type":"user","text":"hello"}\n' |
+    "$APOGEE_BIN" chat -m plain --output-format stream-json) >"$WORK_DIR/real.jsonl" 2>"$WORK_DIR/real-attach.err" || fail "attach the real tree: $(cat "$WORK_DIR/real-attach.err")"
+grep -q '"text":"graph: [0-9]* nodes, [0-9]* edges (supported: python 3, rust 1; skipped: none); m.py: not UTF-8 -- 1 byte(s) shown as U+FFFD"' "$WORK_DIR/real.jsonl" || fail "the attach built no graph: $(cat "$WORK_DIR/real.jsonl")"
+if grep -q "graph: not built\|json.exception" "$WORK_DIR/real.jsonl"; then
+    fail "the attach failed its graph: $(cat "$WORK_DIR/real.jsonl")"
+fi
+"$APOGEE_BIN" graph delete real </dev/null >/dev/null 2>&1 || fail "delete real"
 
 # --- delete ----------------------------------------------------------------------
 "$APOGEE_BIN" graph delete code </dev/null >/dev/null 2>&1 || fail "delete"

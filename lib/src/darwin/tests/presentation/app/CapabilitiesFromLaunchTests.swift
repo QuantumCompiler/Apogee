@@ -51,6 +51,7 @@ private final class NeverChat: ChatSession, @unchecked Sendable {
     func cancel() async throws {}
     func close() async {}
     func stop(grace: Duration) async {}
+    func terminateNow() async {}
 }
 
 /// Answers `__machine-schema` with a recorded vocabulary -- or refuses it, as

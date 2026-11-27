@@ -137,7 +137,7 @@ struct StoreDeleteTests {
             outcome: .failed(
                 exit: ChildExit(reason: .exited, status: 1),
                 stderrTail: tail("apogee models: no backend or stored weights named '\(Self.gemmaPath)'")))
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         #expect(runner.calls.contains("run models delete \(Self.gemmaQ4) --yes"))
         #expect(said == ["Deleted \(Self.gemmaQ4)"])
         let kept = try #require(store.narration, "the CLI's words, kept after the delete")
@@ -151,10 +151,9 @@ struct StoreDeleteTests {
         // With its backends: the removal, as the CLI said it.
         let llama = try #require(store.sets.first { $0.handle == Self.llamaQ4 })
         await store.askToDelete(llama)
-        store.andBackends = true
         runner.reading(["models", "list"], recorded("delete-list-after-removed"))
         runner.reading(["models", "list", "--all"], recorded("delete-list-all-after-removed"))
-        await store.confirm()
+        try await store.confirm(#require(store.pending), andBackends: true)
         #expect(runner.calls.contains("run models delete \(Self.llamaQ4) --yes --and-backends"))
         let removed = try #require(store.narration)
         #expect(removed.title == "Deleted \(Self.llamaQ4)")
@@ -166,9 +165,31 @@ struct StoreDeleteTests {
         // Nothing pointed in: the toast alone.
         let f16 = try #require(store.sets.first { $0.handle == Self.llamaF16 })
         await store.askToDelete(f16)
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         #expect(runner.calls.contains("run models delete \(Self.llamaF16) --yes"))
         #expect(store.narration == nil, "it said no more than what it removed")
         #expect(said.last == "Deleted \(Self.llamaF16)")
+    }
+
+    @Test("Delete, and Delete it and the backends that run from it, in the dialog's order: the question cleared as the dialog closes, then its answer handed in, the button's choice with it (GUI M20)")
+    func deletesInTheDialogsOrder() async throws {
+        let (store, runner) = await store()
+        var said: [String] = []
+        store.say = { said.append($0) }
+        let gemma = try #require(store.sets.first { $0.handle == Self.gemmaQ4 })
+        await store.askToDelete(gemma)
+        let kept = try #require(store.pending, "the dialog is built from the question")
+        store.dismissPending()
+        await store.confirm(kept, andBackends: false)
+        #expect(runner.calls.contains("run models delete \(Self.gemmaQ4) --yes"))
+        #expect(said.last == "Deleted \(Self.gemmaQ4)")
+        let llama = try #require(store.sets.first { $0.handle == Self.llamaQ4 })
+        await store.askToDelete(llama)
+        let removed = try #require(store.pending)
+        #expect(store.offersAndBackends, "its plan names a backend")
+        store.dismissPending()
+        await store.confirm(removed, andBackends: true)
+        #expect(runner.calls.contains("run models delete \(Self.llamaQ4) --yes --and-backends"))
+        #expect(said.last == "Deleted \(Self.llamaQ4)")
     }
 }

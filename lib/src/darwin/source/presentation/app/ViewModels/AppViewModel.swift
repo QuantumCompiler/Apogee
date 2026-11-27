@@ -1,6 +1,7 @@
 import BusinessJobs
 import BusinessReads
 import BusinessSession
+import DataDiscovery
 import DataPreferences
 import Foundation
 import InfrastructureProcess
@@ -31,8 +32,17 @@ import PresentationVoice
 @MainActor
 @Observable
 final class AppViewModel {
-    let title = "Apogee"
+    /// The CLI's install channel this build drives (GUI M18): the bundle's
+    /// `ApogeeChannel`, read here once and handed down -- nothing below the
+    /// composition root reads a build setting (ADR 0001).
+    let channel: InstallChannel
+    /// The window's name: "Apogee Dev" on the dev channel, so a development
+    /// build is never taken for the installed app.
+    let title: String
     let versionLine: String
+    /// Where every session is opened: the client on the build's channel,
+    /// unless a test hands in its own.
+    let starter: any ChatStarting
     let shell: ShellViewModel
     let sessions: SessionLibraryViewModel
     let models: ModelsViewModel
@@ -62,6 +72,8 @@ final class AppViewModel {
     /// as their supervisors list them: what the monitor shows, and what quit
     /// stops (4c).
     let children: ChildRegistry
+    /// The place changes, applied one after another (GUI 6b).
+    let placeChanges: PlaceChanges
 
     /// The composition. `children` is where every job and session the app
     /// starts is listed; `home` holds the media places' folders. A test hands
@@ -72,16 +84,23 @@ final class AppViewModel {
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         let version = (info?["CFBundleShortVersionString"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        // Only the release build (scripts/build.sh) stamps the version; a
-        // build from Xcode leaves it empty.
+        // Only scripts/build.sh stamps the version; a build from Xcode leaves
+        // it empty.
         versionLine = version.map { "Version \($0)" } ?? "Development build"
+        let channel = InstallChannel(bundleValue: info?["ApogeeChannel"])
+        self.channel = channel
+        title = channel == .dev ? "Apogee Dev" : "Apogee"
+        let starter =
+            starter
+            ?? ApogeeClient(
+                identity: ClientIdentity(version: version ?? "development"), children: children, channel: channel)
+        self.starter = starter
         // One starter for every place, so every run any of them starts is
         // listed with the session's child, in one registry.
         let jobs = jobs ?? JobStarter(registry: children)
         let shell = ShellViewModel(preferences: preferences)
         let sessions = SessionLibraryViewModel(
-            starter: starter ?? ApogeeClient(identity: ClientIdentity(version: version ?? "development"), children: children),
-            runner: runner ?? ReadRunner(), preferences: preferences)
+            starter: starter, runner: runner ?? ReadRunner(), preferences: preferences, jobs: jobs)
         let models = ModelsViewModel(runner: runner ?? ReadRunner())
         let store = StoreViewModel(runner: runner ?? ReadRunner())
         let downloads = DownloadsViewModel(starter: jobs)
@@ -168,13 +187,21 @@ final class AppViewModel {
         voice.say = { [weak shell] text in shell?.say(text) }
         voice.streams = { [weak sessions] in sessions?.streamsJobs ?? false }
         // One install into the one environment at a time: the registry says
-        // whether any place -- or Settings' bootstrap -- runs one now (4f).
-        let installElsewhere: @MainActor () -> Bool = { AppViewModel.installing(in: children) }
+        // whether any place -- or Settings' bootstrap -- runs one now (4f),
+        // asked when an install, a rebuild or the bootstrap starts (6c); and
+        // whether a run uses the environment's Python, which a rebuild waits
+        // for (6c).
+        let installElsewhere: @MainActor () -> String? = { AppViewModel.installing(in: children) }
+        let usingEnvironment: @MainActor () -> String? = { AppViewModel.usingEnvironment(in: children) }
         video.installElsewhere = installElsewhere
         compose.installElsewhere = installElsewhere
         voice.installElsewhere = installElsewhere
+        video.usingEnvironment = usingEnvironment
+        compose.usingEnvironment = usingEnvironment
+        voice.usingEnvironment = usingEnvironment
         let settings = SettingsViewModel(runner: runner ?? ReadRunner(), starter: jobs, preferences: preferences)
         settings.say = { [weak shell] text in shell?.say(text) }
+        settings.installElsewhere = installElsewhere
         settings.hasTrack52 = { [weak sessions] in sessions?.hasTrack52 ?? false }
         // Whether what recall holds is asked as its listing (the CLI's M31):
         // the vocabulary read at launch says (GUI M15).
@@ -209,9 +236,13 @@ final class AppViewModel {
         }
         suites.sessionSwitchable = { [weak sessions] in sessions?.canSwitchSuite ?? false }
         // Sessions in view or not: the library keeps its one child to the
-        // session on screen. A place coming into view reads again.
+        // session on screen. A place coming into view reads again. Each change
+        // is applied once the one before it has been (GUI 6b): one made while
+        // an earlier one waits on the binary's re-ask never runs ahead of it,
+        // so the last place chosen is the one in force.
+        let placeChanges = PlaceChanges()
         shell.routeChanged = { [weak sessions, weak models, weak store, weak tasks, weak suites, weak graph, weak video, weak compose, weak voice, weak records, weak collections, weak training, weak agents, weak symphonies, weak mcp, weak review] destination in
-            Task {
+            placeChanges.apply {
                 // A binary changed under the app is asked again before the
                 // place it opens reads or runs anything (GUI 4k).
                 await sessions?.checkBinary()
@@ -263,18 +294,49 @@ final class AppViewModel {
         self.voice = voice
         self.settings = settings
         self.children = children
+        self.placeChanges = placeChanges
         termination = Termination(
             pending: { [weak sessions] in sessions?.needsShutdown ?? false },
             shutDown: { [weak sessions] in await sessions?.quit() ?? ShutdownReport(ended: true, deleteFailure: nil) },
             jobsRunning: { children.children(.job).count },
             stopJobs: { await children.stop(.job, grace: Termination.jobGrace) })
+        // A binary the library adopts after launch -- Try again's -- is
+        // handed to every place as the launch hands one (GUI 6b).
+        sessions.binaryAdopted = { [weak self] _ in await self?.connectPlaces() }
     }
 
-    /// Whether `registry` holds a run that installs into Apogee's Python
-    /// environment: a `train setup` -- a media place's consented install,
-    /// one typed in the console -- or the bootstrap, which runs them.
-    static func installing(in registry: ChildRegistry) -> Bool {
-        registry.children(.job).contains { $0.label.hasPrefix("apogee train setup") || $0.label.hasPrefix("apogee bootstrap") }
+    /// The run in `registry` that installs into Apogee's Python environment,
+    /// as the registry labels it (`apogee train setup`), or `nil` when none
+    /// does: a `train setup` -- a media place's consented install or
+    /// rebuild, one typed in the console -- or the bootstrap, which runs
+    /// them. What an install, a rebuild and Settings' bootstrap ask when
+    /// they start (4f, 6c).
+    static func installing(in registry: ChildRegistry) -> String? {
+        first(of: installs, in: registry)
+    }
+
+    /// The run in `registry` that uses the environment's Python, as the
+    /// registry labels it, or `nil` when none does: a clip, a composition, a
+    /// speech or anything of training -- what a rebuild, which moves the
+    /// environment aside, waits for (GUI 6c). A plain install adds to the
+    /// environment and does not wait for them.
+    static func usingEnvironment(in registry: ChildRegistry) -> String? {
+        first(of: environmentRuns, in: registry)
+    }
+
+    /// The commands that install into the environment.
+    static let installs = ["apogee train setup", "apogee bootstrap"]
+
+    /// The commands that run on the environment's Python.
+    static let environmentRuns = ["apogee video generate", "apogee video compose", "apogee voice say", "apogee train"]
+
+    /// The label of the first job in `registry` running one of `commands`
+    /// -- the command itself, or it and more words -- in the order they
+    /// started.
+    private static func first(of commands: [String], in registry: ChildRegistry) -> String? {
+        registry.children(.job).first { child in
+            commands.contains { child.label == $0 || child.label.hasPrefix($0 + " ") }
+        }?.label
     }
 
     /// The application's own composition. The person's login shell is asked
@@ -293,6 +355,13 @@ final class AppViewModel {
     /// is handed the binary.
     func start() async {
         await sessions.start(inView: shell.route == .sessions)
+        await connectPlaces()
+    }
+
+    /// Every place handed the binary the library holds, each reading what it
+    /// reads on it: at launch, and again whenever the library adopts one
+    /// later -- the one a session's Try again found (GUI 6b).
+    func connectPlaces() async {
         await models.connect(binary: sessions.binaryURL)
         await store.connect(binary: sessions.binaryURL)
         downloads.connect(binary: sessions.binaryURL)

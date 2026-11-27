@@ -1,0 +1,1 @@
+{"fields":[{"field":"chat","value":"plain"},{"field":"embedding","value":"plain   (via models.default)"},{"field":"extraction","value":"plain   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"(unset -- the chat's own backend)"}]}

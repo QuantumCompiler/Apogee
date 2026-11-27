@@ -1,6 +1,12 @@
+import BusinessReads
+import BusinessSession
+import DataDiscovery
 import DataPreferences
+import DataProtocol
+import Foundation
 import PresentationSession
 import PresentationSessions
+import Synchronization
 import Testing
 
 @testable import PresentationApp
@@ -53,6 +59,8 @@ struct TerminationTests {
     final class Heard {
         var replies: [Bool] = []
         var lines: [String] = []
+        /// What the session's child had been sent when the reply was given.
+        var signalledAtReply: [String]?
     }
 
     func termination(pending: Bool, _ held: HeldShutdown, _ heard: Heard) -> Termination {
@@ -98,10 +106,43 @@ struct TerminationTests {
         held.finish(ShutdownReport(ended: false, deleteFailure: "apogee chats: no chat named 'p9' (exited with status 1)"))
         #expect(await eventually { heard.replies == [true] })
         #expect(heard.lines.dropFirst() == [
-            "quit: the session's child did not end within 5 s; given up so the app can quit -- its stop still escalates",
+            "quit: the session's child did not end within 5 s; sent it SIGTERM, and the app quits without waiting for it",
             "quit: the private session was not deleted: apogee chats: no chat named 'p9' (exited with status 1)",
             "quit: the sessions have ended; quitting",
         ])
+    }
+
+    @Test("6a: a private session deleted while its given-up child was still ending is said: an older apogee may write it back")
+    func deletedWhileEndingIsSaid() async {
+        let held = HeldShutdown()
+        let heard = Heard()
+        let termination = termination(pending: true, held, heard)
+        #expect(termination.ask { heard.replies.append($0) } == .later)
+        #expect(await eventually { held.asked == 1 })
+        held.finish(ShutdownReport(ended: false, deleteFailure: nil, deletedWhileEnding: true))
+        #expect(await eventually { heard.replies == [true] })
+        #expect(heard.lines.dropFirst() == [
+            "quit: the session's child did not end within 5 s; sent it SIGTERM, and the app quits without waiting for it",
+            "quit: the private session was deleted while its child was ending; an older apogee may write it back",
+            "quit: the sessions have ended; quitting",
+        ])
+    }
+
+    @Test("6a: over the session library, a child that ignores cancel and end of input -- no jobs, not private -- is sent its SIGTERM before the app is replied to")
+    func signalledBeforeTheReply() async {
+        let chat = StubbornChat()
+        let library = SessionLibraryViewModel(
+            starter: OneChat(chat: chat), runner: EmptyReads(), preferences: Preferences(store: MemoryStore()),
+            clock: GraceOverClock())
+        await library.start(inView: true)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        let heard = Heard()
+        let termination = Termination(pending: { library.needsShutdown }, shutDown: { await library.quit() })
+        termination.log = { heard.lines.append($0) }
+        #expect(termination.ask { _ in heard.signalledAtReply = chat.signals } == .later)
+        #expect(await eventually { heard.signalledAtReply != nil })
+        #expect(heard.signalledAtReply?.contains("terminate") == true, "the SIGTERM went before the reply")
+        #expect(heard.lines.contains("quit: the session's child did not end within 5 s; sent it SIGTERM, and the app quits without waiting for it"))
     }
 
     @Test("asked again while it waits: one shutdown, one reply")
@@ -195,6 +236,89 @@ struct TerminationTests {
     func graceWords() {
         #expect(Termination.words(SessionViewModel.grace) == "5 s")
         #expect(Termination.words(.milliseconds(1500)) == "1.5 s")
+    }
+}
+
+/// A chat whose child ignores cancel and end of input: its stop ends it only
+/// once `terminateNow()` has sent the SIGTERM. Records each step it was
+/// asked for, in order.
+final class StubbornChat: ChatSession, @unchecked Sendable {
+    let events: AsyncStream<SessionEvent>
+    private let continuation: AsyncStream<SessionEvent>.Continuation
+    private let asked = Mutex<[String]>([])
+    private let stopping = Mutex<(terminated: Bool, waiting: CheckedContinuation<Void, Never>?)>((false, nil))
+
+    init() {
+        (events, continuation) = AsyncStream.makeStream(of: SessionEvent.self)
+        continuation.yield(.event(EventDecoder.decode(line: #"{"type":"session","protocol_version":1,"model":"local","next_turn":1}"#)))
+    }
+
+    var signals: [String] { asked.withLock { $0 } }
+
+    func send(user text: String) async throws -> Int { 1 }
+    func answer(_ text: String) async throws {}
+    func attach(path: String, graph: String?) async throws {}
+    func detach(path: String) async throws {}
+    func set(_ settings: RunSettings) async throws {}
+    func compact() async throws {}
+    func cancel() async throws {}
+    func close() async {}
+
+    func stop(grace: Duration) async {
+        asked.withLock { $0.append("stop") }
+        await withCheckedContinuation { (waiting: CheckedContinuation<Void, Never>) in
+            let now = stopping.withLock { state in
+                if state.terminated { return true }
+                state.waiting = waiting
+                return false
+            }
+            if now { waiting.resume() }
+        }
+        continuation.finish()
+    }
+
+    func terminateNow() async {
+        asked.withLock { $0.append("terminate") }
+        stopping.withLock { state in
+            state.terminated = true
+            defer { state.waiting = nil }
+            return state.waiting
+        }?.resume()
+    }
+}
+
+/// Hands out the one chat.
+struct OneChat: ChatStarting {
+    let chat: StubbornChat
+
+    func locateBinary() async -> DiscoveryOutcome {
+        .found(
+            FoundBinary(
+                url: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee"), source: .release, version: "0.2.0",
+                versionLine: "apogee 0.2.0 (0bec6e7c, 2026-10-26, macos-arm64)"),
+            skipped: [])
+    }
+
+    func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession { chat }
+}
+
+/// An empty list for every read; every command done, printing nothing.
+struct EmptyReads: CommandRunning {
+    func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        .document(ReadDocument(text: #"{"object":"list","data":[]}"#)!)
+    }
+
+    func command(binary: URL, _ arguments: [String]) async -> CommandOutcome { .done(stdout: "") }
+}
+
+/// A clock on which every wait is already over: the quit's grace passes at
+/// once, as it would on a child that holds out the whole five seconds.
+struct GraceOverClock: Clock {
+    var now: ContinuousClock.Instant { .now }
+    var minimumResolution: Duration { .zero }
+
+    func sleep(until deadline: ContinuousClock.Instant, tolerance: Duration?) async throws {
+        await Task.yield()
     }
 }
 

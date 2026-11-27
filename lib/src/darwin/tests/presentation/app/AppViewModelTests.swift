@@ -1,3 +1,5 @@
+import BusinessSession
+import DataDiscovery
 import DataPreferences
 import PresentationShell
 import Testing
@@ -12,6 +14,28 @@ struct AppViewModelTests {
         let model = AppViewModel(info: ["CFBundleShortVersionString": "0.2.0"], preferences: Preferences(store: MemoryStore()))
         #expect(model.title == "Apogee")
         #expect(model.versionLine == "Version 0.2.0")
+    }
+
+    @Test("a dev-channel bundle is Apogee Dev, and every session it opens drives the dev channel (GUI M18)")
+    func devChannel() throws {
+        let model = AppViewModel(
+            info: ["ApogeeChannel": "dev", "CFBundleShortVersionString": "0.2.1"],
+            preferences: Preferences(store: MemoryStore()))
+        #expect(model.channel == .dev)
+        #expect(model.title == "Apogee Dev")
+        let client = try #require(model.starter as? ApogeeClient)
+        #expect(client.channel == .dev)
+    }
+
+    @Test("a release bundle, or one naming no channel, is Apogee on the release channel, as before channels")
+    func releaseChannel() throws {
+        for info: [String: Any]? in [["ApogeeChannel": "release"], nil, ["ApogeeChannel": "test"]] {
+            let model = AppViewModel(info: info, preferences: Preferences(store: MemoryStore()))
+            #expect(model.channel == .release)
+            #expect(model.title == "Apogee")
+            let client = try #require(model.starter as? ApogeeClient)
+            #expect(client.channel == .release)
+        }
     }
 
     @Test("a build with no version stamped says it is a development build")

@@ -150,6 +150,10 @@ public:
     /// said when it starts (26n). No new event type.
     void on_side_call(const agentloop::SideCall& call) override;
     void on_tool_status(std::string_view detail) override;
+    /// `tool_call` (56a): one call's `id`, `name`, `state` -- `pending`,
+    /// `running`, `done`, `failed` -- and its `target` when it names one.
+    /// Beside `tool_status`, which is unchanged.
+    void on_tool_call(const agent::ToolCallReport& report) override;
     /// A `notice` event: `{"type":"notice","text":...}`.
     void on_notice(std::string_view text) override;
     void on_clear_status() override;
@@ -176,6 +180,8 @@ public:
     /// with one `answer` line -- `yes`, `no`, `always`, or `session`. An
     /// outbound tool's target is a host, with `"outbound": true` and the URL
     /// as `detail`; its `always` adds the host to `tools.allowed_hosts`.
+    /// Asked about a call, it names the call: `tool_call_id` (56a), the id of
+    /// the `tool_call` event it belongs to.
     void emit_permission_question(const agent::GateRequest& request);
 
     /// Emits an `error` event. Diagnostics also go to stderr; this is the
@@ -352,6 +358,11 @@ enum class JobFormat : std::uint8_t {
 /// newline.
 void write_document(std::ostream& out, const nlohmann::json& document);
 
+/// The line `write_document` writes, without its newline (54a): what `apogee
+/// mcp serve`'s status reads answer, so a served read and the command's
+/// `--output-format json` cannot differ by a byte.
+[[nodiscard]] std::string document_text(const nlohmann::json& document);
+
 /// One user turn read from a driver over stdin, in machine mode.
 struct DriverMessage {
     enum class Kind : std::uint8_t {
@@ -391,15 +402,17 @@ struct DriverMessage {
     std::string client_version;
     std::string wants;
     /// A `set` line's settings (52d), in the order they apply -- `model`,
-    /// `system`, `think`, `effort`, `temperature` -- each value as text (a
-    /// number as written); and each key it named that is no setting a
-    /// session moves, or whose value is neither a string nor a number.
+    /// `system`, `think`, `effort`, `temperature`, and since 56a
+    /// `permission_mode` -- each value as text (a number as written); and each
+    /// key it named that is no setting a session moves, or whose value is
+    /// neither a string nor a number.
     std::vector<std::pair<std::string, std::string>> settings;
     std::vector<std::string> refused;
 };
 
 /// The run settings a `set` line moves (52d), in the order they apply:
-/// exactly the ones the session's slash commands move.
+/// exactly the ones the session's slash commands move -- since 56a the
+/// permission mode among them, `/permission-mode`'s.
 [[nodiscard]] std::vector<std::string_view> settable_keys();
 
 /// What a driver's `hello` is recorded as (28d): one line for the

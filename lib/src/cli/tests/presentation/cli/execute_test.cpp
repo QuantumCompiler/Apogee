@@ -654,6 +654,36 @@ TEST_CASE("a driver's play that cannot run ends in an error event, and nothing i
     CHECK(home.sessions().empty());
 }
 
+TEST_CASE("a driver's play cancelled keeps the title settled before it",
+          "[execute][play][machine][title]") {
+    // 57a, finding 5: a `/play` turn's snapshot was taken before the title
+    // asked after the last turn was settled, so a cancel put the chat back
+    // to its bare id. The cancel is read as soon as it is sent, so it
+    // reaches the play before it starts: the title settled, then stopped.
+    const Home home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--suite", "duo", "--output-format", "stream-json"}, &out, &err,
+                     "{\"type\":\"user\",\"text\":\"hi\"}\n"
+                     "{\"type\":\"user\",\"text\":\"/play echo2 hello\"}\n"
+                     "{\"type\":\"cancel\"}\n") == 0);
+    INFO(out << err);
+    std::vector<std::string> finishes;
+    std::istringstream lines{out};
+    for (std::string line; std::getline(lines, line);) {
+        const nlohmann::json event = nlohmann::json::parse(line);
+        if (event.at("type") == "result") {
+            finishes.push_back(event.at("finish_reason").get<std::string>());
+        }
+    }
+    CHECK(finishes == std::vector<std::string>{"stop", "cancelled"});
+    const std::vector<apogee::logger::Session> saved = home.sessions();
+    REQUIRE(saved.size() == 1);
+    // The utility titled it after the first turn; the cancel kept it.
+    CHECK_FALSE(saved.front().title.empty());
+    CHECK(transcript(saved.front()) == std::vector<std::string>{"user: hi", "assistant: ROOT<hi>"});
+}
+
 // --- the turn functions ---------------------------------------------------------------
 
 namespace {
@@ -1197,10 +1227,13 @@ TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no ne
     std::string err;
     REQUIRE(home.run({"execute", "--suite", "orch", "--output-format", "stream-json"}, &out, &err,
                      "{\"type\":\"user\",\"text\":\"go\"}\n") == 0);
-    // `notice` is the suite's admission, said after `session` since M29.
-    const std::set<std::string> known{"session",      "notice",       "thinking",   "tool_status",
-                                      "answer_start", "answer_delta", "answer_end", "result"};
+    // `notice` is the suite's admission, said after `session` since M29; and
+    // since 56a every call is a `tool_call` as it moves, a play's as any.
+    const std::set<std::string> known{"session",      "notice",     "thinking",
+                                      "tool_status",  "tool_call",  "answer_start",
+                                      "answer_delta", "answer_end", "result"};
     std::vector<std::string> statuses;
+    std::vector<std::string> states;
     std::istringstream lines{out};
     for (std::string line; std::getline(lines, line);) {
         const nlohmann::json event = nlohmann::json::parse(line);
@@ -1208,7 +1241,12 @@ TEST_CASE("a driver sees the model's play as ordinary tool-call narration, no ne
         if (event.at("type") == "tool_status") {
             statuses.push_back(event.at("text").get<std::string>());
         }
+        if (event.at("type") == "tool_call") {
+            CHECK(event.at("name") == "play_echo2");
+            states.push_back(event.at("state").get<std::string>());
+        }
     }
+    CHECK(states == std::vector<std::string>{"pending", "running", "done"});
     // The call, the labeled line -- the model's choice and its cost -- and a
     // line for each stage.
     REQUIRE(statuses.size() == 4);
@@ -1467,4 +1505,22 @@ TEST_CASE("a turn's standing context is injected, so the budget counts it, never
     for (const apogee::harness::ChatMessage& message : session.messages) {
         CHECK(message.content.plain_text().find("PERSONA TEXT") == std::string::npos);
     }
+}
+
+TEST_CASE("execute --acp-origin with no --acp-cwd saves the folder it runs in",
+          "[execute][project][sessions]") {
+    // 56c: an ACP session's child is always told both; one run by hand with
+    // the origin alone saves the folder it runs in, as the child sees it.
+    const ProjectHome home;
+    const WorkingDirectory here{home.project};
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"execute", "--attach", "", "--acp-origin", "acp-test"}, &out, &err, "hi\n") ==
+            0);
+    const std::vector<apogee::logger::Session> saved = home.sessions();
+    REQUIRE(saved.size() == 1);
+    CHECK(saved.front().origin == "acp-test");
+    std::error_code ignored;
+    CHECK(saved.front().cwd == std::filesystem::current_path(ignored).string());
+    CHECK_FALSE(saved.front().cwd.empty());
 }

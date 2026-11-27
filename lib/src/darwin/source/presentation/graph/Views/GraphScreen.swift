@@ -102,7 +102,11 @@ public struct GraphScreen: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete the graph", role: .destructive) { Task { await model.confirmDelete() } }
+            // The graph's name is captured where the button is built: the
+            // dialog's closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete the graph", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text(deleteMessage)
@@ -589,6 +593,18 @@ struct NewGraphSheet: View {
     GraphScreen(model: graph, shell: GraphPreview.shell())
         .frame(width: 1100, height: 520)
         .task { await graph.connect(binary: previewBinary) }
+}
+
+#Preview("A node's explain refused, in the CLI's words: the canvas kept") {
+    let graph = GraphPreview.graph(GraphPreview.explainRefused)
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1200, height: 720)
+        .task {
+            await graph.connect(binary: previewBinary)
+            graph.question = GraphPreview.question
+            await graph.search()
+            await graph.select("ingest.runner.helper")
+        }
 }
 
 #Preview("An export refused, in the CLI's words") {

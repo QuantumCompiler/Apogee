@@ -31,6 +31,12 @@ import Foundation
 /// - every view a Presentation file declares has a `#Preview` in that file;
 ///   previews and `Previews/` support sit inside `#if DEBUG`, use no
 ///   `PreviewProvider`, and never name a real starter (ADR 0004);
+/// - every `.confirmationDialog` in a Presentation module's `Views/` hands
+///   each `Task` its buttons start the answer the dialog was built with: a
+///   `confirm…` call there takes, first, a name the dialog bound outside the
+///   `Task` (`if let answer = …`, a `case … (let …)`, or the actions'
+///   parameter), and no `Task` there reads the dialog's question back -- the
+///   dialog's closing clears it before the `Task` runs (GUI M20);
 /// - each layer's card, `source/<layer>/CLAUDE.md`, names exactly its modules.
 struct LayeringCheck {
     /// Lowest first: a module may depend on its own layer or any before it.
@@ -83,6 +89,7 @@ struct LayeringCheck {
             if module.layer == "presentation" {
                 found += moduleScheme(of: module)
                 found += previews(of: module)
+                found += dialogs(of: module)
             }
         }
         found += application(byName: byName)
@@ -441,6 +448,273 @@ struct LayeringCheck {
     static func names(_ word: String, in text: String) -> Bool {
         let regex = try! NSRegularExpression(pattern: "\\b" + word + "\\b")
         return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    // MARK: - Confirmation dialogs
+
+    /// Every `.confirmationDialog` in the module's `Views/`, its buttons held
+    /// to the answer it was built with (GUI M20). On a press SwiftUI runs the
+    /// button's action, then closes the dialog -- its `isPresented` binding
+    /// set to false, which clears the question in the view-model -- and only
+    /// then runs a `Task` the action started: a `Task` that reads the
+    /// question back finds nothing, and the confirmed action never runs.
+    private func dialogs(of module: Module) -> [String] {
+        tree.swiftFiles(under: "\(module.path)/Views").flatMap {
+            Self.dialogViolations(in: tree.contents(of: $0) ?? "", file: $0)
+        }
+    }
+
+    /// What breaks the dialog rule in `source`, each named by `file` and
+    /// line: a `confirm…` call in a dialog's `Task` whose first argument is
+    /// not a name the dialog bound outside that `Task`, and a dialog's `Task`
+    /// that reads the dialog's question -- the property its `isPresented`
+    /// reads -- back.
+    static func dialogViolations(in source: String, file: String) -> [String] {
+        let code = Self.code(source)
+        var found: [String] = []
+        for opening in Self.matches(#"\.confirmationDialog\s*\("#, in: code, within: code.startIndex..<code.endIndex) {
+            let open = code.index(before: opening.range.upperBound)
+            guard let close = Self.closing(of: open, in: code) else { continue }
+            let arguments = code.index(after: open)..<close
+            guard let actions = Self.actions(after: close, arguments: arguments, in: code) else { continue }
+            let question = Self.question(in: String(code[arguments]))
+            let parameter = Self.matches(#"^\{\s*\(?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)?\s+in\b"#, in: code, within: actions)
+                .first?.groups[0].map { String(code[$0]) }
+            for task in Self.matches(#"\bTask\s*(?:\([^()]*\))?\s*\{"#, in: code, within: actions) {
+                let brace = code.index(before: task.range.upperBound)
+                guard let end = Self.closing(of: brace, in: code) else { continue }
+                let body = brace..<code.index(after: end)
+                if let question,
+                    let read = Self.matches(#"\."# + NSRegularExpression.escapedPattern(for: question) + #"\b"#, in: code, within: body).first
+                {
+                    found.append(
+                        "\(file):\(Self.line(of: read.range.lowerBound, in: code)): a confirmation dialog's Task reads \(question) back -- the dialog's closing clears it before the Task runs; hand the Task the answer captured where the button is built")
+                    continue
+                }
+                let bound = Set(
+                    Self.matches(#"\blet\s+([A-Za-z_][A-Za-z0-9_]*)"#, in: code, within: actions.lowerBound..<task.range.lowerBound)
+                        .compactMap { $0.groups[0].map { String(code[$0]) } } + (parameter.map { [$0] } ?? []))
+                for call in Self.matches(#"\b(confirm[A-Za-z0-9_]*)\s*\("#, in: code, within: body) {
+                    guard let name = call.groups[0].map({ String(code[$0]) }), name != "confirmationDialog" else { continue }
+                    let paren = code.index(before: call.range.upperBound)
+                    let first = Self.firstArgument(after: paren, in: code)
+                    if !bound.contains(first) {
+                        found.append(
+                            "\(file):\(Self.line(of: call.range.lowerBound, in: code)): \(name)(…) in a confirmation dialog's Task is not handed the answer the dialog showed -- its closing clears the question before the Task runs; capture the answer where the button is built (if let answer = …) and hand it in")
+                    }
+                }
+            }
+        }
+        return found
+    }
+
+    /// The dialog's actions: the trailing closure after its arguments, or an
+    /// `actions:` closure among them.
+    private static func actions(after close: String.Index, arguments: Range<String.Index>, in code: String) -> Range<String.Index>? {
+        var next = code.index(after: close)
+        while next < code.endIndex, code[next].isWhitespace { next = code.index(after: next) }
+        let brace: String.Index
+        if next < code.endIndex, code[next] == "{" {
+            brace = next
+        } else if let labelled = Self.matches(#"\bactions\s*:\s*\{"#, in: code, within: arguments).first {
+            brace = code.index(before: labelled.range.upperBound)
+        } else {
+            return nil
+        }
+        return Self.closing(of: brace, in: code).map { brace..<code.index(after: $0) }
+    }
+
+    /// The question a dialog's `isPresented` reads -- `$model.removing`, or
+    /// a binding whose `get` reads `model.pending` -- by its last name.
+    private static func question(in arguments: String) -> String? {
+        let name = "[A-Za-z_][A-Za-z0-9_]*"
+        for pattern in [
+            #"isPresented\s*:\s*\$(?:"# + name + #"\.)*("# + name + ")",
+            #"isPresented\s*:\s*Binding\s*\(\s*get\s*:\s*\{\s*(?:"# + name + #"\.)*("# + name + ")",
+        ] {
+            if let match = Self.matches(pattern, in: arguments, within: arguments.startIndex..<arguments.endIndex).first,
+                let range = match.groups[0]
+            {
+                return String(arguments[range])
+            }
+        }
+        return nil
+    }
+
+    /// The first argument of the call whose `(` is at `paren`, trimmed: up to
+    /// the first comma outside any bracket, or the call's close.
+    private static func firstArgument(after paren: String.Index, in code: String) -> String {
+        var depth = 0
+        var index = code.index(after: paren)
+        let start = index
+        while index < code.endIndex {
+            let character = code[index]
+            if "([{".contains(character) {
+                depth += 1
+            } else if ")]}".contains(character) {
+                if depth == 0 { break }
+                depth -= 1
+            } else if character == ",", depth == 0 {
+                break
+            }
+            index = code.index(after: index)
+        }
+        return code[start..<index].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The bracket closing the one at `open`, counting that pair alone: once
+    /// strings and comments are blank, the code's brackets balance.
+    private static func closing(of open: String.Index, in code: String) -> String.Index? {
+        let opener = code[open]
+        let closer: Character = opener == "(" ? ")" : opener == "[" ? "]" : "}"
+        var depth = 0
+        var index = open
+        while index < code.endIndex {
+            if code[index] == opener {
+                depth += 1
+            } else if code[index] == closer {
+                depth -= 1
+                if depth == 0 { return index }
+            }
+            index = code.index(after: index)
+        }
+        return nil
+    }
+
+    /// The 1-based line `index` is on.
+    private static func line(of index: String.Index, in code: String) -> Int {
+        code[..<index].reduce(1) { $1.isNewline ? $0 + 1 : $0 }
+    }
+
+    /// A match in the code: its range, and each group's -- `nil` where a
+    /// group took no part.
+    private struct Match {
+        let range: Range<String.Index>
+        let groups: [Range<String.Index>?]
+    }
+
+    /// Each match of `pattern` in `text` within `range`.
+    private static func matches(_ pattern: String, in text: String, within range: Range<String.Index>) -> [Match] {
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
+        return regex.matches(in: text, range: NSRange(range, in: text)).compactMap { match in
+            Range(match.range, in: text).map { whole in
+                Match(range: whole, groups: (1..<match.numberOfRanges).map { Range(match.range(at: $0), in: text) })
+            }
+        }
+    }
+
+    /// `source` with its comments and string literals blank -- each of their
+    /// characters a space, its newlines kept -- so what is left reads as code:
+    /// its brackets balance, a name is a name, and a line is the file's.
+    /// Interpolations are blank with the strings they sit in.
+    static func code(_ source: String) -> String {
+        var masker = Masker(source)
+        masker.code(inInterpolation: false)
+        return String(masker.out)
+    }
+
+    /// The scanner behind `code(_:)`, over the source's characters.
+    private struct Masker {
+        let characters: [Character]
+        var out: [Character]
+        var at = 0
+
+        init(_ source: String) {
+            characters = Array(source)
+            out = characters
+        }
+
+        func starts(_ text: String, at index: Int) -> Bool {
+            var index = index
+            for character in text {
+                guard index < characters.count, characters[index] == character else { return false }
+                index += 1
+            }
+            return true
+        }
+
+        mutating func blank(_ range: Range<Int>) {
+            for index in range where !characters[index].isNewline { out[index] = " " }
+        }
+
+        /// Code from `at` -- in an interpolation, up to the `)` closing it,
+        /// left at `at` -- each comment and string in it blanked.
+        mutating func code(inInterpolation: Bool) {
+            var depth = 0
+            while at < characters.count {
+                let start = at
+                if starts("//", at: at) {
+                    while at < characters.count, !characters[at].isNewline { at += 1 }
+                    blank(start..<at)
+                } else if starts("/*", at: at) {
+                    var nesting = 0
+                    while at < characters.count {
+                        if starts("/*", at: at) {
+                            nesting += 1
+                            at += 2
+                        } else if starts("*/", at: at) {
+                            nesting -= 1
+                            at += 2
+                            if nesting == 0 { break }
+                        } else {
+                            at += 1
+                        }
+                    }
+                    blank(start..<at)
+                } else if let hashes = stringOpening() {
+                    string(hashes: hashes)
+                    blank(start..<at)
+                } else {
+                    if inInterpolation {
+                        if characters[at] == "(" {
+                            depth += 1
+                        } else if characters[at] == ")" {
+                            if depth == 0 { return }
+                            depth -= 1
+                        }
+                    }
+                    at += 1
+                }
+            }
+        }
+
+        /// How many `#`s open the string literal at `at`; `nil` when none
+        /// opens there (`#if`, `#Preview`).
+        func stringOpening() -> Int? {
+            var index = at
+            while index < characters.count, characters[index] == "#" { index += 1 }
+            return index < characters.count && characters[index] == "\"" ? index - at : nil
+        }
+
+        /// A string literal, from its opening at `at` to just past its close:
+        /// single-line or multi-line, raw by `hashes`, its interpolations
+        /// scanned as code so a string inside one does not end it.
+        mutating func string(hashes: Int) {
+            let pounds = String(repeating: "#", count: hashes)
+            at += hashes
+            let multiline = starts("\"\"\"", at: at)
+            let quote = multiline ? "\"\"\"" : "\""
+            at += quote.count
+            let close = quote + pounds
+            let escape = "\\" + pounds
+            while at < characters.count {
+                if starts(close, at: at) {
+                    at += close.count
+                    return
+                }
+                if starts(escape, at: at) {
+                    at += escape.count
+                    if at < characters.count, characters[at] == "(" {
+                        at += 1
+                        code(inInterpolation: true)
+                    }
+                    if at < characters.count { at += 1 }
+                    continue
+                }
+                if !multiline, characters[at].isNewline { return }
+                at += 1
+            }
+        }
     }
 
     // MARK: - Layer cards

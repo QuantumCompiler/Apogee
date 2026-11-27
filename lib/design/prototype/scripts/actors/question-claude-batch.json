@@ -1,0 +1,51 @@
+{
+ "turns": [
+  {
+   "reasoning": "RetryBudget(20) is built inside upload_one(). Whether that is a bug depends on what the budget is meant to protect, and the PR description doesn’t say. Ask.",
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "src/upload/uploader.py",
+      "offset": 60,
+      "limit": 81
+     }
+    }
+   ]
+  },
+  {
+   "text": "The change adds a `RetryBudget` that caps retries at 20 per minute. One thing decides whether it’s right:",
+   "tool_calls": [
+    {
+     "name": "ask_user",
+     "arguments": {
+      "questions": [
+       {
+        "header": "Scope",
+        "question": "Should the retry budget apply per upload, per batch, or per host?",
+        "multi_select": false,
+        "options": [
+         {
+          "label": "Per upload",
+          "description": "Each file gets its own 20 retries."
+         },
+         {
+          "label": "Per batch",
+          "description": "One shared budget for every upload in a batch."
+         },
+         {
+          "label": "Per host",
+          "description": "A budget for each server, shared across uploads."
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "text": "Then it needs one fix: `RetryBudget(20)` is built inside `upload_one()` (`uploader.py:88`), so every upload gets a fresh budget and the cap never bites. Create it once in `upload_batch()` and pass it down.\n\nThe rest looks right: the budget refills every 60 s, and running out raises `RetryBudgetExceeded`, which `upload_batch()` already logs and counts."
+  }
+ ]
+}

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"auth":{"terminal":true},"fs":{"readTextFile":true,"writeTextFile":true},"terminal":true},"clientInfo":{"name":"my-client","title":"My Client","version":"1.0.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"{{cwd}}","mcpServers":[{"name":"filesystem","command":"/path/to/mcp-server","args":["--stdio"],"env":[]}]}}
+{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"{{sessionId}}","prompt":[{"type":"text","text":"Can you analyze this code for potential issues?"},{"type":"resource","resource":{"uri":"file://{{cwd}}/main.py","mimeType":"text/x-python","text":"def process_data(items):\n    for item in items:\n        print(item)"}}]}}
+{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"{{sessionId}}"}}

@@ -99,12 +99,32 @@ endforeach()
 # install side by side instead of overwriting one binary. Everything else in
 # the link is the same for every channel, so switching channels rebuilds one
 # file. Called for `apogee`, and by the install-parity case for its dev build.
+# On Windows it also carries the manifest below, so every channel reads its
+# text as UTF-8.
 function(apogee_channel_executable target channel)
     target_compile_definitions(${target} PRIVATE APOGEE_CHANNEL="${channel}")
     if(channel STREQUAL "release")
         set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee)
     else()
         set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee-${channel})
+    endif()
+    apogee_windows_manifest(${target})
+endfunction()
+
+# The Windows manifest (57j): `apogee.manifest`, built in through `apogee.rc`,
+# names UTF-8 the process's code page, so argv, the environment and every
+# narrow CRT and Win32 call carry a person's text as typed. Compiled once, as
+# an object library of its own -- so the executables' definitions (a quoted
+# APOGEE_CHANNEL, the test binary's paths) never reach the resource compiler
+# -- and linked into each executable a person or a test runs: `apogee`, every
+# channel's, and `apogee_tests` (tests/CMakeLists.txt), so the Windows test
+# runs read text in the code page users get. Elsewhere there is nothing to do.
+if(WIN32)
+    add_library(apogee_windows_manifest OBJECT apogee.rc)
+endif()
+function(apogee_windows_manifest target)
+    if(TARGET apogee_windows_manifest)
+        target_link_libraries(${target} PRIVATE apogee_windows_manifest)
     endif()
 endfunction()
 

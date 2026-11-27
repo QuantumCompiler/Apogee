@@ -46,6 +46,7 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "embedstore/ingest.h"
+#include "embedstore/store.h"
 #include "graph/code_languages.h"
 #include "harness/roles.h"
 #include "httpserver/admin_auth.h"
@@ -58,12 +59,15 @@
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
+#include "operations/acp_registration.h"
 #include "operations/code_exec_server.h"
 #include "operations/graph_sources.h"
+#include "operations/mcp_presets.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
+#include "platform/xcode.h"
 #include "scaffold/agent.h"
 #include "secrets/resolve.h"
 #include "secrets/store.h"
@@ -118,6 +122,23 @@ void check_version(CheckReport& report, const CheckInputs& inputs) {
         std::string{harness::channel_name(inputs.root.channel)});
     add(report, Status::Ok, "Version", "root",
         inputs.home.string() + " -- " + harness::root_reason(inputs.root));
+
+    // The code page Windows reads this process's text in (57j): the manifest
+    // names UTF-8, and a Windows older than 10 version 1903 ignores it. Said,
+    // never refused -- ASCII still works there -- and with no remedy line, the
+    // fix being a newer Windows rather than a command.
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    if (host.starts_with("windows")) {
+        const std::string gap =
+            inputs.encoding_probe ? inputs.encoding_probe() : platform::text_encoding_gap();
+        if (gap.empty()) {
+            add(report, Status::Ok, "Version", "code page",
+                "UTF-8 -- arguments, paths and environment values are read as typed");
+        } else {
+            add(report, Status::Warn, "Version", "code page", gap);
+        }
+    }
 
     if (inputs.executable.empty()) {
         return;
@@ -457,15 +478,46 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         // A key no backend reads does nothing, and said nothing until 55g: a
         // warning naming it, with the key it most likely meant. The entry
         // still loads -- a newer release's key read here is one of these.
+        // A remedy followed leaves a config that loads (57f): a key whose
+        // nearest the entry already writes is a stray twin, removed -- a
+        // rename would write that key twice, which JSONC refuses -- and two
+        // typos of one key are not both renamed into it.
         for (const std::string& key : backend.unknown_keys) {
             const std::string_view meant = harness::nearest_backend_key(key);
+            const std::string said =
+                "unknown key '" + key + "' -- no backend reads it, so it does nothing";
+            if (meant.empty()) {
+                add(report, Status::Warn, "Config", label, said,
+                    "remove it from " + file +
+                        " ('apogee config set-backend --help' lists a backend's fields)");
+                continue;
+            }
+            if (std::ranges::find(backend.written_keys, meant) != backend.written_keys.end()) {
+                add(report, Status::Warn, "Config", label,
+                    said + "; the entry already sets '" + std::string{meant} + "'",
+                    "remove '" + key + "' from " + file);
+                continue;
+            }
+            std::vector<std::string> rivals;
+            for (const std::string& other : backend.unknown_keys) {
+                if (harness::nearest_backend_key(other) == meant) {
+                    rivals.push_back("'" + other + "'");
+                }
+            }
+            std::string remedy = "rename it '" + std::string{meant} + "' in " + file;
+            if (rivals.size() > 1) {
+                std::string named;
+                for (std::size_t i = 0; i < rivals.size(); ++i) {
+                    if (i > 0) {
+                        named += i + 1 == rivals.size() ? " and " : ", ";
+                    }
+                    named += rivals[i];
+                }
+                remedy = "rename one of " + named + " to '" + std::string{meant} + "' in " + file +
+                         ", and remove " + (rivals.size() == 2 ? "the other" : "the others");
+            }
             add(report, Status::Warn, "Config", label,
-                "unknown key '" + key + "' -- no backend reads it, so it does nothing" +
-                    (meant.empty() ? std::string{}
-                                   : "; did you mean '" + std::string{meant} + "'?"),
-                meant.empty() ? "remove it from " + file +
-                                    " ('apogee config set-backend --help' lists a backend's fields)"
-                              : "rename it '" + std::string{meant} + "' in " + file);
+                said + "; did you mean '" + std::string{meant} + "'?", remedy);
         }
 
         if (backend.type == harness::BackendType::LlamaCpp) {
@@ -1415,7 +1467,12 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
     }
 
     if (!config.tools.is_disabled("git")) {
-        if (platform::find_on_path("git").empty()) {
+        if (!inputs.child_processes) {
+            // Not offered at all (57k): installing git would change nothing.
+            add(report, Status::Skipped, "Tools", "git",
+                "not offered -- this build cannot start other programs on Windows yet, so there "
+                "are no git or shell tools");
+        } else if (platform::find_on_path("git").empty()) {
             add(report, Status::Warn, "Tools", "git",
                 "not found on PATH -- the git tools will fail",
                 "install git, or add git to tools.disabled");
@@ -1529,6 +1586,104 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "MCP", label, server.command);
     }
     check_code_exec(report, inputs);
+}
+
+/// The `Xcode` section (56d): the two routes joining Apogee and Xcode, read
+/// from Xcode's own command-line tools and said where a person sets them up.
+/// `xcode` is the Xcode selected; `mcpbridge` whether it serves its tools to
+/// Apogee's agents (Xcode 26.3+, `xcrun --find`) and under which server name
+/// when one is registered; `acp agents` whether it hosts Apogee as its agent
+/// (Xcode 26.6+, by version); `approval`, shown beside either, wall W3.
+///
+/// Every row is Ok or Skipped, never Warn or Fail: Xcode is optional, so a
+/// fresh install with none stays green (M11). Off macOS the section is one
+/// skipped row and nothing is asked. What `check` cannot see -- whether
+/// Xcode lets external agents use its tools -- it says in words; it reads
+/// none of Xcode's settings.
+void check_xcode(CheckReport& report, const CheckInputs& inputs) {
+    const auto row = [&report](Status status, std::string name, std::string detail,
+                               std::string remedy = {}) {
+        add(report, status, "Xcode", std::move(name), std::move(detail), std::move(remedy));
+    };
+    const std::string host =
+        inputs.host_target.empty() ? std::string{platform::host_target()} : inputs.host_target;
+    if (!host.starts_with("macos")) {
+        row(Status::Skipped, "xcode", "Xcode runs on macOS only (this build is " + host + ")");
+        return;
+    }
+    std::string error;
+    const std::optional<platform::XcodeFacts> facts =
+        inputs.xcode_probe ? inputs.xcode_probe(error)
+                           : platform::xcode_facts(
+                                 platform::CapturedLimits{.timeout = platform::kXcodeProbeTimeout,
+                                                          .max_output = std::uint64_t{64} * 1024},
+                                 error);
+    if (!facts.has_value()) {
+        row(Status::Skipped, "xcode", "could not ask Xcode's command-line tools -- " + error);
+        return;
+    }
+    constexpr std::string_view kOnlyNeeded =
+        " -- needed only to use Apogee from Xcode, or Xcode's tools from Apogee";
+    const std::string select = facts->xcode_app.empty()
+                                   ? std::string{}
+                                   : "sudo xcode-select -s " + facts->xcode_app.string();
+    switch (facts->install) {
+        case platform::XcodeInstall::None:
+            row(Status::Skipped, "xcode", "not installed" + std::string{kOnlyNeeded});
+            return;
+        case platform::XcodeInstall::Missing:
+            row(Status::Skipped, "xcode",
+                "the selected developer directory, " + facts->developer_dir.string() +
+                    ", is not there" + std::string{kOnlyNeeded},
+                select);
+            return;
+        case platform::XcodeInstall::CommandLineTools:
+            row(Status::Skipped, "xcode",
+                "only the Command Line Tools are selected (" + facts->developer_dir.string() +
+                    "), not Xcode" + std::string{kOnlyNeeded},
+                select);
+            return;
+        case platform::XcodeInstall::Xcode:
+            break;
+    }
+    const std::string xcode =
+        "Xcode " + facts->version + (facts->build.empty() ? "" : " (" + facts->build + ")");
+    row(Status::Ok, "xcode", xcode + ", " + facts->developer_dir.string());
+
+    const bool bridge = !facts->mcpbridge.empty();
+    if (bridge) {
+        const std::string registered = inputs.config_missing || !inputs.config_error.empty()
+                                           ? std::string{}
+                                           : operations::registered_xcode_server(inputs.config);
+        row(Status::Ok, "mcpbridge",
+            (registered.empty()
+                 ? std::string{"Xcode's tools for Apogee's agents: apogee mcp create xcode --from "
+                               "xcode"}
+                 : "Xcode's tools for Apogee's agents: registered as '" + registered + "'") +
+                " -- they answer while Xcode runs with the project open and its Settings › "
+                "Intelligence › Model Context Protocol › \"Allow External Agents to Use Xcode "
+                "Tools\" is on, which check cannot see");
+    } else {
+        row(Status::Skipped, "mcpbridge",
+            xcode +
+                " has no mcpbridge -- Xcode's tools for Apogee's agents need Xcode 26.3 or "
+                "later");
+    }
+
+    const bool agents = platform::xcode_at_least(facts->version, 26, 6);
+    if (agents) {
+        row(Status::Ok, "acp agents",
+            "Xcode " + facts->version + " hosts ACP agents -- add Apogee in " +
+                std::string{operations::kAcpRegistrationWhere} +
+                ": apogee acp registration prints the fields");
+    } else {
+        row(Status::Skipped, "acp agents",
+            xcode + " hosts no ACP agents -- Apogee as Xcode's agent needs Xcode " +
+                std::string{operations::kAcpXcodeMinimum} + " or later");
+    }
+    if (bridge || agents) {
+        row(Status::Ok, "approval", std::string{operations::kXcodeApproval});
+    }
 }
 
 /// The `Agents` section: the bundled assets present, and every configured
@@ -1650,6 +1805,10 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
             if (trouble.empty()) {
                 add(report, Status::Ok, "Knowledge", label,
                     std::to_string(records) + " record(s), text index ok");
+            } else if (trouble == embedstore::kIndexBeingWritten) {
+                // A check that cannot run is skipped, never passed (57s).
+                add(report, Status::Skipped, "Knowledge", label,
+                    std::to_string(records) + " record(s), text index " + trouble);
             } else {
                 add(report, Status::Fail, "Knowledge", label,
                     std::to_string(records) + " record(s), text index FAILED -- " + trouble);
@@ -2334,7 +2493,7 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoDiffusers:
             add(report, Status::Skipped, "Video", "runtime", "not set up -- " + ready.reason,
-                std::string{video::kVideoSetupRemedy});
+                ready.remedy);
             break;
         default: {
             const std::string found =
@@ -2354,25 +2513,14 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
     }
     // The speech runtime (50a): the same reading of files, its own set.
     const video::VideoReadiness voice = video::probe_voice(host);
-    // An environment on a Python the voice set does not run on can never
-    // take it by installing (M19): said, with the remedy that works.
-    const training::PythonVersion on = training::PythonEnv{host.venv}.status().base_version;
-    const training::PythonRange voice_range =
-        training::python_range(training::RequirementSet::Voice);
     switch (voice.refusal) {
         case video::VideoRefusal::NoEnvironment:
         case video::VideoRefusal::NoTorch:
         case video::VideoRefusal::NoKokoro:
-            if (voice.refusal != video::VideoRefusal::NoEnvironment && on.known() &&
-                !voice_range.contains(on)) {
-                add(report, Status::Skipped, "Video", "voice runtime",
-                    "not set up -- the Python environment is on Python " + on.str() +
-                        ", and the voice set runs on " + voice_range.describe(),
-                    "apogee train setup --rebuild --with voice");
-                break;
-            }
+            // The probe's own remedy: on a Python the set does not run on,
+            // the rebuild (M19), else the install.
             add(report, Status::Skipped, "Video", "voice runtime", "not set up -- " + voice.reason,
-                std::string{video::kVoiceSetupRemedy});
+                voice.remedy);
             break;
         default:
             add(report, Status::Ok, "Video", "voice runtime",
@@ -2728,6 +2876,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         }
     }
     const std::filesystem::path cycle_dir = training / "cycle";
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
     if (training::history_exists(cycle_dir)) {
         std::string error;
         const training::CycleHistory history =
@@ -2747,8 +2896,19 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                     (history.anchor_version > 0
                          ? ", anchor v" + std::to_string(history.anchor_version)
                          : std::string{", no anchor yet"}) +
-                    (training::cycle_lock_held(cycle_dir) ? "; a cycle is running now" : ""));
+                    (lock.running() ? "; a cycle is running now" : ""));
         }
+    }
+    // A lock a dead pass left (57g): every `cycle run` refuses it, by the
+    // cycle's rule, until the person removes it -- said here with the way out,
+    // never as a running pass.
+    if (lock.stale()) {
+        add(report, Status::Warn, "Training", "cycle lock",
+            "stopped -- " + std::string{training::kLockFileName} + " is left by process " +
+                std::to_string(lock.pid) +
+                ", which is not running; every 'apogee train cycle run' refuses until it is "
+                "removed",
+            "remove " + lock.path.string() + " to run again");
     }
 }
 
@@ -2766,6 +2926,8 @@ CheckReport run_checks(const CheckInputs& inputs) {
     check_tools(report, inputs);
     say(inputs, "checking MCP servers");
     check_mcp(report, inputs);
+    say(inputs, "checking Xcode");
+    check_xcode(report, inputs);
     say(inputs, "checking agents");
     check_agents(report, inputs);
     say(inputs, "checking knowledge");

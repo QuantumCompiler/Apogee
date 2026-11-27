@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 /// The portability seam.
 ///
@@ -54,10 +55,38 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// every caller here resolves a path it is about to WRITE to, and writing to a
 /// wrong-but-plausible directory is worse than a clear error.
 ///
+/// **UTF-8 on every platform** (57j): Windows reads the variables wide
+/// (`utf8_environment`), so a profile folder named `C:\Users\José` comes back
+/// as the bytes `…Jos\xC3\xA9` whatever the process's code page -- the root
+/// a path is built on with `path_from_utf8`. POSIX hands back $HOME's bytes as
+/// they are.
+///
 /// Callers wanting Apogee's data directory should ask
 /// `apogee::harness::apogee_home()` instead -- it layers the APOGEE_HOME
 /// override on top of this.
 [[nodiscard]] std::optional<std::string> home_directory();
+
+/// One environment variable's value as UTF-8, or nullopt when it is not set
+/// (57j). Windows reads the process's environment wide
+/// (`GetEnvironmentVariableW`) and converts: never the narrow copy, which
+/// holds only what the ANSI code page can spell and misses a change made
+/// through the Win32 call. POSIX is `getenv`, the bytes as they are.
+[[nodiscard]] std::optional<std::string> utf8_environment(std::string_view name);
+
+/// The path `utf8` names (57j): on Windows decoded from UTF-8 to the wide form
+/// the filesystem takes, so libstdc++ (which reads a narrow path as UTF-8) and
+/// libc++ (which reads it in the ANSI code page) build the same path, and a
+/// byte that is no UTF-8 is U+FFFD rather than a thrown "Cannot convert
+/// character sequence". POSIX takes the bytes as they are.
+[[nodiscard]] std::filesystem::path path_from_utf8(std::string_view utf8);
+
+/// Why this process may read a non-ASCII argument, path or environment value
+/// wrongly, or empty when it reads them as UTF-8 (57j). On Windows, whether
+/// the process's ANSI code page is UTF-8: the manifest every Apogee
+/// executable carries names it (`source/apogee.manifest`), and a Windows
+/// older than 10 version 1903 ignores that -- `apogee check` warns, and
+/// nothing refuses to run. Always empty elsewhere.
+[[nodiscard]] std::string text_encoding_gap();
 
 /// Absolute path of the running executable, or empty when the platform will
 /// not say.
@@ -68,6 +97,104 @@ enum class Architecture : std::uint8_t { X64, Arm64 };
 /// attribute), and `apogee uninstall` has to delete it -- both need the real
 /// path, and a wrong one there means uninstall removes the wrong file.
 [[nodiscard]] std::filesystem::path executable_path();
+
+// --- Links, removal and the folders a user's tools write to (57k) ----------
+//
+// The Windows x64 build's libstdc++ cannot see a link: `symlink_status`
+// follows it, `read_symlink` is a stub, so `remove_all`, the directory walks,
+// `weakly_canonical` and `is_symlink` all take a junction or a symbolic link
+// for the folder or file it points at. These calls see one, on every
+// platform, and are a plain `std::filesystem` call wherever the library
+// already does.
+
+/// Whether `path` itself -- never what it points at -- is a link: a symbolic
+/// link, or on Windows a reparse point tagged `IO_REPARSE_TAG_SYMLINK` or
+/// `IO_REPARSE_TAG_MOUNT_POINT` (a junction). Another reparse point -- a
+/// OneDrive placeholder, a deduplicated file -- is the file or folder it is,
+/// never a link. False with `code` clear when nothing is there; `code` set
+/// when it cannot be read. POSIX asks `symlink_status`.
+[[nodiscard]] bool is_link(const std::filesystem::path& path, std::error_code& code) noexcept;
+
+/// The same question about an entry a directory listing gave (57y), answered
+/// from the type the listing read where the platform supplies one -- on POSIX
+/// the entry's cached type, from `readdir`'s `d_type` -- so walking a folder
+/// of tens of thousands of files costs no `lstat` per file. So an entry
+/// removed or replaced since the listing is answered as listed; where the
+/// listing read no type, as the path form answers (false with `code` clear
+/// when nothing is there). On Windows it is `is_link(entry.path())`, which
+/// sees the junction the library's own type does not.
+[[nodiscard]] bool is_link(const std::filesystem::directory_entry& entry,
+                           std::error_code& code) noexcept;
+
+/// Removes `path` and everything under it, a link removed as itself and never
+/// followed: what it points at is left whole. Nothing there is no error. On
+/// Windows a directory link (a junction or a directory symbolic link) goes
+/// with `RemoveDirectoryW` and a file link with `DeleteFileW`, and only a real
+/// folder is emptied first; a read-only file is removed too. Stops at the
+/// first failure, `code` saying why, as `remove_all` does -- which POSIX calls.
+void remove_tree(const std::filesystem::path& path, std::error_code& code);
+
+/// `path` absolute, with every link on the part of it that exists resolved
+/// and the rest normalised -- `weakly_canonical`, which POSIX calls. On
+/// Windows, the longest prefix that opens (following links) named by
+/// `GetFinalPathNameByHandleW`, its `\\?\` taken off, the rest appended:
+/// so two paths resolved here agree in case and drive spelling wherever they
+/// share a folder, and a junction is judged where it points. Empty, with
+/// `code` set, when it cannot be resolved.
+[[nodiscard]] std::filesystem::path resolve_path(const std::filesystem::path& path,
+                                                 std::error_code& code);
+
+/// The folder a user's Documents live in: on Windows the Documents known
+/// folder (`SHGetKnownFolderPath(FOLDERID_Documents)`), the very folder
+/// PowerShell's `[Environment]::GetFolderPath('MyDocuments')` names -- a
+/// OneDrive or policy redirect included -- and so the one `install.ps1`
+/// writes its completion stub under. Elsewhere `<home>/Documents`. Empty when
+/// it cannot be determined.
+[[nodiscard]] std::filesystem::path documents_directory();
+
+/// Whether this process may delete the executable it runs from while it runs:
+/// true on POSIX, false on Windows, which refuses to delete a running image --
+/// what an uninstall's plan says up front.
+[[nodiscard]] bool running_binary_deletable() noexcept;
+
+/// How `remove_own_binary` dealt with the running executable.
+enum class OwnBinaryOutcome : std::uint8_t {
+    /// Gone: deleted (POSIX; on Windows, an image no process runs), or
+    /// nothing was there.
+    Removed,
+    /// Windows: renamed aside in its own folder, so its name no longer runs,
+    /// and Windows deletes the renamed file at the next restart.
+    DeletedAtRestart,
+    /// Windows: renamed aside, but Windows would not schedule the deletion
+    /// (an unelevated process may not) -- or, from
+    /// `delete_or_rename_own_binary`, it was never asked: the renamed file is
+    /// the user's to delete once this process has ended.
+    RenamedAside,
+    /// Nothing changed; `error` says why.
+    Failed,
+};
+
+struct OwnBinaryRemoval {
+    OwnBinaryOutcome outcome = OwnBinaryOutcome::Failed;
+    /// Where the binary was renamed to, for the two Windows outcomes.
+    std::filesystem::path aside{};
+    std::string error{};
+};
+
+/// Removes the executable at `path` -- `apogee uninstall`'s last step:
+/// `delete_or_rename_own_binary`, then, for a binary it renamed aside,
+/// `MoveFileExW(…, MOVEFILE_DELAY_UNTIL_REBOOT)`, which only an elevated
+/// process may ask; the outcome says which held.
+[[nodiscard]] OwnBinaryRemoval remove_own_binary(const std::filesystem::path& path);
+
+/// `remove_own_binary`'s first step alone, which asks Windows for nothing
+/// that outlives this process: POSIX deletes the file. Windows will not
+/// delete a running image, so a delete it refuses becomes a rename aside in
+/// the same folder (allowed for a running image) to
+/// `<name>.uninstalled-<pid>`: `RenamedAside`, its name no longer running.
+/// Never `DeletedAtRestart` -- so a test proves the rename without leaving a
+/// pending delete on the machine (57k).
+[[nodiscard]] OwnBinaryRemoval delete_or_rename_own_binary(const std::filesystem::path& path);
 
 /// A day on the local calendar, and the time zone it is in.
 struct LocalDate {
@@ -106,9 +233,38 @@ struct LocalDate {
 /// Creates `path` holding `content` only if it does not exist yet -- one
 /// atomic create-or-fail (`O_CREAT|O_EXCL`; `CREATE_NEW` on Windows), so two
 /// processes racing for a lock cannot both win. False when the file exists
-/// or cannot be made; `exists` says which.
+/// or cannot be made; `exists` says which. Windows names the file wide
+/// (`CreateFileW`), so a non-ASCII path is the path asked for (57j).
 [[nodiscard]] bool create_exclusive_file(const std::filesystem::path& path,
                                          std::string_view content, bool& exists);
+
+/// Creates `path` -- nothing may be there yet, a link included -- holding
+/// `content`, under `mode` (permission bits; the umask takes what it takes)
+/// from its first instant: the mode is given to the create itself
+/// (`O_CREAT|O_EXCL`), so the file is never on disk under a wider one, not
+/// even before its first byte is written (57e: a secret's temporary file was
+/// caught at the umask's mode while it was written). False, with `error`
+/// saying why, when it cannot be made or written -- and then nothing of this
+/// call's is left at `path`. Windows, where modes do not exist, writes it as a
+/// stream does and ignores `mode`.
+[[nodiscard]] bool write_new_file(const std::filesystem::path& path, std::string_view content,
+                                  std::filesystem::perms mode, std::string& error);
+
+/// Creates the directory `path` only if nothing is there yet, readable,
+/// writable and searchable by its owner alone (0700) from its first instant
+/// -- one atomic create-or-fail (`mkdir`; `CreateDirectory` on Windows,
+/// whose temporary directory is the user's own), so a folder another run or
+/// another local user made under that name is never taken for this one's
+/// (57a: a private chat's attachment index). False when something is there
+/// or the directory cannot be made; `exists` says which.
+[[nodiscard]] bool create_private_directory(const std::filesystem::path& path, bool& exists);
+
+/// Whether `path` itself -- a link, never what it points at -- belongs to the
+/// user this process runs as: what a sweep of a shared temporary directory
+/// may remove is this user's leftover alone (57a). False when `path` cannot
+/// be read. On Windows, whose temporary directory is the user's own, whether
+/// anything is there.
+[[nodiscard]] bool owned_by_this_user(const std::filesystem::path& path) noexcept;
 
 /// The three standard streams, for terminal detection.
 enum class StandardStream : std::uint8_t { In, Out, Err };
@@ -159,6 +315,72 @@ enum class StandardStream : std::uint8_t { In, Out, Err };
 /// is no console, cannot host it. A refusal is said and the caller falls back
 /// to plain output: never a garbled screen.
 [[nodiscard]] std::string full_screen_refusal();
+
+/// Whether the output `stream` writes to shows an escape sequence as what it
+/// means -- a colour, a cursor move -- rather than as the bytes (57j). Asked of
+/// a Windows console alone: one whose virtual-terminal processing is off (a
+/// classic console where `ConsoleScope` could not turn it on) prints
+/// `←[32m`, so colour resolves off there. Everything else -- a POSIX
+/// terminal, a pipe, a file, a Windows console with it on -- answers true, and
+/// `is_terminal` stays the gate for decoration. `In` answers true.
+[[nodiscard]] bool renders_escape_sequences(StandardStream stream) noexcept;
+
+/// The Windows console set up for the run to read and write as a POSIX
+/// terminal does (57j), and put back as it was found when the run ends.
+///
+/// When any standard stream is a console, the outermost scope saves its
+/// input and output code pages and each output's mode, then sets both code
+/// pages to UTF-8 -- what the CLI writes, `·`, `…`, `—` and the markdown
+/// renderer's rules -- and turns virtual-terminal processing on, so colour
+/// and the status line's cursor moves render in a classic console rather than
+/// printing as `←[32m`. A console's code page outlives the process in
+/// cmd.exe, so all three are put back: by the destructor (after flushing the
+/// standard streams, so the last line is read in the page it was written in),
+/// and by `restore_console()` on an exit no destructor sees -- the third
+/// Ctrl-C's `_Exit`, and the `ExitProcess` Windows takes for a Ctrl-C or
+/// Ctrl-Break that nothing handled (a command with no `InterruptScope`). For
+/// that last one the first scope that changes the console adds a console
+/// routine, once per process, which puts it back and declines the event; it
+/// must come before any `signal()` call adds the C runtime's routine, so that
+/// it is asked only after the runtime declined -- `RootCommand::run` makes the
+/// scope before any command arms a handler. A console that refuses the mode
+/// keeps it off, and `renders_escape_sequences` says so. replxx and FTXUI
+/// save and restore their own console state inside it, unchanged. Scopes
+/// nest: one made while another lives does nothing. A no-op on macOS and
+/// Linux, and wherever no standard stream is a console.
+class ConsoleScope {
+public:
+    ConsoleScope() noexcept;
+    ~ConsoleScope();
+
+    ConsoleScope(const ConsoleScope&) = delete;
+    ConsoleScope& operator=(const ConsoleScope&) = delete;
+    ConsoleScope(ConsoleScope&&) = delete;
+    ConsoleScope& operator=(ConsoleScope&&) = delete;
+
+    /// Whether this scope changed the console (and will put it back).
+    [[nodiscard]] bool changed() const noexcept {
+        return changed_;
+    }
+
+private:
+    bool changed_ = false;
+};
+
+/// Puts back the console a live `ConsoleScope` changed, once, from any thread
+/// -- for an exit that skips the scope's destructor: the interrupt handler's
+/// `_Exit` on the third Ctrl-C, and the scope's console routine before an
+/// unhandled event's `ExitProcess`. A no-op when nothing is changed, and
+/// outside Windows.
+void restore_console() noexcept;
+
+/// Stands `handler` again for `signal` from inside that handler (57j). The
+/// Microsoft C runtime puts a signal back to its default action before it
+/// calls the handler, so without this a second Ctrl-C ends a Windows process
+/// with `STATUS_CONTROL_C_EXIT` where POSIX, whose `signal` keeps the handler,
+/// lets it count. A no-op elsewhere. The gap between the runtime's reset and
+/// this call is a few instructions.
+void rearm_signal(int signal, void (*handler)(int)) noexcept;
 
 /// Discards anything already typed at the terminal but not yet read.
 ///

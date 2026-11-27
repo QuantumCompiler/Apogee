@@ -5,6 +5,8 @@
 #include <sstream>
 #include <utility>
 
+#include "ansi/inert.h"
+
 namespace apogee::commands {
 namespace {
 
@@ -61,13 +63,20 @@ void ThinkingView::write(std::string_view chunk) {
         // reasoning block on every such turn.
         return;
     }
+    if (!open_) {
+        column_ = 0;
+    }
+    // Shown, never obeyed (57p): once, ahead of both paths. An OSC in the
+    // reasoning would set the title or the clipboard, and a cursor move would
+    // send the window's erase to the wrong rows.
+    const std::string text = ansi::inert_text(chunk, column_);
 
     if (options_.verbose) {
         // A permanent transcript: no cursor movement, no collapse.
         if (!open_) {
             budget_reached_ = false;
         }
-        writer_.write(chunk);
+        writer_.write(text);
         open_ = true;
         reasoned_ = true;
         return;
@@ -86,7 +95,7 @@ void ThinkingView::write(std::string_view chunk) {
         return;
     }
     reasoned_ = true;
-    append(chunk);
+    append(text);
 }
 
 void ThinkingView::summary(std::string_view line) {
@@ -95,7 +104,7 @@ void ThinkingView::summary(std::string_view line) {
     }
     open_block();
     reasoned_ = true;
-    summary_ = std::string{line};
+    summary_ = ansi::inert_line(line);
     writer_.with_lock([this](std::ostream& out) { repaint_locked(out); });
 }
 
@@ -105,7 +114,8 @@ void ThinkingView::show_raw(std::string_view why) {
         return;
     }
     const std::string line =
-        cut_to("· reasoning shown in full -- " + std::string{why}, content_width());
+        cut_to("· reasoning shown in full -- " + ansi::inert_line(why), content_width());
+    column_ = 0;  // a row of its own: the reasoning after it starts one
     if (options_.verbose) {
         writer_.write(options_.style.dim(line) + "\n");
         return;
@@ -133,7 +143,8 @@ void ThinkingView::side_call(std::string_view label) {
     if (!options_.active || label.empty()) {
         return;
     }
-    const std::string line = cut_to(std::string{"· "} + std::string{label}, content_width());
+    const std::string line = cut_to("· " + ansi::inert_line(label), content_width());
+    column_ = 0;  // a row of its own: the reasoning after it starts one
     if (options_.verbose) {
         if (!open_) {
             budget_reached_ = false;
@@ -156,10 +167,10 @@ void ThinkingView::side_call_done(std::string_view label, std::string_view suffi
     if (!options_.active || suffix.empty() || !open_) {
         return;
     }
-    const std::string opened = std::string{"· "} + std::string{label};
+    const std::string opened = "· " + ansi::inert_line(label);
+    const std::string done = ansi::inert_line(suffix);
     if (options_.verbose) {
-        writer_.write(options_.style.dim(cut_to(opened, content_width()) + std::string{suffix}) +
-                      "\n");
+        writer_.write(options_.style.dim(cut_to(opened, content_width()) + done) + "\n");
         return;
     }
     // The latest line the call opened, completed where it stands -- cut so
@@ -169,10 +180,10 @@ void ThinkingView::side_call_done(std::string_view label, std::string_view suffi
     if (at == std::string::npos) {
         return;
     }
-    const std::size_t suffix_cells = ansi::display_width(suffix);
+    const std::size_t suffix_cells = ansi::display_width(done);
     const std::size_t room =
         content_width() > suffix_cells + 1 ? content_width() - suffix_cells : 1;
-    tail_.replace(at, started.size(), cut_to(opened, room) + std::string{suffix} + "\n");
+    tail_.replace(at, started.size(), cut_to(opened, room) + done + "\n");
     writer_.with_lock([this](std::ostream& out) { repaint_locked(out); });
 }
 

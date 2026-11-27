@@ -17,7 +17,9 @@ public final class Preferences: Sendable {
         static let binaryOverride = "binaryOverride"
         static let route = "route"
         static let sidebarHidden = "sidebarHidden"
+        static let sidebarWidth = "sidebarWidth"
         static let inspectorOpen = "inspectorOpen"
+        static let inspectorWidth = "inspectorWidth"
         static let openChat = "openChat"
         static let videoFolders = "videoFolders"
         static let voiceFolders = "voiceFolders"
@@ -30,9 +32,11 @@ public final class Preferences: Sendable {
     }
 
     /// The app's own preferences: its standard defaults, whose domain in the
-    /// app is its bundle identifier, `com.quantumcompiler.apogee`. (A suite
-    /// named for the app's own identifier is refused by `UserDefaults`, and
-    /// would keep nothing.)
+    /// app is its bundle identifier -- `com.quantumcompiler.apogee`, or the dev
+    /// channel's `com.quantumcompiler.apogee.dev`, so a development build never
+    /// reads or writes the installed app's (GUI M18). (A suite named for the
+    /// app's own identifier is refused by `UserDefaults`, and would keep
+    /// nothing.)
     public static func standard() -> Preferences {
         Preferences(store: DefaultsStore(.standard))
     }
@@ -61,10 +65,22 @@ public final class Preferences: Sendable {
         set { setBool(newValue, Key.sidebarHidden) }
     }
 
+    /// The sidebar's width in points, as the person last dragged it.
+    public var sidebarWidth: Double {
+        get { store.string(forKey: Key.sidebarWidth).flatMap(Double.init) ?? 256 }
+        set { store.set(String(newValue), forKey: Key.sidebarWidth) }
+    }
+
     /// Whether the inspector is open beside a session.
     public var inspectorOpen: Bool {
         get { bool(Key.inspectorOpen) }
         set { setBool(newValue, Key.inspectorOpen) }
+    }
+
+    /// The inspector's width in points, as the person last dragged it.
+    public var inspectorWidth: Double {
+        get { store.string(forKey: Key.inspectorWidth).flatMap(Double.init) ?? 360 }
+        set { store.set(String(newValue), forKey: Key.inspectorWidth) }
     }
 
     /// The saved conversation open in Sessions, by its id; `nil` for a new

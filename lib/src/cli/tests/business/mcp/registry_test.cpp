@@ -167,6 +167,41 @@ TEST_CASE("tools register namespaced, gated unless read-only, and dispatch to th
     CHECK(connected);
 }
 
+TEST_CASE("a tool the person named is gated whatever its server's hint; the rest keep it",
+          "[mcp][registry][permission][57o]") {
+    // A level in the config outranks readOnlyHint (57o): the composition
+    // passes which names carry one, and those are gated so the level binds.
+    const Run run{{server("srv", "well")}};
+    apogee::agent::ToolRegistry named;
+    run.registry.register_into(named,
+                               [](std::string_view name) { return name == "mcp__srv__echo"; });
+    REQUIRE(named.find("mcp__srv__echo") != nullptr);
+    CHECK(named.find("mcp__srv__echo")->writes);
+    CHECK(named.find("mcp__srv__write")->writes);
+    apogee::agent::ToolRegistry unnamed;
+    run.registry.register_into(unnamed);
+    CHECK_FALSE(unnamed.find("mcp__srv__echo")->writes);
+    CHECK(unnamed.find("mcp__srv__write")->writes);
+}
+
+TEST_CASE("an MCP tool's prompt carries its whole arguments; the target stays cut",
+          "[mcp][registry][permission][57p]") {
+    // The sweep's entry 2, for a server's tool: the prompt showed the first
+    // 77 characters of the arguments, and nothing else said the rest.
+    const Run run{{server("srv", "well")}};
+    apogee::agent::ToolRegistry registry;
+    run.registry.register_into(registry);
+    const apogee::agent::Tool* tool = registry.find("mcp__srv__write");
+    REQUIRE(tool != nullptr);
+    REQUIRE(tool->describe_detail);
+    const std::string arguments =
+        R"({"path":"notes/today.md","text":"an ordinary note about the build, then the part )"
+        R"(nobody saw, past the cut the prompt made: rm -rf ~ and everything under it"})";
+    REQUIRE(arguments.size() > 130);
+    CHECK(tool->describe_target(arguments) == arguments.substr(0, 77) + "...");
+    CHECK(tool->describe_detail(arguments) == arguments);
+}
+
 TEST_CASE("built-ins dispatch identically with zero, one failed, or one connected server",
           "[mcp][registry]") {
     apogee::agent::Tool native;

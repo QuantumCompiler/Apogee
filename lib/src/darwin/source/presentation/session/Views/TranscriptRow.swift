@@ -72,6 +72,20 @@ struct TranscriptRow: View {
                         .disabled(!model.transcript.acceptsInput)
                 }
             }
+        case .notSent(let text):
+            // The turn above never reached the child: said so, and sent again
+            // once a child takes it (GUI 6a).
+            Card(accent: Palette.warning) {
+                CardLabel(text: "Not sent")
+                Text("apogee had stopped taking input, so this message never reached it.")
+                    .font(.apogeeBody)
+                    .foregroundStyle(Palette.textPrimary)
+                if model.canResend(item.id) {
+                    Button("Send again") { model.resend(text) }
+                        .disabled(!model.transcript.acceptsInput)
+                        .help("Sends the message above again, as typed")
+                }
+            }
         case .stopped:
             QuietLine(symbol: "stop.circle", text: "stopped")
         case .unanswered:
@@ -328,6 +342,25 @@ struct EndedCard: View {
     let model = SessionPreview.session(SessionPreview.mockActor)
     VStack(alignment: .leading, spacing: Spacing.m) {
         ForEach(SessionPreview.stopped.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+}
+
+#Preview("Not sent: a stop closed the child's input first -- Send again, the session taking turns") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.notSent.items) { TranscriptRow(item: $0, model: model) }
+    }
+    .frame(width: 720)
+    .padding(Spacing.xl)
+    .task { await SessionPreview.ready(model) }
+}
+
+#Preview("Not sent, the session not back yet: Send again waits") {
+    let model = SessionPreview.session(SessionPreview.mockActor)
+    VStack(alignment: .leading, spacing: Spacing.m) {
+        ForEach(SessionPreview.notSent.items) { TranscriptRow(item: $0, model: model) }
     }
     .frame(width: 720)
     .padding(Spacing.xl)

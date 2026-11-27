@@ -1,0 +1,143 @@
+nothing to fix
+
+Version
+  ok   apogee  0.2.0
+  ok   channel  release
+  ok   root  /Users/someone/.apogee -- set by APOGEE_HOME
+  ok   quarantine  not quarantined
+
+Config
+  ok   config.json  parses cleanly
+  ok   backend: planner  mock
+  ok   default_backend  planner
+
+Tools
+  ok   permissions.delete_file  ask
+  ok   permissions.delete_note  ask
+  ok   permissions.edit_file  ask
+  ok   permissions.run_command  ask
+  ok   permissions.write_file  ask
+  ok   permissions.write_note  ask
+  ok   fs_root  /Users/someone -- unset, so the folder Apogee was started in
+  ok   allowed_hosts  none -- every website asks first, and a pipe or `serve` fetches nothing
+  ok   search  not configured -- no web_search tool. To add one, run SearXNG with JSON on and add under tools: search: {provider: searxng, url: http://127.0.0.1:8888}
+  ok   git  found on PATH
+
+MCP
+ FAIL  server: github  command not found on PATH: npx
+        run: install it, or: apogee config delete-mcp-server github
+ skip  code-exec  code_exec_server.py matches the shipped copy; not registered -- it would run under /Users/someone/.apogee/training/venv/bin/python (the training environment)
+        run: apogee mcp create code --command /Users/someone/.apogee/training/venv/bin/python --args /Users/someone/.apogee/training/scripts/code_exec_server.py
+
+Agents
+  ok   bundled: prompts/security-review.txt  present
+  ok   bundled: schemas/security-review-output.json  present
+  ok   bundled: prompts/release-notes.txt  present
+  ok   bundled: schemas/release-notes-output.json  present
+  ok   bundled: prompts/merge-request.txt  present
+  ok   bundled: schemas/merge-request-output.json  present
+  ok   bundled: prompts/code-review.txt  present
+  ok   bundled: schemas/code-review-output.json  present
+  ok   bundled: prompts/test-gaps.txt  present
+  ok   bundled: schemas/test-gaps-output.json  present
+  ok   bundled: prompts/doc-drift.txt  present
+  ok   bundled: schemas/doc-drift-output.json  present
+  ok   bundled: prompts/meeting-minutes.txt  present
+  ok   bundled: schemas/meeting-minutes-output.json  present
+
+Knowledge
+  ok   collection: knowledge  no records yet -- 'apogee knowledge capture' creates it
+  ok   raw archive  none archived yet -- created by the first capture
+
+Attachments
+  ok   ffmpeg  found -- attached audio and video are decoded
+  ok   images  planner sees them as they are; described by planner
+  ok   audio  nothing here hears it -- set a transcription model with 'apogee config set-default-transcription'
+  ok   video  a timeline of its frames by planner, its sound untranscribed
+  ok   pdftotext  found -- attached PDFs are read
+  ok   git  found -- an attached folder inside a repository leaves out what git ignores
+  ok   chat indexes  none yet -- '/attach' in a chat creates its index
+
+Memory
+  ok   recall  nothing summarised yet -- a chat of two turns or more is, when it ends
+
+Training
+  ok   python env  at /Users/someone/.apogee/training/venv; sets: video, voice
+  ok   script: prepare_dataset.py  matches the shipped copy
+  ok   script: train_mlx.py  matches the shipped copy
+  ok   script: train_peft.py  matches the shipped copy
+  ok   converter  convert_hf_to_gguf.py matches the vendored copy (114 files)
+ warn  trainer  mlx fits this host, but its requirement set is not installed
+        run: apogee train setup --trainer mlx
+ warn  convert set  not installed -- 'train promote' needs it to convert to GGUF
+        run: apogee train setup --with convert
+  ok   kit: extraction-fidelity  24 eval item(s) -- The extraction role's chores in the product's own requests -- the graph clerk's entities and relations, and the shipped symphonies' fact, action and card stages -- each one JSON object held to its schema.
+  ok   kit: instruction-following  24 eval item(s) -- Follow explicit instructions precisely — format, length, and constraints.
+  ok   kit: knowledge-capture  24 eval item(s) -- The knowledge-capture clerk's chore in the product's own request -- a raw discussion read into one canonical intent record: the why, the decision, its status and discipline, and the link it names.
+  ok   kit: reasoning  24 eval item(s) -- Solve arithmetic and logic problems with a correct final answer.
+  ok   kit: structured-output  24 eval item(s) -- Emit well-formed JSON that matches a requested shape.
+  ok   kit: summarization  24 eval item(s) -- Condense a passage into a faithful, concise summary.
+  ok   kit: tool-calling  32 eval item(s) -- Choosing the one tool call a request needs -- the right tool and arguments its schema accepts -- against the product's own file, shell and git tool declarations.
+  ok   kit: utility-chores  24 eval item(s) -- The utility role's chores in the product's own formats -- a follow-up rewritten as a standalone search query, and a tool's output summarised for the model that acts on it.
+
+MLX
+ skip  runtime  not set up -- only an mlx backend needs it (mlx-lm is not installed in the Python environment at /Users/someone/.apogee/training/venv)
+        run: apogee train setup --with mlx
+ skip  vision  not set up -- only an MLX vision model needs it (mlx-vlm is not installed in /Users/someone/.apogee/training/venv)
+        run: apogee train setup --with mlx-vlm
+ skip  embeddings  not set up -- only an MLX embedding model needs it (mlx-embeddings is not installed in /Users/someone/.apogee/training/venv)
+        run: apogee train setup --with mlx-embeddings
+ skip  video  not installed (opt-in) -- only 'models convert --mlx' of a Wan set and 'video generate' on MLX need it; pip builds mlx-video from GitHub at its pin, commit 87db56a51758 (2026-05-13)
+        run: apogee train setup --with mlx-video
+ skip  voice  not installed (opt-in) -- only 'models convert --mlx' of a voice model and 'voice say' on MLX need it; mlx-audio's floor is >=0.4.0
+        run: apogee train setup --with mlx-audio
+  ok   driver  mlx_generate.py matches the shipped copy
+  ok   conversion driver  mlx_convert.py matches the shipped copy
+  ok   embedding driver  mlx_embed.py matches the shipped copy
+
+Video
+ skip  runtime  not set up -- torch is not installed in the Python environment at /Users/someone/.apogee/training/venv
+        run: apogee train setup --with video
+ skip  voice runtime  not set up -- torch is not installed in the Python environment at /Users/someone/.apogee/training/venv
+        run: apogee train setup --with voice
+  ok   driver  video_generate.py matches the shipped copy
+  ok   voice driver  voice_say.py matches the shipped copy
+  ok   mlx driver  video_generate_mlx.py matches the shipped copy
+  ok   mlx voice driver  voice_say_mlx.py matches the shipped copy
+ skip  ffmpeg captions  no subtitles filter (this ffmpeg was built without libass) -- a composition keeps its captions beside the video as an SRT
+        run: brew install ffmpeg-full && brew unlink ffmpeg; brew link --force ffmpeg-full
+  ok   ffmpeg h264  libx264 -- clips and compositions encode as H.264
+
+Filesystem
+  ok   data directory  /Users/someone/.apogee
+  ok   config/  config.json and anything else the config engine owns (private)
+  ok   logs/  operational log, one file per day
+  ok   sessions/  persisted chat transcripts (private)
+  ok   attachments/  each chat's attached files, indexed; deleted with the chat (private)
+  ok   memory/  summaries of past chats, searched by recall; a chat's goes with it (private)
+  ok   models/  the model store: <model>/gguf and <model>/safetensors, one directory per set of weights (models/store.h)
+  ok   embeddings/  vector stores for RAG
+  ok   notes/  notes the model keeps for you (the write_note / read_note tools)
+  ok   mcp/  MCP servers scaffolded by 'apogee mcp create', one directory each
+  ok   prompts/  agents' system prompts, loaded by 'apogee analyze --agent'
+  ok   schemas/  agents' output schemas (JSON Schema), loaded beside the prompts
+  ok   analyses/  reports saved by 'apogee analyze', one directory per agent
+  ok   symphonies/  symphony spec files -- the shipped starters and any of your own, played by name ('apogee symphonies')
+  ok   knowledge/  captured decision records' raw conversations (knowledge/raw) (private)
+  ok   training/  training datasets, kits, scripts and the Python environment ('apogee datasets' / 'apogee train') (private)
+  ok   tasks/  task ledgers ('apogee task'), one directory per task, and the one-task lock (private)
+  ok   recipes/  task recipes -- the shipped starters and any of your own, run by name ('apogee task run --recipe')
+  ok   review-skills/  review skills -- the shipped lenses and any of your own, each a markdown file ('apogee review skills')
+  ok   review/  review sweep state -- each target's watermark, the sweep lock, and each sweep's documents ('apogee review sweep') (private)
+  ok   cache/  downloads and scratch state, safe to delete
+
+Secrets
+  ok   Admin token  not generated yet -- created at the first 'apogee serve'
+  ok   Credential store  none -- 'apogee auth add' creates it
+
+Models
+  ok   hexgrad--Kokoro-82M/mlx/ffffffffffff  kokoro, MLX, precision not stated, files whole
+  ok   org--clip/pipeline/aaaaaaaaaaaa  WanPipeline, 4 components, files whole
+  ok   hexgrad--Kokoro-82M/voice/cccccccccccc  kokoro-v1_0.pth, 2 voices, files whole
+
+1 failure(s), 2 warning(s)

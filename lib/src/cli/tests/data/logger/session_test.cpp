@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <random>
 #include <string>
 #include <vector>
@@ -288,6 +290,35 @@ TEST_CASE("a new chat is written once it has a turn, and a loaded one with none 
     CHECK(secret.unwritten());
     apogee::logger::save(secret);
     CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(secret.chat_id)));
+}
+
+TEST_CASE("an ACP host's new chat closed before an answered turn writes nothing, origin or not",
+          "[chat][session][unwritten][acp]") {
+    // 56c on M28: a session an ACP host opened and closed with nothing
+    // answered leaves no file, no row and no title -- its origin and folder
+    // ride only the first answered turn's save.
+    const TempDir dir{"session-acp-unwritten-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+
+    Session hosted;
+    hosted.chat_id = apogee::logger::new_chat_id();
+    hosted.backend = "claude";
+    hosted.new_chat = true;
+    hosted.origin = "Xcode";
+    hosted.cwd = "/Users/me/Project";
+    CHECK(hosted.unwritten());
+    CHECK(apogee::logger::save(hosted) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(apogee::logger::session_path(hosted.chat_id)));
+    CHECK(apogee::logger::list_sessions().empty());
+
+    hosted.messages = {ChatMessage::user("hello"), ChatMessage::assistant("hi")};
+    hosted.turns = 1;
+    CHECK(apogee::logger::save(hosted) == apogee::logger::Saved::Written);
+    const auto loaded = apogee::logger::load(hosted.chat_id, {});
+    CHECK(loaded.session.origin == "Xcode");
+    CHECK(loaded.session.cwd == "/Users/me/Project");
+    REQUIRE(apogee::logger::list_sessions().size() == 1);
+    CHECK(apogee::logger::list_sessions().front().origin == "Xcode");
 }
 
 TEST_CASE("a session is loadable by its custom name", "[chat][session]") {
@@ -639,6 +670,69 @@ TEST_CASE("a chat's roster pin is saved with it, and a chat with none saves as b
     const auto odd = deserialize(R"({"schema_version": 2, "chat_id": "c", "model": 7})", {});
     CHECK(odd.session.model.empty());
     REQUIRE(odd.warnings.size() == 1);
+    CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
+}
+
+TEST_CASE("a chat an ACP host began names it and its folder, and every other saves as before",
+          "[logger][session][acp]") {
+    // 56c, additive (ADR 0006): a chat begun anywhere else is byte for byte
+    // the file it was before -- the golden is today's -- and the schema stays
+    // 2.
+    const Session plain = sample();
+    const std::string plain_text = apogee::logger::serialize(plain);
+    CHECK(plain_text == R"({
+  "backend": "claude",
+  "chat_id": "20260826-120000-abcd",
+  "compactions": 0,
+  "messages": [
+    {
+      "content": "hello",
+      "role": "user"
+    },
+    {
+      "content": "hi there",
+      "role": "assistant"
+    }
+  ],
+  "params": {
+    "max_tokens": 512,
+    "temperature": 0.4
+  },
+  "schema_version": 2,
+  "started_at": "2026-08-26T12:00:00Z",
+  "turns": 2,
+  "updated_at": "2026-08-26T12:05:00Z"
+}
+)");
+    const auto read_plain = deserialize(plain_text, {});
+    CHECK(read_plain.warnings.empty());
+    CHECK(read_plain.session.origin.empty());
+    CHECK(read_plain.session.cwd.empty());
+
+    // A host's: both written, both read back, and nothing else moved.
+    Session hosted = sample();
+    hosted.origin = "Xcode";
+    hosted.cwd = "/Users/me/Project";
+    const std::string text = apogee::logger::serialize(hosted);
+    nlohmann::json written = nlohmann::json::parse(text);
+    CHECK(written.at("origin") == "Xcode");
+    CHECK(written.at("cwd") == "/Users/me/Project");
+    CHECK(written.at("schema_version") == apogee::logger::kCurrentSchemaVersion);
+    written.erase("origin");
+    written.erase("cwd");
+    CHECK(written == nlohmann::json::parse(plain_text));
+    const auto loaded = deserialize(text, {});
+    CHECK(loaded.warnings.empty());
+    CHECK(loaded.session.origin == "Xcode");
+    CHECK(loaded.session.cwd == "/Users/me/Project");
+    CHECK(apogee::logger::serialize(loaded.session) == text);
+
+    // A shape it cannot read is dropped with a warning, the chat resumed.
+    const auto odd =
+        deserialize(R"({"schema_version": 2, "chat_id": "c", "origin": 7, "cwd": []})", {});
+    CHECK(odd.session.origin.empty());
+    CHECK(odd.session.cwd.empty());
+    REQUIRE(odd.warnings.size() == 2);
     CHECK(odd.warnings.front().kind == WarningKind::FieldDropped);
 }
 
@@ -1007,4 +1101,56 @@ TEST_CASE("a chat deleted outside a running session stays deleted",
     fresh.chat_id = "20260826-120000-f1f1";
     CHECK(apogee::logger::save(fresh) == apogee::logger::Saved::Written);
     CHECK(std::filesystem::exists(apogee::logger::session_path(fresh.chat_id)));
+}
+
+TEST_CASE("a delete is learned without a save, and only of a file this process filed",
+          "[logger][session][unwritten][record-truth]") {
+    // 57a: a close that writes nothing -- a resumed chat left as it was --
+    // never called `save`, so never learned its chat was deleted, and went
+    // on to summarise, capture and call it saved. `learn_deleted` asks only
+    // whether the file this process read or wrote is still there.
+    const TempDir dir{"session-learn-delete-" + std::to_string(std::random_device{}())};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    Session kept = sample();
+    REQUIRE(apogee::logger::save(kept) == apogee::logger::Saved::Written);
+    Session resumed = apogee::logger::load(kept.chat_id, {}).session;
+    const std::filesystem::path file = apogee::logger::session_path(kept.chat_id);
+    const std::string before = [&file] {
+        std::ifstream in{file, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    }();
+
+    // Still there: nothing learned, nothing written.
+    CHECK_FALSE(apogee::logger::filed_and_gone(resumed));
+    CHECK_FALSE(apogee::logger::learn_deleted(resumed));
+    CHECK_FALSE(resumed.deleted);
+    {
+        std::ifstream in{file, std::ios::binary};
+        CHECK(std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}} ==
+              before);
+    }
+
+    // Deleted outside: learned, and kept -- the save after it writes nothing.
+    REQUIRE(std::filesystem::remove(file));
+    CHECK(apogee::logger::filed_and_gone(resumed));
+    CHECK_FALSE(resumed.deleted);  // the query alone marks nothing
+    CHECK(apogee::logger::learn_deleted(resumed));
+    CHECK(resumed.deleted);
+    CHECK(resumed.unwritten());
+    CHECK(apogee::logger::save(resumed) == apogee::logger::Saved::Unwritten);
+    CHECK_FALSE(std::filesystem::exists(file));
+
+    // A session that filed nothing has nothing to lose: a new chat before its
+    // first save, and a private one.
+    Session fresh = sample();
+    fresh.chat_id = "20260826-120000-f2f2";
+    fresh.new_chat = true;
+    CHECK_FALSE(apogee::logger::filed_and_gone(fresh));
+    CHECK_FALSE(apogee::logger::learn_deleted(fresh));
+    Session secret = sample();
+    secret.chat_id = "20260826-120000-f3f3";
+    secret.never_written = true;
+    secret.filed_name = "";  // even had it one
+    CHECK_FALSE(apogee::logger::learn_deleted(secret));
+    CHECK_FALSE(secret.deleted);
 }

@@ -51,13 +51,22 @@ constexpr std::array<std::string_view, 3> kIngestRetrieverNames{kLexical, kVecto
         return "the collection holds no vectors -- re-run `apogee embed ingest` with "
                "--retriever vector to build them";
     }
+    if (!store.mixed_models.empty()) {
+        // A partial re-ingest under another model (57s): never one space.
+        return "the collection's vectors are from more than one model (" +
+               spoken_models(store.mixed_models) + ") -- re-run `apogee embed ingest` over every " +
+               "source with '" + embedder.model + "' to vector-query";
+    }
     if (store.recorded_model.empty() || store.recorded_model != embedder.model) {
         const std::string from = store.recorded_model.empty()
                                      ? "an unrecorded model (or an interrupted vector ingest)"
                                      : "model '" + store.recorded_model + "'";
+        // Every source, never "the current model" alone: re-ingesting part
+        // of the collection leaves the rest in the old space (57s).
         return "the collection's vectors are from " + from +
                " but the embedding backend would use '" + embedder.model +
-               "' -- re-run `apogee embed ingest` with the current model to vector-query";
+               "' -- re-run `apogee embed ingest` over every source with '" + embedder.model +
+               "' to vector-query";
     }
     if (store.vector_dims > 1) {
         return "the collection holds vectors of " + std::to_string(store.vector_dims) +
@@ -203,6 +212,68 @@ IngestRetrieval resolve_ingest_retriever(std::string_view flag, std::string_view
         return out;
     }
     out.retriever = Retriever::Vector;
+    return out;
+}
+
+std::string spoken_models(const std::vector<std::string>& models) {
+    std::string out;
+    for (std::size_t index = 0; index < models.size(); ++index) {
+        if (index > 0) {
+            out += index + 1 == models.size() ? " and " : ", ";
+        }
+        out += models[index].empty() ? "an unrecorded model" : "'" + models[index] + "'";
+    }
+    return out;
+}
+
+IngestBinding resolve_ingest_binding(const IngestBindingFacts& facts) {
+    IngestBinding out;
+    if (facts.source_models.empty()) {
+        // No vectors left at all: a stale record must not make auto pick
+        // vector search over a store that holds none.
+        out.action = BindingAction::Clear;
+        return out;
+    }
+    // Every model the store's vectors are from, in the order its sources
+    // name them, and how many sources keep another model's than this run's.
+    std::vector<std::string> models;
+    std::int64_t others = 0;
+    for (const std::string& model : facts.source_models) {
+        if (std::ranges::find(models, model) == models.end()) {
+            models.push_back(model);
+        }
+        if (model != facts.run_model) {
+            ++others;
+        }
+    }
+    if (models.size() == 1) {
+        if (models.front().empty()) {
+            // Nothing known of any source's model: the store's own record,
+            // or its absence, is all there is to say.
+            out.action = BindingAction::Keep;
+            return out;
+        }
+        // One space: the store's own, or this run's over every vector left.
+        out.action = BindingAction::Bind;
+        out.model = models.front();
+        return out;
+    }
+    // Vectors from more than one model: the store is two spaces (or more),
+    // and says so rather than ranking one against the other.
+    out.action = BindingAction::Mixed;
+    if (const auto run = std::ranges::find(models, facts.run_model);
+        !facts.run_model.empty() && run != models.end()) {
+        std::rotate(run, run + 1, models.end());  // this run's last
+    }
+    out.models = models;
+    if (facts.vectors_written > 0 && !facts.run_model.empty()) {
+        std::erase(models, facts.run_model);
+        out.warning = "warning: " + std::to_string(others) + " source(s) keep vectors from " +
+                      spoken_models(models) +
+                      " -- the collection searches lexically until every source is re-ingested "
+                      "with '" +
+                      facts.run_model + "'";
+    }
     return out;
 }
 

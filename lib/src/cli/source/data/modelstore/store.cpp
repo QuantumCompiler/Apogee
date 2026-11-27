@@ -147,6 +147,15 @@ std::optional<WeightsHandle> parse_weights_handle(std::string_view text) {
     return handle;
 }
 
+std::optional<std::string> renamed_handle(std::string_view ref, std::string_view from,
+                                          std::string_view to) {
+    const std::optional<WeightsHandle> handle = parse_weights_handle(ref);
+    if (!handle.has_value() || handle->model != from || to.empty()) {
+        return std::nullopt;
+    }
+    return weights_handle(to, handle->format, handle->id);
+}
+
 bool is_weight_id(std::string_view text) noexcept {
     return text.size() == kWeightIdLength && std::ranges::all_of(text, [](char c) {
                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
@@ -997,7 +1006,9 @@ StoreTarget resolve_store_target(const StoreRoots& roots, std::string_view given
 
 std::string remove_weights(const std::filesystem::path& weights_dir) {
     std::error_code code;
-    std::filesystem::remove_all(weights_dir, code);
+    // A model's folder is the thing a user moves to another drive and links
+    // back: the link goes, never what it points at (57k).
+    platform::remove_tree(weights_dir, code);
     if (code) {
         return "could not remove " + weights_dir.string() + ": " + code.message();
     }

@@ -1,0 +1,7 @@
+promoted to new backend student-tuned -> v1
+  gguf:   /Users/someone/.apogee/models/student/gguf/052b295c3e9b/student-tuned-v1.gguf
+  config: /Users/someone/.apogee/config/config.json
+  eval:   46% (11/24)
+
+Chat with it:
+  apogee chat -m student-tuned

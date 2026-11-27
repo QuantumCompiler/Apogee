@@ -9,6 +9,8 @@ import SwiftUI
 public struct SessionsScreen: View {
     @Bindable private var library: SessionLibraryViewModel
     private let shell: ShellViewModel
+    /// The width when a drag on the inspector's edge began; `nil` between drags.
+    @State private var dragStart: Double?
 
     public init(library: SessionLibraryViewModel, shell: ShellViewModel) {
         self.library = library
@@ -33,6 +35,22 @@ public struct SessionsScreen: View {
             .id(ObjectIdentifier(library.current))
             if showsInspector {
                 Divider()
+                    .overlay {
+                        Color.clear
+                            .frame(width: 8)
+                            .contentShape(Rectangle())
+                            .pointerStyle(.frameResize(position: .leading))
+                            .gesture(
+                                DragGesture(coordinateSpace: .global)
+                                    .onChanged { value in
+                                        let start = dragStart ?? library.inspectorWidth
+                                        dragStart = start
+                                        library.setInspectorWidth(start - value.translation.width)
+                                    }
+                                    .onEnded { _ in dragStart = nil }
+                            )
+                    }
+                    .zIndex(1)
                 InspectorPane(
                     inspector: library.inspector,
                     showInfo: { if let chat = library.currentChat { Task { await library.showInfo(chat) } } },
@@ -40,30 +58,30 @@ public struct SessionsScreen: View {
                     forgetRecall: { Task { await library.askToForgetRecall() } },
                     chooseRecall: { library.selectRecall($0) }
                 ) { shell.go(.models) }
-                    .frame(width: 360)
-                    .task {
-                        await library.refreshRoles()
-                        await library.refreshRecall()
-                    }
+                    .frame(width: CGFloat(library.inspectorWidth))
+                    .task { await library.refreshInspector() }
             }
         }
         .confirmationDialog(
             pendingTitle, isPresented: Binding(get: { library.pending != nil }, set: { if !$0 { library.dismissPending() } }),
             titleVisibility: .visible
         ) {
-            switch library.pending {
-            case .stopTurn:
-                Button("Stop the turn and switch", role: .destructive) { Task { await library.confirm() } }
-            case .endPrivate:
-                Button("End it and switch", role: .destructive) { Task { await library.confirm() } }
-            case .delete:
-                Button("Delete", role: .destructive) { Task { await library.confirm() } }
-            case .compact:
-                Button("Compact it", role: .destructive) { Task { await library.confirm() } }
-            case .forgetRecall:
-                Button("Forget every summary", role: .destructive) { Task { await library.confirm() } }
-            case nil:
-                EmptyView()
+            // The answer is captured here, where the button is built: the
+            // dialog's closing clears the question before the Task runs
+            // (GUI M20).
+            if let answer = library.pending {
+                switch answer {
+                case .stopTurn:
+                    Button("Stop the turn and switch", role: .destructive) { Task { await library.confirm(answer) } }
+                case .endPrivate:
+                    Button("End it and switch", role: .destructive) { Task { await library.confirm(answer) } }
+                case .delete:
+                    Button("Delete", role: .destructive) { Task { await library.confirm(answer) } }
+                case .compact:
+                    Button("Compact it", role: .destructive) { Task { await library.confirm(answer) } }
+                case .forgetRecall:
+                    Button("Forget every summary", role: .destructive) { Task { await library.confirm(answer) } }
+                }
             }
             Button(keepTitle, role: .cancel) { library.dismissPending() }
         } message: {
@@ -560,6 +578,27 @@ public struct SessionCommands: Commands {
         await library.start(inView: false)
         await library.refreshRecall()
     }
+}
+
+#Preview("Recall that can't be read: the failure alone, Forget still offered") {
+    @Previewable @State var library = SessionsPreview.documents(recall: false)
+    InspectorPane(inspector: library.inspector, showInfo: {}, compact: {}, forgetRecall: {}) {}
+        .frame(width: 360, height: 760)
+        .task {
+            await library.start(inView: false)
+            await library.refreshRoles()
+            await library.refreshRecall()
+        }
+}
+
+#Preview("Forgetting what recall holds when it can't be read: the question says so") {
+    let library = SessionsPreview.documents(recall: false)
+    SessionsScreen(library: library, shell: SessionsPreview.shell())
+        .frame(width: 1100, height: 720)
+        .task {
+            await library.start(inView: true)
+            await library.askToForgetRecall()
+        }
 }
 
 #Preview("Forgetting what recall holds: the summaries it erases, named") {

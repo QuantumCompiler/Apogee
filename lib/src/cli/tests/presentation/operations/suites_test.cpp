@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "backends/factory.h"
 #include "contracts/config.h"
 #include "symphony/definition.h"
 
@@ -66,6 +67,43 @@ TEST_CASE("a run under a suite whose member names nothing is refused in the exis
     CHECK(validate_active_suite(config).empty());
     config.models.default_suite = "research";
     CHECK(validate_active_suite(config) ==
+          "no backend named 'ghost' (configured: helper, root) -- suite research's utility "
+          "member; fix it with: apogee config set-suite research --utility <backend>");
+}
+
+TEST_CASE("once built, a run under a suite whose member did not start is refused with its reason",
+          "[operations][suites][named-backend]") {
+    using apogee::backends::BackendStatus;
+    using apogee::backends::BuildResult;
+    Config config = two_backends();
+    BuildResult built;
+    built.statuses = {BackendStatus{.name = "root", .constructed = true},
+                      BackendStatus{.name = "helper", .constructed = true}};
+    // No suite active: nothing to refuse.
+    CHECK(validate_active_suite(config, built).empty());
+    // A member defined and started passes.
+    config.models.default_suite = "fine";
+    CHECK(validate_active_suite(config, built).empty());
+    // Defined, but the factory did not start it: its own reason, once named,
+    // and the backends that did start, then the suite's member and the fix.
+    built.statuses.back() = BackendStatus{
+        .name = "helper", .constructed = false, .reason = "helper: no Python environment"};
+    CHECK(validate_active_suite(config, built) ==
+          "backend 'helper' is configured but could not be started: no Python environment "
+          "(started backends: root) -- suite fine's utility member; fix it with: apogee config "
+          "set-suite fine --utility <backend>");
+    // Before building, the config-only check cannot tell, and does not.
+    CHECK(validate_active_suite(config).empty());
+    // With nothing started, it says where to look.
+    built.statuses.front().constructed = false;
+    CHECK(validate_active_suite(config, built)
+              .starts_with("backend 'helper' is configured but could not be started: no Python "
+                           "environment (no backend started; 'apogee check' says why) -- suite "
+                           "fine's utility member"));
+    // A member naming nothing keeps its existing words.
+    built.statuses.front().constructed = true;
+    config.models.default_suite = "research";
+    CHECK(validate_active_suite(config, built) ==
           "no backend named 'ghost' (configured: helper, root) -- suite research's utility "
           "member; fix it with: apogee config set-suite research --utility <backend>");
 }

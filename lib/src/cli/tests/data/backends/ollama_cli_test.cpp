@@ -303,3 +303,37 @@ TEST_CASE("list_models reports the configured cloud model", "[backends][ollama]"
     CHECK(models.front().provider == "ollama-cli");
     CHECK(models.front().id == "gpt-oss:20b-cloud");
 }
+
+TEST_CASE("a run that fails mid-answer fails the turn with the CLI's own error",
+          "[backends][ollama][errors]") {
+    // 57b: the failure check used to need an EMPTY answer, so a server or a
+    // cloud model that failed mid-generation returned half an answer as a
+    // whole turn -- saved, and its `Error:` line dropped.
+    Fixture fixture{"The capital of France is"};
+    fixture.spawner->exit_status = 1;
+    fixture.spawner->stderr_script =
+        "Error: an error was encountered while running the model: unexpected EOF\n";
+
+    std::string streamed;
+    apogee::harness::StreamOptions options;
+    options.on_token = [&streamed](std::string_view chunk) { streamed += chunk; };
+
+    try {
+        (void)fixture.provider->stream_chat(turn({ChatMessage::user("capital of France?")}),
+                                            options);
+        FAIL("expected the non-zero exit to fail the turn");
+    } catch (const apogee::harness::ProviderError& error) {
+        const std::string message = error.what();
+        CHECK(message.find("exited with status 1") != std::string::npos);
+        CHECK(message.find("Error: an error was encountered while running the model") !=
+              std::string::npos);
+    }
+    // What streamed was shown live; it is not returned as a turn.
+    CHECK(streamed == "The capital of France is");
+}
+
+TEST_CASE("a clean exit after an answer is the turn", "[backends][ollama]") {
+    Fixture fixture{"Paris."};
+    const auto response = fixture.provider->chat(turn({ChatMessage::user("capital?")}), {});
+    CHECK(response.message.content.plain_text() == "Paris.");
+}

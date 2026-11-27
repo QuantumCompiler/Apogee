@@ -124,10 +124,34 @@ public final class CollectionsViewModel {
         return collections.isEmpty ? "No collections yet. Ingest a folder of documents: it is read, chunked and indexed for retrieval." : nil
     }
 
-    /// The vectors line, in the CLI's terms: how many chunks carry one, or
-    /// that the collection is text only.
+    /// The vectors line, in the words of the CLI's text-mode `embed info`
+    /// (`embed.cpp`'s `collection_info_text`), from its document's `vectors`
+    /// object (GUI 6h): `<n> of <total> chunks, <D>-d [<model>]`; `[model not
+    /// recorded -- re-ingest to bind]` with none bound; the CLI's `[mixed:
+    /// ...]` where the vectors come from several models (its 57s); ` --
+    /// MIXED: <w> widths` where they are of several widths. A text-only
+    /// collection -- `vectors` null -- says so.
     public static func vectors(_ info: CollectionInfo) -> String {
-        info.vectors.map { "\($0) of \(info.chunks) chunks" } ?? "none -- a text index only"
+        guard let vectors = info.vectors else { return "none -- a text index only" }
+        var line = "\(vectors.chunks) of \(info.chunks) chunk\(info.chunks == 1 ? "" : "s"), \(vectors.dimension)-d"
+        if !vectors.mixed.isEmpty {
+            line += " [mixed: \(spoken(vectors.mixed)) -- re-ingest every source with one model]"
+        } else if let model = vectors.model {
+            line += " [\(model)]"
+        } else {
+            line += " [model not recorded -- re-ingest to bind]"
+        }
+        if vectors.widths > 1 { line += " -- MIXED: \(vectors.widths) widths" }
+        return line
+    }
+
+    /// Models named as the CLI names them (`agentloop::spoken_models`):
+    /// quoted, `and` before the last, an unrecorded one "an unrecorded
+    /// model".
+    static func spoken(_ models: [String?]) -> String {
+        let names = models.map { $0.map { "'\($0)'" } ?? "an unrecorded model" }
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " and " + names[names.count - 1]
     }
 
     // MARK: - Searching
@@ -154,9 +178,16 @@ public final class CollectionsViewModel {
 
     // MARK: - Changing
 
-    public func confirmDelete() async {
-        guard let binary, let pending = pendingDelete, working == nil else { return }
-        pendingDelete = nil
+    /// `embed delete` once the person said yes to `answer`, the delete the
+    /// dialog showed -- a whole collection's with `--yes`, or one source's --
+    /// read back, the CLI's last line said. The dialog's closing clears
+    /// `pendingDelete` before its button's action runs, so the answer is
+    /// handed in (GUI M20); `pendingDelete` is cleared only while it is still
+    /// `answer`.
+    public func confirmDelete(_ answer: PendingDelete) async {
+        guard let binary, working == nil else { return }
+        let pending = answer
+        if pendingDelete == answer { pendingDelete = nil }
         working = "Deleting"
         let outcome = await runner.command(binary: binary, pending.arguments)
         working = nil
@@ -174,7 +205,12 @@ public final class CollectionsViewModel {
         ingesting = true
     }
 
-    /// The ingest sheet's command, supervised.
+    /// The ingest sheet's command, supervised. When it ends, its collection
+    /// is chosen and read; landing on another collection than the one shown,
+    /// the shown one's page and search results go at once, as a click's
+    /// `select(_:)` drops them, so no moment holds one collection's results
+    /// or heading under another's name (GUI 6h). An ingest into the
+    /// collection shown keeps its results: they are its own.
     public func ingest() {
         guard let binary, let arguments = ingestForm.arguments, job == nil else { return }
         ingesting = false
@@ -187,6 +223,10 @@ public final class CollectionsViewModel {
             self.job = nil
             let progress = run
             run = nil
+            if selected != name {
+                info = nil
+                results = nil
+            }
             selected = name
             await refresh()
             switch progress?.status {

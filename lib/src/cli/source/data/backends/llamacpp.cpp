@@ -1620,10 +1620,65 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
     expire_if_idle();
     ensure_model(options.on_status);
     // The whole turn under the base's lock: one thread drives a model at a
-    // time, and the providers sharing it take turns (53d).
+    // time, and the providers sharing it take turns (53d). The forgetting
+    // below runs under it too.
     const std::shared_ptr<SharedBase> base = base_;
     const std::unique_lock<std::mutex> lock = base->use();
 
+    // A failure fails this turn, never the session (57c). The model loads
+    // with no context made, so a `cache_type` the user named or a window the
+    // hardware cannot hold fails at the first turn's context, and a decode
+    // at any prompt or token: llama.cpp says each as a plain runtime_error,
+    // which no surface handles -- it ended `chat` and machine mode with exit
+    // 1 and no `error` event. A cancellation leaves the session's record and
+    // its KV agreeing (the next trim cuts what the turn generated), so it
+    // keeps them; any other failure past the point the KV is being refilled
+    // forgets both.
+    bool session_changing = false;
+    try {
+        return run_locked(request, options, session_changing);
+    } catch (const harness::CancelledError&) {
+        throw;
+    } catch (const harness::HarnessError&) {
+        if (session_changing) {
+            forget_session();
+        }
+        throw;
+    } catch (const std::runtime_error& e) {
+        if (session_changing) {
+            forget_session();
+        }
+        throw harness::ProviderError(options_.backend_name, e.what());
+    } catch (...) {
+        if (session_changing) {
+            forget_session();
+        }
+        throw;
+    }
+}
+
+void LlamaCppProvider::forget_session() noexcept {
+    session_tokens_.clear();
+    last_prompt_tokens_ = 0;
+    if (session_ == nullptr) {
+        return;
+    }
+    // Position 0 empties any cache: there is no checkpoint before it.
+    bool emptied = false;
+    try {
+        emptied = session_->trim_to(0) == 0;
+    } catch (...) {
+        emptied = false;
+    }
+    if (!emptied) {
+        // A context that cannot be emptied is not trusted with a turn.
+        session_.reset();
+    }
+}
+
+harness::ChatResponse LlamaCppProvider::run_locked(const harness::ChatRequest& request,
+                                                   const harness::StreamOptions& options,
+                                                   bool& session_changing) {
     // Images take a different route entirely. mtmd turns text-with-markers plus
     // decoded pictures into interleaved text and embedding chunks, so there is
     // no flat token vector to prefix-match against -- which is why the image
@@ -1664,6 +1719,9 @@ harness::ChatResponse LlamaCppProvider::run(const harness::ChatRequest& request,
         // context only ever holds its own entry's (53d).
         assert_adapters(*context);
         reject_if_too_long(*context, prompt.size(), options_.backend_name);
+        // From here the KV is restored, cut and refilled, and generation
+        // writes past the prompt: a failure leaves it unlike the record.
+        session_changing = true;
 
         // A context with nothing in it yet may start from disk (26j): the
         // resumed chat's own state, or the prefix its system prompt and tools

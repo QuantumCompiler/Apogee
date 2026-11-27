@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "backends/llama_runtime.h"
 #include "backends/llamacpp.h"
 #include "cli/chat.h"
 #include "cli/execute.h"
@@ -641,10 +642,25 @@ struct AdmissionChat {
     }
 };
 
+/// Whether the sandbox's local members start: they are llamacpp entries, which
+/// a build without llama.cpp cannot construct -- and a session under a suite
+/// whose member did not start is refused at launch (57d), before its admission
+/// is reached, so such a build holds that refusal instead (below).
+[[nodiscard]] bool local_members_start() {
+    return apogee::backends::llama_available();
+}
+
+constexpr const char* kNoLocalMembers =
+    "the local members are llamacpp entries, which this build cannot start: a session under "
+    "their suite is refused at launch (57d)";
+
 }  // namespace
 
 TEST_CASE("a chat under a suite that fits states it and proceeds",
           "[commands][suites][residency]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     AdmissionChat chat;
     // small: 770 MiB recorded + 544 MiB of cache at 32K.
     REQUIRE(chat.run({"chat", "--suite", "roomy"}, "hello\n") == 0);
@@ -655,6 +671,9 @@ TEST_CASE("a chat under a suite that fits states it and proceeds",
 
 TEST_CASE("a chat under a suite that cannot fit is refused with the numbers; --force runs it",
           "[commands][suites][residency]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     AdmissionChat chat;
     CHECK(chat.run({"chat", "--suite", "huge"}, "hello\n") == 1);
     CHECK(chat.err.find("apogee chat: suite huge needs 206368 MiB of this machine's 65536 MiB: big "
@@ -670,6 +689,9 @@ TEST_CASE("a chat under a suite that cannot fit is refused with the numbers; --f
 
 TEST_CASE("a member with no recorded size is said to be unknown, and the chat still runs",
           "[commands][suites][residency]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     AdmissionChat chat;
     REQUIRE(chat.run({"chat", "--suite", "partial"}, "hello\n") == 0);
     CHECK(chat.err.find("suite partial needs at least 1024 MiB of this machine's 65536 MiB: loose "
@@ -680,6 +702,9 @@ TEST_CASE("a member with no recorded size is said to be unknown, and the chat st
 
 TEST_CASE("/suite refuses a suite that cannot fit, and --force switches to it",
           "[commands][suites][residency]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     AdmissionChat chat;
     REQUIRE(chat.run({"chat", "--suite", "roomy"},
                      "/suite huge\n/suite\n/suite huge --force\n/suite\n/suite roomy --hot\n") ==
@@ -716,6 +741,9 @@ constexpr const char* kDrivenHello = "{\"type\":\"user\",\"text\":\"hello\"}\n";
 
 TEST_CASE("a driven session's admission is a notice after its session event, not stderr's",
           "[commands][suites][residency][machine]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     // M29: a driver read `[apogee] suite research: ...` from stderr alone.
     // As a resume's notes are (55b), it is said where the driver draws it.
     for (const std::string mode : {"chat", "execute"}) {
@@ -748,6 +776,9 @@ TEST_CASE("a driven session's admission is a notice after its session event, not
 
 TEST_CASE("a driven session refused admission at launch says so on stderr, exit 1, stdout empty",
           "[commands][suites][residency][machine]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     // The launch contract (machine-mode.md): nothing is on stdout before the
     // session event, and a refusal is no turn's error.
     for (const std::string mode : {"chat", "execute"}) {
@@ -764,32 +795,77 @@ TEST_CASE("a driven session refused admission at launch says so on stderr, exit 
 
 TEST_CASE("a suite's warnings at launch reach a driver as notices, and the terminal as before",
           "[commands][suites][residency][machine]") {
-    // A member pinned to a window it cannot be rebuilt at: the suite's own
-    // warning, said where the session is read.
+    // A member --warm cannot load -- `small` is a header with no weights: the
+    // suite's own warning, said where the session is read. (Until 57d the
+    // fixture was a member that never started, pinned to a window it could
+    // not be rebuilt at; such a suite is refused at launch now, below.)
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
+    AdmissionChat chat;
+    REQUIRE(chat.run({"chat", "--suite", "roomy", "--warm", "--output-format", "stream-json"},
+                     kDrivenHello) == 0);
+    const std::vector<nlohmann::json> events = events_of(chat.out);
+    REQUIRE(events.size() > 3);
+    CHECK(events.at(0).at("suite") == "roomy");
+    CHECK(events.at(1).at("type") == "notice");
+    CHECK(events.at(1).at("text").get<std::string>().starts_with("suite roomy needs "));
+    CHECK(events.at(2).at("type") == "notice");
+    CHECK(events.at(2).at("text").get<std::string>().starts_with(
+        "could not warm small -- its first use will try again: "));
+    CHECK_FALSE(events.at(2).contains("turn"));
+    CHECK(chat.err.find("could not warm") == std::string::npos);
+
+    // At the terminal -- a pipe -- both stay on stderr, as they always were.
+    REQUIRE(chat.run({"chat", "--suite", "roomy", "--warm"}, "hello\n") == 0);
+    CHECK(chat.err.find("could not warm small -- its first use will try again: ") !=
+          std::string::npos);
+    CHECK(chat.err.find("[apogee] suite roomy needs ") != std::string::npos);
+}
+
+TEST_CASE("a suite whose member never started is refused at launch, before its warnings",
+          "[commands][suites][residency][machine][named-backend]") {
+    // 57d: a member configured but never started -- a vendor CLI whose binary
+    // is nowhere -- pinned to a window. It drew a rebuild warning, and every
+    // extraction would have been answered by the default under its name.
     AdmissionChat chat{"  gone:\n    type: claude-cli\n    binary: /nowhere/at/all/claude\n",
                        "  pinned:\n    members:\n      chat: root\n      extraction:\n"
                        "        backend: gone\n        context_size: 4096\n"};
-    REQUIRE(chat.run({"chat", "--suite", "pinned", "--output-format", "stream-json"},
-                     kDrivenHello) == 0);
-    const std::vector<nlohmann::json> events = events_of(chat.out);
-    REQUIRE(events.size() > 2);
-    CHECK(events.at(0).at("suite") == "pinned");
-    CHECK(events.at(1).at("type") == "notice");
-    CHECK(events.at(1).at("text").get<std::string>().starts_with(
-        "gone keeps its old window -- it could not be rebuilt: "));
-    CHECK(events.at(2).at("type") == "notice");
-    CHECK(events.at(2).at("text") == "suite pinned: no member holds memory on this machine");
-    CHECK(chat.err.find("keeps its old window") == std::string::npos);
-
-    // At the terminal -- a pipe -- both stay on stderr, as they always were.
-    REQUIRE(chat.run({"chat", "--suite", "pinned"}, "hello\n") == 0);
-    CHECK(chat.err.find("gone keeps its old window -- it could not be rebuilt: ") !=
-          std::string::npos);
-    CHECK(chat.err.find("[apogee] suite pinned: no member holds memory on this machine") !=
-          std::string::npos);
+    for (const std::string mode : {"chat", "execute"}) {
+        for (const bool machine : {false, true}) {
+            INFO(mode << (machine ? " driven" : ""));
+            std::vector<std::string> args{mode, "--suite", "pinned"};
+            if (machine) {
+                args.insert(args.end(), {"--output-format", "stream-json"});
+            }
+            CHECK(chat.run(args, machine ? kDrivenHello : "hello\n") == 1);
+            CHECK(chat.out.empty());
+            // The refusal alone: nothing rebuilt or said for a suite refused.
+            CHECK(chat.err.starts_with("apogee " + mode +
+                                       ": backend 'gone' is configured but could not be "
+                                       "started: "));
+            CHECK(
+                chat.err.ends_with(" -- suite pinned's extraction member; fix it with: apogee "
+                                   "config set-suite pinned --extraction <backend>\n"));
+            CHECK(chat.err.find("keeps its old window") == std::string::npos);
+        }
+    }
+    // Without llama.cpp the sandbox's local members never start either, and
+    // a suite of them is refused the same way, before its admission.
+    if (!local_members_start()) {
+        CHECK(chat.run({"chat", "--suite", "roomy"}, "hello\n") == 1);
+        CHECK(chat.err.starts_with(
+            "apogee chat: backend 'small' is configured but could not be started: "));
+        CHECK(chat.err.find(" -- suite roomy's extraction member; fix it with: ") !=
+              std::string::npos);
+        CHECK(chat.out.empty());
+    }
 }
 
 TEST_CASE("warming needs a suite, and paints nothing on a pipe", "[commands][suites][residency]") {
+    if (!local_members_start()) {
+        SKIP(kNoLocalMembers);
+    }
     AdmissionChat chat;
     CHECK(chat.run({"chat", "--warm"}, "hello\n") == 1);
     CHECK(chat.err.find("--warm loads a suite's members, and this chat runs under none") !=

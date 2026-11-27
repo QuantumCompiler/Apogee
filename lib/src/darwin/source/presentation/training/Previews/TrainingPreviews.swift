@@ -267,6 +267,62 @@ enum TrainingPreview {
         .ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: BoundedTail(), interrupted: false))
     }
 
+    // MARK: - What the CLI's 57g and 57h state (GUI 6i)
+
+    /// The second sweep's sandbox, on the build tree's binary: `Nightly SFT`
+    /// (its `name:` not its key, `nightly`) and a spec-file run whose file has
+    /// gone, each aborted at stage 2; `three` failed, its first stage kept
+    /// failed; and a cycle pass aborted -- each run's document with its
+    /// `resume`, the named pipelines `train pipeline list`'s.
+    static let resumes = PreviewRunner(
+        reads: runner.reads + [
+            (["train", "pipeline", "list"], TrainingDocuments.pipelineListSweep),
+            (["train", "pipeline", "status"], TrainingDocuments.pipelineStatusResumesList),
+            (["train", "pipeline", "status", namedID], TrainingDocuments.pipelineStatusNamed),
+            (["train", "pipeline", "status", specFileID], TrainingDocuments.pipelineStatusSpecFileGone),
+            (["train", "pipeline", "status", keptFailedID], TrainingDocuments.pipelineStatusKeptFailed),
+            (["train", "pipeline", "status", cyclePassID], TrainingDocuments.pipelineStatusCyclePass),
+        ])
+
+    /// The same, the `Nightly SFT` run held by a live process (57g's
+    /// `holder`).
+    static let resumesHeld = PreviewRunner(
+        reads: resumes.reads.filter { $0.0 != ["train", "pipeline", "status", namedID] } + [
+            (["train", "pipeline", "status", namedID], TrainingDocuments.pipelineStatusNamedHeld)
+        ])
+
+    /// An older binary's aborted run (no `resume` in its document) whose spec
+    /// the completion does not name.
+    static let abortedUnnamed = PreviewRunner(reads: aborted.reads, commands: [(complete, TrainingDocuments.pipelineCompleteNone)])
+
+    static let namedID = "pipe-20261109-040503"
+    static let specFileID = "pipe-20261109-041444"
+    static let keptFailedID = "pipe-20261109-041458"
+    static let cyclePassID = "cycle-20261109-041521"
+
+    /// The cycle after a dead pass's lock was left (57g's `stale_lock`).
+    static let cycleStaleLock = cycle(TrainingDocuments.trainStatusCycleStaleLock, TrainingDocuments.cycleStatusStaleLock)
+    /// The cycle held by a live process, as a binary from 57g says it.
+    static let cycleLiveLock = cycle(TrainingDocuments.trainStatusCycleLiveLock, TrainingDocuments.cycleStatusLiveLock)
+    /// A first pass killed before it wrote any history: no history, its lock
+    /// left.
+    static let staleLockNoHistory = PreviewRunner(
+        reads: reads(status: TrainingDocuments.trainStatusStaleLockNoHistory)
+            + pipelines.reads.filter { $0.0.starts(with: ["train", "pipeline"]) },
+        commands: pipelines.commands)
+    /// The history there and unreadable (57h's `cycle_error`).
+    static let cycleUnreadable = PreviewRunner(
+        reads: reads(status: TrainingDocuments.trainStatusCycleUnreadable)
+            + pipelines.reads.filter { $0.0.starts(with: ["train", "pipeline"]) },
+        commands: pipelines.commands)
+
+    /// `train status` with a run still training that is older than the five
+    /// newest, named in `running` by its id alone.
+    static let runningOlder = PreviewRunner(reads: reads(status: TrainingDocuments.trainStatusRunningOlder))
+
+    /// The running run known by its id alone.
+    static let olderRunningID = "pipe-20261109-040503-s0"
+
     /// Updates folded as the place folds them.
     static func folded(_ updates: [JobUpdate]) -> JobProgress {
         var progress = JobProgress()

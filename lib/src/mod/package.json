@@ -1,0 +1,22 @@
+{
+  "name": "apogee",
+  "private": true,
+  "description": "The checks of the Apogee mod, the Claude plugin in this folder: its type-check, layering check and tests. Claude loads the plugin from .claude-plugin/plugin.json and never reads this file.",
+  "type": "module",
+  "engines": {
+    "node": "26.x"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "layering": "node tests/architecture/layering/main.mjs",
+    "test:node": "node --test \"tests/**/*.test.mjs\"",
+    "validate": "\"${CLAUDE:-claude}\" plugin validate --strict .",
+    "test:plugin": "\"${CLAUDE:-claude}\" plugin test .",
+    "package": "node scripts/package.mjs",
+    "validate:package": "node scripts/validate-package.mjs",
+    "check": "npm run typecheck && npm run layering && npm run test:node && npm run validate && npm run test:plugin"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

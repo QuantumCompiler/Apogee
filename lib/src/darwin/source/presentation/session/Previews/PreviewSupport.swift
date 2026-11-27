@@ -18,7 +18,10 @@ import InfrastructureProcess
 /// turn is said only up to its `result`, and what the binary said between
 /// turns to a `set` line -- its notices -- only once a `set` is written (GUI
 /// M10's switch). Stopped or closed, it ends as a child that went when
-/// asked. What is written to it goes nowhere.
+/// asked -- or, `holdsStop`, a stop never ends it: the session stays as it
+/// is while its child is being stopped. `refusesTurns`, a turn's line is
+/// refused as one written after a stop closed the child's input is (GUI
+/// 6a). What is written to it goes nowhere.
 actor PreviewChat: ChatSession {
     nonisolated let events: AsyncStream<SessionEvent>
     private let continuation: AsyncStream<SessionEvent>.Continuation
@@ -26,12 +29,17 @@ actor PreviewChat: ChatSession {
     private var unsaid: ArraySlice<ProtocolEvent>
     private let ending: SessionEnd?
     private let byTurn: Bool
+    private let holdsStop: Bool
+    private let refusesTurns: Bool
     private var turns = 0
 
     /// How a child that went when asked ends: its input closed, exit 0.
     static let wentWhenAsked = SessionEnd(reason: .finished, exit: ChildExit(reason: .exited, status: 0), stderrTail: BoundedTail())
 
-    init(saying lines: [String], silentFrom type: String? = nil, ending: SessionEnd? = nil, byTurn: Bool = false) {
+    init(
+        saying lines: [String], silentFrom type: String? = nil, ending: SessionEnd? = nil, byTurn: Bool = false,
+        holdsStop: Bool = false, refusesTurns: Bool = false
+    ) {
         let (events, continuation) = AsyncStream.makeStream(of: SessionEvent.self)
         let said = type.map { type in lines.prefix { JSONValue.parse($0)?["type"]?.stringValue != type } } ?? lines[...]
         var unsaid = said.map(EventDecoder.decode(line:))[...]
@@ -41,6 +49,8 @@ actor PreviewChat: ChatSession {
         self.unsaid = unsaid
         self.ending = ending
         self.byTurn = byTurn
+        self.holdsStop = holdsStop
+        self.refusesTurns = refusesTurns
     }
 
     /// Says the events up to the next the binary waits after: its `session`,
@@ -74,6 +84,7 @@ actor PreviewChat: ChatSession {
     }
 
     func send(user text: String) async throws -> Int {
+        if refusesTurns { throw SessionError.notRunning }
         turns += 1
         Self.say(&unsaid, to: continuation, ending: ending, byTurn: byTurn)
         return turns
@@ -105,21 +116,34 @@ actor PreviewChat: ChatSession {
     }
 
     func stop(grace: Duration) async {
+        guard !holdsStop else { return }
+        continuation.yield(.ended(Self.wentWhenAsked))
+        continuation.finish()
+    }
+
+    /// Terminated, it ends as a child that went when asked.
+    func terminateNow() {
         continuation.yield(.ended(Self.wentWhenAsked))
         continuation.finish()
     }
 }
 
 /// Where a preview's chats come from: the binary found where the release
-/// installs it -- or, given `missing`, none, every place looked passed over --
-/// and each chat opened on it saying `lines`, then ending as `ending` says.
+/// installs it -- or, given `missing`, none on `channel`, every place looked
+/// passed over -- and each chat opened on it saying `lines`, then ending as
+/// `ending` says.
 struct PreviewChats: ChatStarting {
     var lines: [String] = []
     var silentFrom: String?
     var ending: SessionEnd?
     var missing: [SkippedCandidate]?
+    /// The channel none was found on: its install line is the screen's.
+    var channel = InstallChannel.release
     /// Each turn said up to its `result`, and a `set` answered (`PreviewChat`).
     var byTurn = false
+    /// A stop never ends a chat, and a turn's line is refused (`PreviewChat`).
+    var holdsStop = false
+    var refusesTurns = false
 
     /// The binary as the tests' scripted starter finds it
     /// (tests/presentation/session/Scripted.swift).
@@ -128,11 +152,13 @@ struct PreviewChats: ChatStarting {
         versionLine: "apogee 0.1.9 (7072bdf, 2026-10-19, macos-arm64)")
 
     func locateBinary() async -> DiscoveryOutcome {
-        missing.map { .notFound(skipped: $0) } ?? .found(Self.found, skipped: [])
+        missing.map { .notFound(skipped: $0, channel: channel) } ?? .found(Self.found, skipped: [])
     }
 
     func openChat(binary: URL, launch: ChatLaunch) -> any ChatSession {
-        PreviewChat(saying: lines, silentFrom: silentFrom, ending: ending, byTurn: byTurn)
+        PreviewChat(
+            saying: lines, silentFrom: silentFrom, ending: ending, byTurn: byTurn, holdsStop: holdsStop,
+            refusesTurns: refusesTurns)
     }
 }
 

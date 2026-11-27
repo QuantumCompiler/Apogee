@@ -1,0 +1,58 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"video generate"}
+{"text":"from /Users/someone/Movies/Apogee/lighthouse-dusk-draft.mp4.json: model Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6, the prompt, 1280x704, 24 fps, 5 s, 16 steps, seed 4242 (held)","type":"notice"}
+{"text":"changed: 50 steps (--final)","type":"notice"}
+{"text":"Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6 (the record): 1280x704, 121 frames (5 s at 24 fps), 50 steps, seed 4242","type":"notice"}
+{"device":"mps","dtype":"bfloat16","engine":"torch","mode":"t2v","type":"ready"}
+{"step":1,"steps":50,"type":"step"}
+{"step":2,"steps":50,"type":"step"}
+{"step":3,"steps":50,"type":"step"}
+{"step":4,"steps":50,"type":"step"}
+{"step":5,"steps":50,"type":"step"}
+{"step":6,"steps":50,"type":"step"}
+{"step":7,"steps":50,"type":"step"}
+{"step":8,"steps":50,"type":"step"}
+{"step":9,"steps":50,"type":"step"}
+{"step":10,"steps":50,"type":"step"}
+{"step":11,"steps":50,"type":"step"}
+{"step":12,"steps":50,"type":"step"}
+{"step":13,"steps":50,"type":"step"}
+{"step":14,"steps":50,"type":"step"}
+{"step":15,"steps":50,"type":"step"}
+{"step":16,"steps":50,"type":"step"}
+{"step":17,"steps":50,"type":"step"}
+{"step":18,"steps":50,"type":"step"}
+{"step":19,"steps":50,"type":"step"}
+{"step":20,"steps":50,"type":"step"}
+{"step":21,"steps":50,"type":"step"}
+{"step":22,"steps":50,"type":"step"}
+{"step":23,"steps":50,"type":"step"}
+{"step":24,"steps":50,"type":"step"}
+{"step":25,"steps":50,"type":"step"}
+{"step":26,"steps":50,"type":"step"}
+{"step":27,"steps":50,"type":"step"}
+{"step":28,"steps":50,"type":"step"}
+{"step":29,"steps":50,"type":"step"}
+{"step":30,"steps":50,"type":"step"}
+{"step":31,"steps":50,"type":"step"}
+{"step":32,"steps":50,"type":"step"}
+{"step":33,"steps":50,"type":"step"}
+{"step":34,"steps":50,"type":"step"}
+{"step":35,"steps":50,"type":"step"}
+{"step":36,"steps":50,"type":"step"}
+{"step":37,"steps":50,"type":"step"}
+{"step":38,"steps":50,"type":"step"}
+{"step":39,"steps":50,"type":"step"}
+{"step":40,"steps":50,"type":"step"}
+{"step":41,"steps":50,"type":"step"}
+{"step":42,"steps":50,"type":"step"}
+{"step":43,"steps":50,"type":"step"}
+{"step":44,"steps":50,"type":"step"}
+{"step":45,"steps":50,"type":"step"}
+{"step":46,"steps":50,"type":"step"}
+{"step":47,"steps":50,"type":"step"}
+{"step":48,"steps":50,"type":"step"}
+{"step":49,"steps":50,"type":"step"}
+{"step":50,"steps":50,"type":"step"}
+{"frames":121,"height":704,"type":"frames","width":1280}
+{"frames":121,"type":"assembling"}
+{"document":{"codec":"h264","created_at":"2026-11-14T12:00:00Z","device":{"device":"mps","dtype":"bfloat16","platform":"macos-arm64"},"engine":"torch","image":null,"loras":[],"mode":"t2v","model":{"class":"WanPipeline","name":"Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6","path":"/Users/someone/.apogee/models/Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6","ref":"","revision":"","variant":null},"object":"video.generation","output":"/Users/someone/Movies/Apogee/lighthouse-dusk-3.mp4","parent":{"clip":"/Users/someone/Movies/Apogee/lighthouse-dusk-draft.mp4","continued":null,"document":"/Users/someone/Movies/Apogee/lighthouse-dusk-draft.mp4.json","move":"from"},"preset":"final","prompt":"A lighthouse on a basalt cliff at dusk, waves breaking white on the rocks below, slow push-in","seconds":467.6,"seed":4242,"seed_source":"held","settings":{"duration":5.0,"fps":24,"frames":121,"guidance":null,"height":704,"steps":50,"width":1280},"sidecar":"/Users/someone/Movies/Apogee/lighthouse-dusk-3.mp4.json","status":"done","versions":{"apogee":"0.1.9","diffusers":"0.35.1","torch":"2.8.0"}},"type":"document"}

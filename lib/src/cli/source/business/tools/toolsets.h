@@ -12,6 +12,7 @@
 #include "agent/tool.h"
 #include "contracts/config.h"
 #include "harness/harness.h"
+#include "platform/child_process.h"
 #include "tools/git.h"
 
 /// The native toolsets, registered as one set.
@@ -45,6 +46,14 @@ struct ToolsetOptions {
     const harness::Config* config = nullptr;
     /// Toolsets switched off, by name.
     std::vector<std::string> disabled;
+    /// Whether this build can start other programs (57k). Without it no
+    /// `run_command`, no git tools, and no shell in the environment note: a
+    /// model is never offered a tool that can only fail (25e's rule), and no
+    /// one is asked to approve a command that cannot run. The `shell` and
+    /// `git` names stay valid toolset names -- the registry lacks them as it
+    /// lacks `web_search` without an instance. The platform's answer by
+    /// default; a test sets it to see either side on any host.
+    bool child_processes = platform::supports_child_processes();
 };
 
 /// Where the filesystem tools are sandboxed, and whether the config said so.
@@ -67,6 +76,14 @@ struct FsRoot {
 /// under (27d) -- its native toolset, `web` or `mcp` -- or empty for one none
 /// of them names.
 [[nodiscard]] std::string toolset_of(std::string_view tool);
+
+/// Why the native tool `tool` is never offered by this build, or empty: a
+/// `shell` or `git` tool where no program can be started (57k) -- what a
+/// refusal of `--allow`, `--deny`, `/allow` or a task's grant naming it says,
+/// rather than that the name is no tool. `child_processes` is the platform's
+/// answer by default; a test sets it to see either side on any host.
+[[nodiscard]] std::string why_not_offered(
+    std::string_view tool, bool child_processes = platform::supports_child_processes());
 
 /// The tools that declare `writes` -- the `permissions:` keys a config may
 /// carry, and what the shipped template lists.

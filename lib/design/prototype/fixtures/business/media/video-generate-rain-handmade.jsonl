@@ -1,0 +1,49 @@
+{"protocol_version":1,"schema":"2026-10-26","type":"job","verb":"video generate"}
+{"text":"from /Users/someone/Movies/Apogee/rain-window.mp4.json: model Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6, the prompt, 1280x704, 24 fps, 4 s, 40 steps, seed 1203 (held), 1 LoRA (held), the seed image","type":"notice"}
+{"text":"recorded on linux-x86_64 (cuda); this is macos-arm64 -- the same seed may not make the same clip here","type":"notice"}
+{"text":"changed: nothing -- the same run again","type":"notice"}
+{"text":"Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6 (the record): 1280x704, 97 frames (4 s at 24 fps), 40 steps, seed 1203, LoRAs: rain-glass-wan22.safetensors x0.7","type":"notice"}
+{"device":"mps","dtype":"bfloat16","engine":"torch","mode":"i2v","type":"ready"}
+{"step":1,"steps":40,"type":"step"}
+{"step":2,"steps":40,"type":"step"}
+{"step":3,"steps":40,"type":"step"}
+{"step":4,"steps":40,"type":"step"}
+{"step":5,"steps":40,"type":"step"}
+{"step":6,"steps":40,"type":"step"}
+{"step":7,"steps":40,"type":"step"}
+{"step":8,"steps":40,"type":"step"}
+{"step":9,"steps":40,"type":"step"}
+{"step":10,"steps":40,"type":"step"}
+{"step":11,"steps":40,"type":"step"}
+{"step":12,"steps":40,"type":"step"}
+{"step":13,"steps":40,"type":"step"}
+{"step":14,"steps":40,"type":"step"}
+{"step":15,"steps":40,"type":"step"}
+{"step":16,"steps":40,"type":"step"}
+{"step":17,"steps":40,"type":"step"}
+{"step":18,"steps":40,"type":"step"}
+{"step":19,"steps":40,"type":"step"}
+{"step":20,"steps":40,"type":"step"}
+{"step":21,"steps":40,"type":"step"}
+{"step":22,"steps":40,"type":"step"}
+{"step":23,"steps":40,"type":"step"}
+{"step":24,"steps":40,"type":"step"}
+{"step":25,"steps":40,"type":"step"}
+{"step":26,"steps":40,"type":"step"}
+{"step":27,"steps":40,"type":"step"}
+{"step":28,"steps":40,"type":"step"}
+{"step":29,"steps":40,"type":"step"}
+{"step":30,"steps":40,"type":"step"}
+{"step":31,"steps":40,"type":"step"}
+{"step":32,"steps":40,"type":"step"}
+{"step":33,"steps":40,"type":"step"}
+{"step":34,"steps":40,"type":"step"}
+{"step":35,"steps":40,"type":"step"}
+{"step":36,"steps":40,"type":"step"}
+{"step":37,"steps":40,"type":"step"}
+{"step":38,"steps":40,"type":"step"}
+{"step":39,"steps":40,"type":"step"}
+{"step":40,"steps":40,"type":"step"}
+{"frames":97,"height":704,"type":"frames","width":1280}
+{"frames":97,"type":"assembling"}
+{"document":{"codec":"h264","created_at":"2026-11-14T12:00:00Z","device":{"device":"mps","dtype":"bfloat16","platform":"macos-arm64"},"engine":"torch","image":"/Users/someone/Pictures/window-still.jpg","loras":[{"path":"/Users/someone/loras/rain-glass-wan22.safetensors","scale":0.7,"sha256":"c41d8e02b7a95e3d1f60c84a2e9b7d03f5a1c6e88b2d4f07a39e1c5b6d8f5f7a"}],"mode":"i2v","model":{"class":"WanPipeline","name":"Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6","path":"/Users/someone/.apogee/models/Wan2.2-TI2V-5B/pipeline/9b1e47c0a2f6","ref":"","revision":"","variant":null},"object":"video.generation","output":"/Users/someone/Movies/Apogee/rain-window-2.mp4","parent":{"clip":"/Users/someone/Movies/Apogee/rain-window.mp4","continued":null,"document":"/Users/someone/Movies/Apogee/rain-window.mp4.json","move":"from"},"preset":null,"prompt":"Rain running down a window at night, city lights blurred behind the glass","seconds":98.4,"seed":1203,"seed_source":"held","settings":{"duration":4.0,"fps":24,"frames":97,"guidance":null,"height":704,"steps":40,"width":1280},"sidecar":"/Users/someone/Movies/Apogee/rain-window-2.mp4.json","status":"done","versions":{"apogee":"0.1.9","diffusers":"0.35.1","peft":"0.17.1","torch":"2.8.0"}},"type":"document"}

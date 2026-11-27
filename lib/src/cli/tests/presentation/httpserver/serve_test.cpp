@@ -2,10 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <csignal>
 #include <string>
 #include <vector>
 
 #include "httpserver/mux.h"
+#include "httpserver/shutdown.h"
 
 /// The bind policy and the route table -- the parts of `serve.cpp`'s
 /// neighbourhood that need no socket to assert.
@@ -173,4 +175,34 @@ TEST_CASE("the route table is the documented one", "[httpserver][mux]") {
     CHECK(has("POST", "/v1/admin/backends"));
     CHECK(has("GET", "/v1/admin/events"));
     CHECK(has("DELETE", "/v1/admin/jobs/{id}"));
+}
+
+TEST_CASE("a second Ctrl-C to serve is a second stop and the process lives",
+          "[httpserver][signals][windows][57j]") {
+    // Windows' C runtime puts SIGINT back to its default before calling the
+    // handler: until it stood itself again, the second Ctrl-C killed `serve`
+    // before an in-flight turn finished. Every platform, so CI's Windows rows
+    // run it -- the second raise ended the test binary there before 57j.
+    using apogee::httpserver::clear_shutdown;
+    using apogee::httpserver::shutdown_requested;
+    using apogee::httpserver::StopOnSignals;
+    void (*const before)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, before);
+    clear_shutdown();
+    {
+        const StopOnSignals signals;
+        (void)std::raise(SIGINT);
+        CHECK(shutdown_requested());
+        clear_shutdown();
+        (void)std::raise(SIGINT);
+        CHECK(shutdown_requested());
+        void (*const standing)(int) = std::signal(SIGINT, SIG_DFL);
+        (void)std::signal(SIGINT, standing);
+        CHECK(standing != SIG_DFL);
+        CHECK(standing != before);
+    }
+    void (*const after)(int) = std::signal(SIGINT, SIG_DFL);
+    (void)std::signal(SIGINT, after);
+    CHECK(after == before);
+    clear_shutdown();
 }

@@ -1,0 +1,43 @@
+{
+ "turns": [
+  {
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "config.toml",
+      "offset": 1,
+      "limit": 40
+     }
+    }
+   ]
+  },
+  {
+   "tool_calls": [
+    {
+     "name": "read_file",
+     "arguments": {
+      "path": "src/ingest/runner.py",
+      "offset": 60,
+      "limit": 37
+     }
+    }
+   ]
+  },
+  {
+   "reasoning": "`[fetch]` already has `retries = 2` and `timeout = 10`. Loop in `_fetch()` with a backoff of 1 s, then 2 s. Retry only `TimeoutError` and `httpx.TransportError`, so a 404 fails at once instead of three times.",
+   "tool_calls": [
+    {
+     "name": "write_file",
+     "arguments": {
+      "path": "src/ingest/runner.py",
+      "content": "\"\"\"The ingest runner: fetch a batch of URLs, parse each page, hand it on.\"\"\"\n\nimport asyncio\nimport logging\n\nimport httpx\n\nfrom ingest.config import Settings\nfrom ingest.parsers.feed import parse\n\nlog = logging.getLogger(__name__)\n\n\nclass Runner:\n    \"\"\"Runs one batch at a time, every URL in it as its own task.\"\"\"\n\n    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:\n        self.settings = settings\n        self.client = client\n        self.pages: list[bytes] = []\n\n    async def run(self, batches: list[list[str]]) -> None:\n        \"\"\"Every batch in order; a batch that fails is logged, and the next runs.\"\"\"\n        for number, batch in enumerate(batches, start=1):\n            try:\n                await self.run_batch(batch)\n            except* TimeoutError as group:\n                log.error(\"batch %d timed out: %s\", number, group.exceptions)\n\n    def summary(self) -> str:\n        return f\"{len(self.pages)} pages fetched\"\n\n    # -- one batch --------------------------------------------------------\n\n    def _check(self, batch: list[str]) -> None:\n        if not batch:\n            raise ValueError(\"an empty batch\")\n        if len(batch) > self.settings.ingest.batch_size:\n            raise ValueError(\"a batch over batch_size\")\n\n    def _hosts(self, batch: list[str]) -> set[str]:\n        return {httpx.URL(url).host for url in batch}\n\n    def _log_start(self, batch: list[str]) -> None:\n        log.info(\"batch of %d urls from %d hosts\", len(batch), len(self._hosts(batch)))\n\n    # The batch is one TaskGroup: every URL a task, and the group's exit\n    # waits for all of them. The first task that raises cancels the rest\n    # (run() is cancelled the same way on shutdown).\n\n    # -- the batch itself --\n    async def run_batch(self, batch: list[str]) -> None:\n        async with asyncio.TaskGroup() as tg:\n            for url in batch:\n                tg.create_task(self._fetch(url))\n        log.info(\"batch done: %d urls\", len(batch))\n\n    # -- one URL ----------------------------------------------------------\n\n    def _store(self, page: bytes) -> None:\n        self.pages.append(page)\n\n    def _parse(self, page: bytes) -> None:\n        for item in parse(page):\n            log.debug(\"item: %s\", item.title)\n\n    # _fetch() gets one URL; run_batch() makes it a task. A timeout here\n    # raises in this task alone, then the TaskGroup cancels its siblings.\n\n    # -- the fetch --\n    async def _fetch(self, url: str) -> bytes | None:\n        retries = self.settings.fetch.retries\n        for attempt in range(retries + 1):\n            try:\n                async with asyncio.timeout(self.settings.fetch.timeout):\n                    return await self.client.get(url)\n            except (TimeoutError, httpx.TransportError):\n                if attempt == retries:\n                    log.warning(\"giving up on %s\", url)\n                    return None\n                await asyncio.sleep(2 ** attempt)\n\n    # -- after the fetch ---------------------------------------------------\n\n    async def fetch_and_store(self, url: str) -> None:\n        page = await self._fetch(url)\n        self._store(page)\n        self._parse(page)\n\n    async def close(self) -> None:\n        await self.client.aclose()\n\n\nasync def main(settings: Settings) -> None:\n    async with httpx.AsyncClient() as client:\n        runner = Runner(settings, client)\n        batches = [line.split() for line in open(settings.ingest.source)]\n        await runner.run(batches)\n        log.info(runner.summary())\n\n\nif __name__ == \"__main__\":\n    logging.basicConfig(level=logging.INFO)\n    asyncio.run(main(Settings.load(\"config.toml\")))\n"
+     }
+    }
+   ]
+  },
+  {
+   "text": "Done. `_fetch()` now retries up to `fetch.retries` times (2 in your config), waiting 1 s, then 2 s. Only timeouts and connection errors are retried; an HTTP error status still fails at once.\n\nI haven’t run the tests. Want me to run `pytest tests/test_runner.py -q`?"
+  }
+ ]
+}

@@ -77,6 +77,11 @@ struct AttachmentGraphOutcome {
     /// re-parses only what changed.
     int parsed = 0;
     int unchanged = 0;
+    /// Files used with bytes that were not UTF-8, each named with what the
+    /// mend did (57t: `m.py: not UTF-8 -- 1 byte(s) shown as U+FFFD`) -- the
+    /// first `kGraphLineMended`, then `and N more file(s) not UTF-8` -- said
+    /// on the attach's line, never kept in the session.
+    std::vector<std::string> mended;
 };
 
 /// Builds `job`'s member into the index at `store_path` -- 27k's
@@ -112,6 +117,11 @@ void forget_attachment_graph(const std::filesystem::path& store_path, const std:
 
 /// How many kinds the notice names before folding the rest into a count.
 inline constexpr std::size_t kGraphLineKinds = 8;
+
+/// How many mended files the attach's line names before folding the rest
+/// into a count (57t), so a tree of Latin-1 files keeps the line one line;
+/// `graph build --source` names every one.
+inline constexpr std::size_t kGraphLineMended = 3;
 
 // ---- The graph at work on turns (27o) -----------------------------------------
 //

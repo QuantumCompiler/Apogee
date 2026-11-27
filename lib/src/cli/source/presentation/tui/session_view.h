@@ -95,8 +95,14 @@ public:
                      std::vector<PickerDoor> doors = {});
 
     /// A conversation begins: the transcript empties, a line queued for one
-    /// before it is dropped, and input is taken.
-    void begin_session();
+    /// before it is dropped, and input is taken. A `private_conversation`
+    /// (57a: `apogee tui --private`'s) gets an Up history of its own,
+    /// starting empty; the shell's earlier lines are kept aside, and come back
+    /// -- the private ones dropped -- as the next conversation begins, or as
+    /// `end_session` says this one ended.
+    void begin_session(bool private_conversation = false);
+    /// The conversation has ended: a private one's lines are dropped now.
+    void end_session();
     /// What is typed completes through `suggest` -- chat's own completer,
     /// the one command table's rows and values.
     void set_completion(commands::Suggester suggest);

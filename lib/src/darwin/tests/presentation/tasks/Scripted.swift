@@ -39,8 +39,11 @@ final class ScriptedJob: JobRunning, @unchecked Sendable {
 
     func say(_ update: JobUpdate) { continuation.yield(update) }
 
-    func end(status: Int32 = 0) {
-        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: BoundedTail(), interrupted: false)))
+    /// Ends it with `status`, its stderr having said `stderr`.
+    func end(status: Int32 = 0, stderr: String = "") {
+        var tail = BoundedTail()
+        tail.append(Data(stderr.utf8))
+        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: status), stderrTail: tail, interrupted: false)))
         continuation.finish()
     }
 

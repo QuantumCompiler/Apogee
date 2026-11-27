@@ -35,7 +35,8 @@ namespace apogee::backends::claude_cli {
 [[nodiscard]] std::vector<CliEvent> parse_stream(std::string_view bytes);
 
 /// A short label for an event, so a test can assert on a sequence readably and
-/// a failure diff names what actually differed.
+/// a failure diff names what actually differed. A failed result's label names
+/// the error, never the subtype `success` it may be filed under (M34).
 [[nodiscard]] std::string describe(const CliEvent& event);
 
 /// Renders one IR message as the JSONL a `--input-format stream-json` child

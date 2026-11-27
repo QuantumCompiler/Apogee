@@ -117,7 +117,9 @@ TEST_CASE("context injected by auto_rag reaches the request and never persisted 
 
     apogee::agentloop::Options loop;
     loop.model = "mock";
-    loop.transient_prefix = rag.prefix;  // the same seam the flag path uses
+    // The same seam the flag path uses.
+    loop.transient_prefix =
+        apogee::agentloop::injected_as(rag.prefix, apogee::agentloop::InjectedSource::Retrieval);
     loop.stream_answer = false;
 
     apogee::agentloop::NullReporter reporter;

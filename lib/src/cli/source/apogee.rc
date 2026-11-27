@@ -1,0 +1,13 @@
+// The Windows resources every Apogee executable carries (57j): its
+// application manifest, apogee.manifest beside this file -- the UTF-8 code
+// page among it. Compiled on Windows alone, by the resource compiler the
+// toolchain brings (windres under GCC, llvm-windres under clang), into the
+// `apogee_windows_manifest` object library source/CMakeLists.txt links into
+// `apogee`, every channel's executable and `apogee_tests`.
+//
+// 1 is CREATEPROCESS_MANIFEST_RESOURCE_ID and 24 is RT_MANIFEST, written as
+// numbers so no header is needed. No LANGUAGE statement: the compiler's
+// default (1033) is not the neutral language MinGW's default manifest is
+// stamped with, which is how both GNU ld and lld tell that one from ours and
+// drop it.
+1 24 "apogee.manifest"

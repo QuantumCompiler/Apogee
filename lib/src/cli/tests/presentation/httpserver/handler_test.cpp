@@ -4,21 +4,28 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
+#include "backends/anthropic.h"
+#include "backends/google.h"
+#include "backends/llamacpp.h"
 #include "backends/mlx_local.h"
 #include "backends/mock.h"
 #include "cli/embed.h"
+#include "cli/helpers.h"
 #include "cli/permissions.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
@@ -27,7 +34,11 @@
 #include "httpserver/mux.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
+#include "support/fake_llama.h"
+#include "support/fake_mcp_server.h"
 #include "support/fake_mlx_driver.h"
+#include "support/fake_transport.h"
+#include "tools/git.h"
 #include "tools/todo.h"
 
 /// The conformance suite: every route, driven through the listener-free mux.
@@ -389,7 +400,8 @@ TEST_CASE("a truncated answer says length, in both shapes", "[httpserver][chat]"
                    nlohmann::json{{"prompt", "go"}})))["choices"][0]["finish_reason"] == "length");
 }
 
-TEST_CASE("a streamed chat completion frames chunks and ends with [DONE]", "[httpserver][sse]") {
+TEST_CASE("a streamed chat completion frames chunks and ends with the DONE sentinel",
+          "[httpserver][sse]") {
     const Fixture fixture;
     nlohmann::json body = chat_body("hello");
     body["stream"] = true;
@@ -807,6 +819,105 @@ TEST_CASE("a provider failure is a 502, or an error frame that still ends the st
 
 namespace {
 
+/// A provider over a scripted wire, served as `mock`: one attempt, no sleep.
+template <typename Provider>
+std::shared_ptr<Provider> over_the_wire(apogee::testing::FakeTransport::Reply reply) {
+    typename Provider::Options options;
+    options.backend_name = "mock";
+    options.api_key = "test-key";
+    apogee::backends::RetryPolicy policy;
+    policy.max_attempts = 1;
+    auto client = std::make_unique<apogee::backends::HttpClient>(
+        std::make_unique<apogee::testing::FakeTransport>(
+            std::vector<apogee::testing::FakeTransport::Reply>{std::move(reply)}),
+        policy);
+    client->set_sleeper([](std::chrono::milliseconds) {});
+    return std::make_shared<Provider>(std::move(options), std::move(client));
+}
+
+}  // namespace
+
+TEST_CASE("a direct-API or local backend's failure is a 502 backend_error, streamed and not",
+          "[httpserver][errors]") {
+    // Each reached `serve` as something other than the entry's failure
+    // (57c): a transport failure as a 500 server_error, a cut stream or a
+    // blocked prompt as an answer finished with `stop`, a llama.cpp context
+    // refused as server_error.
+    using apogee::testing::FakeTransport;
+
+    struct Case {
+        std::string_view name;
+        std::shared_ptr<apogee::harness::LLMProvider> provider;
+        std::string said;
+    };
+
+    auto local = [] {
+        auto runtime = std::make_unique<apogee::testing::FakeLlamaRuntime>();
+        runtime->context_error = "llama.cpp: could not create a context for this model";
+        apogee::backends::LlamaCppProvider::Options options;
+        options.backend_name = "mock";
+        options.model = "test-model";
+        options.model_path = "/models/test.gguf";
+        return std::make_shared<apogee::backends::LlamaCppProvider>(std::move(options),
+                                                                    std::move(runtime));
+    };
+    const std::string anthropic_cut =
+        "event: message_start\n"
+        R"(data: {"type":"message_start","message":{"model":"m","usage":{"input_tokens":3}}})"
+        "\n\nevent: content_block_start\n"
+        R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+        "\n\nevent: content_block_delta\n"
+        R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half an"}})"
+        "\n\n";
+    std::vector<Case> cases;
+    cases.push_back({"a connection that could not be made",
+                     over_the_wire<apogee::backends::AnthropicProvider>(
+                         {.status = 0,
+                          .transport_error = true,
+                          .error_message = "request failed: Couldn't connect to server"}),
+                     "mock: request failed: Couldn't connect to server"});
+    cases.push_back(
+        {"a stream cut before its end",
+         over_the_wire<apogee::backends::AnthropicProvider>({.status = 200, .body = anthropic_cut}),
+         "mock: the response stream ended before the answer finished"});
+    cases.push_back({"a blocked prompt",
+                     over_the_wire<apogee::backends::GoogleProvider>(
+                         {.status = 200,
+                          .body = "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n"}),
+                     "mock: the prompt was blocked (SAFETY)"});
+    cases.push_back({"a context llama.cpp could not make", local(),
+                     "mock: llama.cpp: could not create a context for this model"});
+
+    for (const Case& c : cases) {
+        INFO(c.name);
+        const Fixture fixture{{}, served_default(), false, c.provider};
+        const HttpResponse blocking = fixture.send(post("/v1/chat/completions", chat_body("hi")));
+        CHECK(blocking.status == 502);
+        CHECK(parsed(blocking)["error"]["type"] == "backend_error");
+        CHECK(parsed(blocking)["error"]["message"] == c.said);
+
+        nlohmann::json body = chat_body("hi");
+        body["stream"] = true;
+        const Frames streamed = frames(collect(fixture.send(post("/v1/chat/completions", body))));
+        CHECK(streamed.done_last);
+        bool saw_error = false;
+        for (const nlohmann::json& frame : streamed.data) {
+            if (frame.contains("error")) {
+                saw_error = true;
+                CHECK(frame["error"]["type"] == "backend_error");
+                CHECK(frame["error"]["message"] == c.said);
+            }
+            // Never an answer finished as if it were whole.
+            if (frame.contains("choices")) {
+                CHECK(frame["choices"][0]["finish_reason"].is_null());
+            }
+        }
+        CHECK(saw_error);
+    }
+}
+
+namespace {
+
 /// U+FFFD, the replacement character, as UTF-8.
 constexpr std::string_view kReplacement = "\xEF\xBF\xBD";
 
@@ -1056,6 +1167,166 @@ TEST_CASE("the session routes list, show, and end a session", "[httpserver][sess
     CHECK(parsed(fixture.send(get("/v1/sessions")))["data"].empty());
     // Ending the live session does not delete the user's transcript.
     CHECK(std::filesystem::exists(apogee::logger::session_path(id)));
+}
+
+/// Holds the provider inside one turn until released (57n): the turn on the
+/// other side of `turn_mutex_` from the request a test sends next.
+struct TurnGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered = false;
+    bool released = false;
+
+    /// Called on the provider's thread, before the turn answers.
+    void hold() {
+        std::unique_lock<std::mutex> lock{mutex};
+        entered = true;
+        changed.notify_all();
+        changed.wait(lock, [this] { return released; });
+    }
+
+    void wait_entered() {
+        std::unique_lock<std::mutex> lock{mutex};
+        changed.wait(lock, [this] { return entered; });
+    }
+
+    void release() {
+        const std::lock_guard<std::mutex> lock{mutex};
+        released = true;
+        changed.notify_all();
+    }
+};
+
+/// A mock that answers `A<question>`, and holds the turn whose last user
+/// message is `held` at `gate`.
+std::shared_ptr<MockProvider> gated_mock(TurnGate& gate, std::string held) {
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {text_turn("A<{{last_user}}>")};
+    options.on_request = [&gate,
+                          held = std::move(held)](const apogee::harness::ChatRequest& request) {
+        if (!request.messages.empty() && request.messages.back().content.plain_text() == held) {
+            gate.hold();
+        }
+    };
+    return std::make_shared<MockProvider>(std::move(options));
+}
+
+std::vector<std::string> texts_of(const std::vector<ChatMessage>& messages) {
+    std::vector<std::string> out;
+    out.reserve(messages.size());
+    for (const ChatMessage& message : messages) {
+        out.push_back(message.content.plain_text());
+    }
+    return out;
+}
+
+TEST_CASE("two requests on one session build on each other, in arrival order",
+          "[httpserver][session][concurrency]") {
+    // 57n: the session was copied when the request was planned, before the
+    // turn lock, so a request that waited behind another ran on the history
+    // from before that turn and its commit overwrote it -- the sweep's probe
+    // ended at turn_count 2 with the second exchange gone.
+    TurnGate gate;
+    const std::shared_ptr<MockProvider> mock = gated_mock(gate, "second");
+    const Fixture fixture{{text_turn("unused")}, served_default(), false, mock};
+
+    nlohmann::json create = chat_body("first");
+    create["session_id"] = "new";
+    const HttpResponse made = fixture.send(post("/v1/chat/completions", create));
+    REQUIRE(made.status == 200);
+    const std::string id = made.headers.at("X-Apogee-Session-Id");
+
+    // The second request holds the turn lock, inside its model call.
+    HttpResponse second_reply;
+    std::thread second{[&] {
+        nlohmann::json body = chat_body("second");
+        body["session_id"] = id;
+        second_reply = fixture.send(post("/v1/chat/completions", body));
+    }};
+    gate.wait_entered();
+
+    // The third is planned now, while the second's turn is still open --
+    // a streamed request's plan is made before its body runs, which is what
+    // makes the wait deterministic -- and its body waits behind the lock.
+    nlohmann::json third_body = chat_body("third");
+    third_body["session_id"] = id;
+    third_body["stream"] = true;
+    const HttpResponse third_reply = fixture.send(post("/v1/chat/completions", third_body));
+    REQUIRE(third_reply.status == 200);
+    std::string third_sse;
+    std::thread third{[&] { third_sse = collect(third_reply); }};
+
+    gate.release();
+    second.join();
+    third.join();
+
+    REQUIRE(second_reply.status == 200);
+    CHECK(parsed(second_reply)["choices"][0]["message"]["content"] == "A<second>");
+    CHECK(content_of(frames(third_sse)) == "A<third>");
+
+    // The third was answered with the second exchange in context.
+    REQUIRE(mock->requests().size() == 3);
+    CHECK(texts_of(mock->requests().back().messages) ==
+          std::vector<std::string>{"first", "A<first>", "second", "A<second>", "third"});
+
+    // Every exchange kept, in arrival order, in memory and on disk.
+    const std::vector<std::string> kept{"first",     "A<first>", "second",
+                                        "A<second>", "third",    "A<third>"};
+    const nlohmann::json detail = parsed(fixture.send(get("/v1/sessions/" + id)));
+    CHECK(detail["turn_count"] == 3);
+    std::vector<std::string> served_texts;
+    for (const nlohmann::json& message : detail["messages"]) {
+        served_texts.push_back(message["content"].get<std::string>());
+    }
+    CHECK(served_texts == kept);
+    const apogee::logger::LoadedSession loaded = apogee::logger::load(id, {});
+    CHECK(loaded.session.turns == 3);
+    CHECK(texts_of(loaded.session.messages) == kept);
+}
+
+TEST_CASE("a session ended while a request waits on it is a typed 404, and nothing runs",
+          "[httpserver][session][concurrency]") {
+    TurnGate gate;
+    const std::shared_ptr<MockProvider> mock = gated_mock(gate, "hold");
+    const Fixture fixture{{text_turn("unused")}, served_default(), false, mock};
+
+    nlohmann::json create = chat_body("first");
+    create["session_id"] = "new";
+    const std::string id =
+        fixture.send(post("/v1/chat/completions", create)).headers.at("X-Apogee-Session-Id");
+
+    // Another conversation holds the one turn lock.
+    std::thread holder{
+        [&] { (void)fixture.send(post("/v1/chat/completions", chat_body("hold"))); }};
+    gate.wait_entered();
+
+    nlohmann::json waiting = chat_body("next");
+    waiting["session_id"] = id;
+    waiting["stream"] = true;
+    const HttpResponse reply = fixture.send(post("/v1/chat/completions", waiting));
+    REQUIRE(reply.status == 200);
+    CHECK(fixture.send(del("/v1/sessions/" + id)).status == 204);
+
+    std::string sse;
+    std::thread waiter{[&] { sse = collect(reply); }};
+    gate.release();
+    holder.join();
+    waiter.join();
+
+    const Frames parsed_frames = frames(sse);
+    bool typed = false;
+    for (const nlohmann::json& frame : parsed_frames.data) {
+        if (frame.contains("error")) {
+            typed =
+                frame["error"]["type"] == "session_not_found" && frame["error"]["session_id"] == id;
+        }
+    }
+    CHECK(typed);
+    // Only the create and the holder's turn reached the model, and the ended
+    // session was not brought back by a commit.
+    CHECK(mock->turn_count() == 2);
+    CHECK(fixture.send(get("/v1/sessions/" + id)).status == 404);
 }
 
 TEST_CASE("a session near its window is compacted before the turn, a stateless request only warned",
@@ -1418,6 +1689,68 @@ TEST_CASE("a served destructive tool runs only when the config allows it; ask is
         fixture.registry.add(writer(&ran));
         REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("write it"))).status == 200);
         CHECK_FALSE(ran);
+    }
+}
+
+TEST_CASE("a served git call stays in the root, and a served MCP deny holds over the server's hint",
+          "[httpserver][tools][permission][57o]") {
+    // 57o on the served path: the registry `serve --tools` builds, nobody to
+    // ask, the config's levels the only answer.
+    const auto tool_results = [](const Fixture& fixture) {
+        std::string text;
+        for (const auto& request : fixture.provider->requests()) {
+            for (const ChatMessage& message : request.messages) {
+                if (message.role == Role::Tool) {
+                    text += message.content.plain_text();
+                }
+            }
+        }
+        return text;
+    };
+    SECTION("git_show of a repository outside the root is refused, never read") {
+        const apogee::testing::TempDir temp{"handler-git-" +
+                                            std::to_string(std::random_device{}())};
+        std::filesystem::create_directories(temp.path() / "proj");
+        ToolCall call;
+        call.id = "call_g";
+        call.name = "git_show";
+        call.arguments = nlohmann::json{{"repo", (temp.path() / "elsewhere").string()}}.dump();
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, served_default(), true};
+        apogee::tools::GitOptions git;
+        git.working_directory = temp.path() / "proj";
+        git.fs_root = temp.path() / "proj";
+        apogee::tools::register_git_tools(fixture.registry, git);
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("show it"))).status == 200);
+        CHECK(tool_results(fixture).find("outside the allowed root") != std::string::npos);
+    }
+    SECTION("an MCP tool the config denies is refused unrun, though its server says read-only") {
+        Config config;
+        apogee::harness::McpServerConfig well;
+        well.command = "well";
+        config.mcp_servers.emplace("srv", well);
+        config.permissions.levels["mcp__srv__echo"] = apogee::harness::PermissionLevel::Deny;
+        std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+        const auto servers = std::make_shared<apogee::mcp::Registry>();
+        const ToolRegistry built = apogee::commands::make_built_in_tools(
+            apogee::commands::BuiltInToolOptions{.config = &config,
+                                                 .mcp = servers,
+                                                 .mcp_spawn = apogee::testing::fake_fleet(&made)});
+        REQUIRE(built.find("mcp__srv__echo") != nullptr);
+        ToolCall call;
+        call.id = "call_m";
+        call.name = "mcp__srv__echo";
+        call.arguments = R"({"text":"hi"})";
+        HandlerOptions options = served_default();
+        options.permission = apogee::commands::make_permission_checker(config, nullptr);
+        Fixture fixture{{tool_turn({call}), text_turn("after")}, std::move(options), true};
+        fixture.registry.add(*built.find("mcp__srv__echo"));
+        REQUIRE(fixture.send(post("/v1/chat/completions", chat_body("echo it"))).status == 200);
+        CHECK(tool_results(fixture).find("denied permission") != std::string::npos);
+        for (const auto& transport : made) {
+            for (const nlohmann::json& frame : transport->sent()) {
+                CHECK(frame.value("method", "") != "tools/call");
+            }
+        }
     }
 }
 

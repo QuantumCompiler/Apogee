@@ -36,6 +36,8 @@ apogee_add_module(contracts
     contracts/text_diff.cpp
     contracts/server_tools.h
     contracts/server_tools.cpp
+    contracts/mcp_serve.h
+    contracts/mcp_serve.cpp
     contracts/assets.h
     contracts/assets.cpp
     contracts/assets_agents.cpp
@@ -137,6 +139,8 @@ apogee_add_module(embedstore
     embedstore/graph_dedupe.cpp
     embedstore/graph_code.h
     embedstore/graph_code.cpp
+    embedstore/folder_listing.h
+    embedstore/folder_listing.cpp
     embedstore/fts.h
     embedstore/fts.cpp
     embedstore/chunk.h
@@ -153,6 +157,8 @@ apogee_add_module(backends
     backends/backends.h
     backends/mock.h
     backends/mock.cpp
+    backends/provider_send.h
+    backends/provider_send.cpp
     backends/anthropic_wire.h
     backends/anthropic_wire.cpp
     backends/anthropic.h
@@ -178,6 +184,7 @@ apogee_add_module(backends
     backends/google.h
     backends/google.cpp
     backends/cli_event.h
+    backends/restore_on_exit.h
     backends/claude_cli.h
     backends/claude_cli.cpp
     backends/claude_cli_events.h

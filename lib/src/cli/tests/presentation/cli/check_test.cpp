@@ -1,24 +1,31 @@
 #include "cli/check.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "agent/tool.h"
 #include "agentloop/recall.h"
 #include "backends/adapters.h"
 #include "backends/provider_cache.h"
 #include "backends/provider_table.h"
+#include "cli/helpers.h"
 #include "cli/line_tokens.h"
+#include "cli/permissions.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -29,16 +36,22 @@
 #include "knowledge/record.h"
 #include "knowledge/store.h"
 #include "modelstore/store.h"
+#include "operations/acp_registration.h"
 #include "operations/code_exec_server.h"
+#include "platform/child_process.h"
 #include "platform/ffmpeg.h"
 #include "platform/platform.h"
+#include "platform/xcode.h"
 #include "secrets/store.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/fake_existence_view.h"
+#include "support/fake_mcp_server.h"
+#include "support/fake_xcode.h"
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/terminal_output.h"
 #include "support/towered_configs.h"
 #include "training/python_env.h"
 
@@ -143,6 +156,11 @@ CheckInputs inputs_for(const Install& install) {
     inputs.config_path = install.root / "config" / "config.yaml";
     inputs.config_missing = true;
     inputs.env = [](std::string_view) { return std::string{}; };
+    // No Xcode (56d): the doctor's cases never ask the developer's own; the
+    // Xcode cases script theirs.
+    inputs.xcode_probe = [](std::string&) -> std::optional<apogee::platform::XcodeFacts> {
+        return apogee::platform::XcodeFacts{};
+    };
     return inputs;
 }
 
@@ -894,6 +912,47 @@ TEST_CASE("the doctor reports the credential store: absent is fine, present must
     CHECK(store_row().detail.find("credentials.json") != std::string::npos);
 }
 
+TEST_CASE("check's level on an MCP tool is the level the gate enforces, read-only hint or not",
+          "[commands][check][tools][mcp][57o]") {
+    // The sweep (57o): `ok permissions.mcp__self__list_notes deny` while the
+    // tool still ran. One config, read by both: the row says deny, and the
+    // registry a --tools session builds from it refuses the call unrun.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml",
+                  "permissions:\n  mcp__srv__echo: deny\n"
+                  "mcp_servers:\n  srv:\n    command: well\n");
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    const auto* row = row_with(report, "permissions.mcp__srv__echo");
+    REQUIRE(row != nullptr);
+    CHECK(row->status == Status::Ok);
+    CHECK(row->detail == "deny");
+
+    // The server registry is kept for the test's life: its clients answer
+    // the calls, so a refusal below is the gate's and never a closed pipe.
+    std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+    const auto servers = std::make_shared<apogee::mcp::Registry>();
+    const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
+        apogee::commands::BuiltInToolOptions{.config = &inputs.config,
+                                             .mcp = servers,
+                                             .mcp_spawn = apogee::testing::fake_fleet(&made)});
+    REQUIRE(registry.find("mcp__srv__echo") != nullptr);
+    apogee::agent::DispatchContext context;
+    context.permission = apogee::commands::make_permission_checker(inputs.config, nullptr);
+    context.confirm = [](const apogee::agent::GateRequest&) { return true; };
+    const apogee::agent::ToolOutcome outcome = apogee::agent::dispatch(
+        registry, apogee::harness::ToolCall{"e", "mcp__srv__echo", R"({"text":"hi"})"}, context);
+    CHECK(outcome.is_error);
+    CHECK(outcome.content.find("denied permission") != std::string::npos);
+    for (const auto& transport : made) {
+        for (const nlohmann::json& frame : transport->sent()) {
+            CHECK(frame.value("method", "") != "tools/call");
+        }
+    }
+}
+
 TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",
           "[commands][check][tools]") {
     Install install;
@@ -1611,7 +1670,9 @@ TEST_CASE(
     install.write("training/cycle/history.json",
                   "{\"backend\": \"nightly\", \"halted\": false, \"anchor_version\": 2, "
                   "\"consecutive_fails\": 0, \"total_runs\": 5, \"runs\": []}\n");
-    install.write("training/cycle/cycle.lock", "123\n");
+    // A live pass's lock -- this process's id -- keeps the row ok.
+    install.write("training/cycle/cycle.lock",
+                  std::to_string(apogee::platform::current_process_id()) + "\n");
     report = run_checks(inputs);
     history = row_with(report, "cycle history");
     REQUIRE(history != nullptr);
@@ -1619,6 +1680,24 @@ TEST_CASE(
     CHECK(history->detail.find("5 run(s)") != std::string::npos);
     CHECK(history->detail.find("anchor v2") != std::string::npos);
     CHECK(history->detail.find("running now") != std::string::npos);
+    CHECK(row_with(report, "cycle lock") == nullptr);
+    // A dead pass's lock (57g): never "running now", but a warning of its
+    // own naming the file and the way out.
+    install.write("training/cycle/cycle.lock", "999999999\n");
+    report = run_checks(inputs);
+    history = row_with(report, "cycle history");
+    REQUIRE(history != nullptr);
+    CHECK(history->status == Status::Ok);
+    CHECK(history->detail.find("running now") == std::string::npos);
+    const apogee::commands::CheckRow* stale = row_with(report, "cycle lock");
+    REQUIRE(stale != nullptr);
+    CHECK(stale->status == Status::Warn);
+    CHECK(stale->detail.find("left by process 999999999, which is not running") !=
+          std::string::npos);
+    CHECK(stale->remedy.starts_with("remove "));
+    CHECK(stale->remedy.find("cycle.lock") != std::string::npos);
+    CHECK(stale->remedy.ends_with(" to run again"));
+    CHECK(report.passed());
     install.write("training/cycle/history.json", "{");
     report = run_checks(inputs);
     CHECK(row_with(report, "cycle history")->status == Status::Warn);
@@ -3771,6 +3850,56 @@ TEST_CASE(
                               std::string{kUse});
 }
 
+TEST_CASE("check's off-pin remedy for mlx-video, followed, passes the row it named",
+          "[commands][check][mlx][mlx_video][m23]") {
+    // 57i, finding 4: the remedy is `train setup --with mlx-video`, whose
+    // install is `PythonEnv::install` -- here over a runner standing for pip
+    // as probe 2 measured it: the set's own pip keeps the commit there, and
+    // only a forced reinstall of the pinned requirement builds the pin.
+    if (apogee::platform::host_target().starts_with("windows")) {
+        SKIP("the scripted git is a POSIX file on a POSIX PATH");
+    }
+    const Install install;
+    install.seed();
+    (void)apogee::harness::seed_data_directory(install.root);
+    write_fake_mlx_runtime(install);
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const auto video_row = [&inputs] {
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* row = row_in(report, "MLX", "video");
+        REQUIRE(row != nullptr);
+        return *row;
+    };
+    install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                         "1111111111111111111111111111111111111111");
+    apogee::commands::CheckRow video = video_row();
+    REQUIRE(video.status == Status::Warn);
+    REQUIRE(video.remedy == "apogee train setup --with mlx-video");
+
+    const apogee::testing::TempDir bin{"check-git-" + std::to_string(std::random_device{}())};
+    std::ofstream{bin.path() / "git"} << "#!/bin/sh\n";
+    std::filesystem::permissions(bin.path() / "git", std::filesystem::perms::owner_all);
+    const apogee::testing::EnvGuard path{"PATH", bin.path().string()};
+    apogee::training::PythonEnv env{
+        venv_of(install), [&install](const apogee::platform::ChildCommand& command,
+                                     const apogee::harness::CancellationToken& /*token*/) {
+            if (std::ranges::find(command.arguments, "--force-reinstall") !=
+                command.arguments.end()) {
+                install_distribution(install, "mlx_video", "mlx-video", "0.1.0",
+                                     std::string{kPinnedCommit});
+            }
+            apogee::training::CommandResult result;
+            result.exit_code = 0;
+            return result;
+        }};
+    REQUIRE(env.install(apogee::training::RequirementSet::MlxVideo).empty());
+    video = video_row();
+    CHECK(video.status == Status::Ok);
+    CHECK(video.detail.find("at commit 87db56a51758") != std::string::npos);
+    CHECK(video.detail.find("the commit Apogee pins") != std::string::npos);
+}
+
 TEST_CASE(
     "mlx-audio's row holds it to its floor, and absent it is a skip that names the rebuild where "
     "the environment's Python cannot take it",
@@ -4077,4 +4206,493 @@ TEST_CASE("a backend's unknown key is a named warning with the key it meant, and
                   return row.detail.starts_with("unknown key");
               }) == 5);
     }
+}
+
+TEST_CASE("an unknown key whose twin the entry already sets is removed, never renamed into it",
+          "[commands][check][unknown-keys]") {
+    // 57f, finding 3: a stray `Model` beside the entry's own `model` was told
+    // `rename it 'model'`, and following that wrote `model` twice -- which
+    // the JSONC loader refuses, so no command loaded the config. Now the row
+    // says the entry already sets it and the remedy removes the stray key; a
+    // lone `Model` keeps the rename; and two typos of one key are not both
+    // renamed into it.
+    const std::string text = R"({
+  "backends": {
+    "twin": {
+      "type": "mock",
+      "model": "x",
+      "Model": "y"
+    },
+    "lone": {
+      "type": "mock",
+      "Model": "y"
+    },
+    "pair": {
+      "type": "mock",
+      "Model": "y",
+      "modle": "z"
+    }
+  }
+}
+)";
+    const std::string file = "config.json";
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    inputs.config_path = install.root / "config" / file;
+    install.write("config/" + file, text);
+    load_into(inputs);
+    REQUIRE(inputs.config_error.empty());
+    const CheckReport report = run_checks(inputs);
+    const auto rows_of = [&report](std::string_view backend) {
+        std::vector<apogee::commands::CheckRow> rows;
+        for (const auto& row : report.rows) {
+            if (row.name == "backend: " + std::string{backend} &&
+                row.detail.starts_with("unknown key")) {
+                rows.push_back(row);
+            }
+        }
+        return rows;
+    };
+
+    const std::vector<apogee::commands::CheckRow> twin = rows_of("twin");
+    REQUIRE(twin.size() == 1);
+    CHECK(twin.front().status == Status::Warn);
+    CHECK(twin.front().detail ==
+          "unknown key 'Model' -- no backend reads it, so it does nothing; the entry already "
+          "sets 'model'");
+    CHECK(twin.front().remedy == "remove 'Model' from config.json");
+
+    const std::vector<apogee::commands::CheckRow> lone = rows_of("lone");
+    REQUIRE(lone.size() == 1);
+    CHECK(lone.front().detail ==
+          "unknown key 'Model' -- no backend reads it, so it does nothing; did you mean "
+          "'model'?");
+    CHECK(lone.front().remedy == "rename it 'model' in config.json");
+
+    const std::vector<apogee::commands::CheckRow> pair = rows_of("pair");
+    REQUIRE(pair.size() == 2);
+    for (const auto& row : pair) {
+        INFO(row.detail);
+        CHECK(row.detail.ends_with("did you mean 'model'?"));
+        CHECK(row.remedy ==
+              "rename one of 'Model' and 'modle' to 'model' in config.json, and remove the other");
+    }
+    // No row anywhere renames a key into one its entry already writes.
+    CHECK(std::ranges::none_of(report.rows, [](const auto& row) {
+        return row.name == "backend: twin" && row.remedy.starts_with("rename");
+    }));
+
+    // Followed, each remedy leaves a config that loads; the old rename did
+    // not.
+    const auto without_line = [&text](std::string_view from, std::string_view line) {
+        std::string out = text;
+        const std::size_t entry = out.find(from);
+        const std::size_t at = out.find(line, entry);
+        REQUIRE(at != std::string::npos);
+        out.erase(at, line.size());
+        return out;
+    };
+    std::string followed = without_line("\"twin\"", ",\n      \"Model\": \"y\"");
+    {
+        const std::size_t lone_at = followed.find("\"Model\"", followed.find("\"lone\""));
+        followed.replace(lone_at, 7, "\"model\"");
+        const std::size_t pair_at = followed.find("\"Model\"", followed.find("\"pair\""));
+        followed.replace(pair_at, 7, "\"model\"");
+        const std::string modle = ",\n      \"modle\": \"z\"";
+        followed.erase(followed.find(modle), modle.size());
+    }
+    const apogee::harness::Config loaded = apogee::harness::parse_config(followed, file);
+    for (const char* name : {"twin", "lone", "pair"}) {
+        INFO(name);
+        CHECK(loaded.find_backend(name)->unknown_keys.empty());
+    }
+    CHECK(loaded.find_backend("twin")->model == "x");
+    std::string renamed = text;
+    renamed.replace(renamed.find("\"Model\"", renamed.find("\"twin\"")), 7, "\"model\"");
+    CHECK_THROWS_WITH(apogee::harness::parse_config(renamed, file),
+                      Catch::Matchers::ContainsSubstring("appears twice"));
+}
+
+// ---------------------------------------------------------------------------
+// The Xcode section (56d): the two routes joining Apogee and Xcode, read from
+// Xcode's own command-line tools -- every case Ok or Skipped, never a warning,
+// so a Mac with no Xcode stays green (M11).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using apogee::testing::FakeXcode;
+using Catch::Matchers::ContainsSubstring;
+using Catch::Matchers::StartsWith;
+
+/// The Xcode section's rows, in order, as copies.
+[[nodiscard]] std::vector<apogee::commands::CheckRow> xcode_section(const CheckReport& report) {
+    std::vector<apogee::commands::CheckRow> rows;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.section == "Xcode") {
+            rows.push_back(row);
+        }
+    }
+    return rows;
+}
+
+/// The Xcode section a scripted probe gives on macOS.
+[[nodiscard]] std::vector<apogee::commands::CheckRow> xcode_rows(
+    const Install& install, std::optional<apogee::platform::XcodeFacts> facts, std::string why = {},
+    apogee::harness::Config config = {}) {
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    if (!config.mcp_servers.empty()) {
+        inputs.config = std::move(config);
+        inputs.config_missing = false;
+    }
+    inputs.xcode_probe = [facts,
+                          why](std::string& error) -> std::optional<apogee::platform::XcodeFacts> {
+        if (!facts.has_value()) {
+            error = why;
+        }
+        return facts;
+    };
+    return xcode_section(run_checks(inputs));
+}
+
+[[nodiscard]] apogee::platform::XcodeFacts an_xcode(std::string version, std::string build,
+                                                    bool bridge) {
+    apogee::platform::XcodeFacts facts;
+    facts.install = apogee::platform::XcodeInstall::Xcode;
+    facts.developer_dir = "/Applications/Xcode.app/Contents/Developer";
+    facts.version = std::move(version);
+    facts.build = std::move(build);
+    if (bridge) {
+        facts.mcpbridge = "/Applications/Xcode.app/Contents/Developer/usr/bin/mcpbridge";
+    }
+    return facts;
+}
+
+[[nodiscard]] std::vector<std::string> names_of(
+    const std::vector<apogee::commands::CheckRow>& rows) {
+    std::vector<std::string> names;
+    for (const apogee::commands::CheckRow& row : rows) {
+        names.push_back(row.name);
+    }
+    return names;
+}
+
+/// No row warns or fails: Xcode is optional.
+void never_warns(const std::vector<apogee::commands::CheckRow>& rows) {
+    for (const apogee::commands::CheckRow& row : rows) {
+        INFO(row.name << ": " << row.detail);
+        CHECK((row.status == Status::Ok || row.status == Status::Skipped));
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Xcode 27.1 gives the bridge, the agents and the approval", "[commands][check][xcode]") {
+    const Install install;
+    const std::vector<apogee::commands::CheckRow> rows =
+        xcode_rows(install, an_xcode("27.1", "27A9275", true));
+    REQUIRE(names_of(rows) ==
+            std::vector<std::string>{"xcode", "mcpbridge", "acp agents", "approval"});
+    never_warns(rows);
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[0].detail == "Xcode 27.1 (27A9275), /Applications/Xcode.app/Contents/Developer");
+    CHECK(rows[1].status == Status::Ok);
+    CHECK_THAT(rows[1].detail, ContainsSubstring("apogee mcp create xcode --from xcode"));
+    // What check cannot see, said in words.
+    CHECK_THAT(rows[1].detail,
+               ContainsSubstring("\"Allow External Agents to Use Xcode Tools\" is on, which "
+                                 "check cannot see"));
+    CHECK(rows[2].status == Status::Ok);
+    CHECK_THAT(rows[2].detail, ContainsSubstring("Xcode 27.1 hosts ACP agents"));
+    CHECK_THAT(rows[2].detail,
+               ContainsSubstring("Settings › Intelligence › Agents › Add an Agent"));
+    CHECK_THAT(rows[2].detail, ContainsSubstring("apogee acp registration"));
+    CHECK(rows[3].status == Status::Ok);
+    CHECK(rows[3].detail == apogee::operations::kXcodeApproval);
+}
+
+TEST_CASE("an older Xcode skips what it cannot do, and a bridge registered is named",
+          "[commands][check][xcode]") {
+    const Install install;
+    // 26.4: the bridge, no agents.
+    std::vector<apogee::commands::CheckRow> rows =
+        xcode_rows(install, an_xcode("26.4", "17E192", true));
+    REQUIRE(names_of(rows) ==
+            std::vector<std::string>{"xcode", "mcpbridge", "acp agents", "approval"});
+    never_warns(rows);
+    CHECK(rows[1].status == Status::Ok);
+    CHECK(rows[2].status == Status::Skipped);
+    CHECK_THAT(rows[2].detail, ContainsSubstring("needs Xcode 26.6 or later"));
+
+    // 26.2: neither, so no approval to speak of.
+    rows = xcode_rows(install, an_xcode("26.2", "17C52", false));
+    REQUIRE(names_of(rows) == std::vector<std::string>{"xcode", "mcpbridge", "acp agents"});
+    never_warns(rows);
+    CHECK(rows[0].status == Status::Ok);
+    CHECK(rows[1].status == Status::Skipped);
+    CHECK_THAT(rows[1].detail, ContainsSubstring("Xcode 26.2 (17C52) has no mcpbridge"));
+    CHECK_THAT(rows[1].detail, ContainsSubstring("need Xcode 26.3 or later"));
+    CHECK(rows[2].status == Status::Skipped);
+
+    // A server already running the bridge is named, not offered again.
+    apogee::harness::Config config;
+    config.mcp_servers["tools"] = apogee::harness::McpServerConfig{
+        .command = "/usr/bin/xcrun", .args = {"mcpbridge"}, .env = {}, .enabled = true};
+    rows = xcode_rows(install, an_xcode("27.1", "27A9275", true), {}, config);
+    CHECK_THAT(rows[1].detail, ContainsSubstring("registered as 'tools'"));
+    CHECK_THAT(rows[1].detail, !ContainsSubstring("mcp create"));
+}
+
+TEST_CASE("no Xcode, the Command Line Tools or a probe that would not answer is one skipped row",
+          "[commands][check][xcode]") {
+    const Install install;
+    // Not installed: what it is for, nothing to do.
+    std::vector<apogee::commands::CheckRow> rows =
+        xcode_rows(install, apogee::platform::XcodeFacts{});
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].name == "xcode");
+    CHECK(rows[0].status == Status::Skipped);
+    CHECK(rows[0].detail ==
+          "not installed -- needed only to use Apogee from Xcode, or Xcode's tools from Apogee");
+    CHECK(rows[0].remedy.empty());
+
+    // The Command Line Tools: the remedy names Xcode only when it is there.
+    apogee::platform::XcodeFacts tools;
+    tools.install = apogee::platform::XcodeInstall::CommandLineTools;
+    tools.developer_dir = "/Library/Developer/CommandLineTools";
+    rows = xcode_rows(install, tools);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Skipped);
+    CHECK_THAT(rows[0].detail, ContainsSubstring("only the Command Line Tools are selected "
+                                                 "(/Library/Developer/CommandLineTools)"));
+    CHECK(rows[0].remedy.empty());
+    tools.xcode_app = "/Applications/Xcode.app";
+    rows = xcode_rows(install, tools);
+    CHECK(rows[0].remedy == "sudo xcode-select -s /Applications/Xcode.app");
+
+    // An Xcode deleted while selected.
+    apogee::platform::XcodeFacts gone;
+    gone.install = apogee::platform::XcodeInstall::Missing;
+    gone.developer_dir = "/Applications/Old.app/Contents/Developer";
+    rows = xcode_rows(install, gone);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Skipped);
+    CHECK_THAT(rows[0].detail, ContainsSubstring("/Applications/Old.app/Contents/Developer, is "
+                                                 "not there"));
+
+    // A probe that would not answer: skipped with why, never a pass.
+    rows = xcode_rows(install, std::nullopt, "xcrun took longer than 5 seconds");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Skipped);
+    CHECK(rows[0].detail ==
+          "could not ask Xcode's command-line tools -- xcrun took longer than 5 seconds");
+}
+
+TEST_CASE("off macOS the Xcode section is one skipped row and nothing is asked",
+          "[commands][check][xcode]") {
+    const Install install;
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "linux-x64";
+    bool asked = false;
+    inputs.xcode_probe = [&asked](std::string&) -> std::optional<apogee::platform::XcodeFacts> {
+        asked = true;
+        return std::nullopt;
+    };
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = xcode_section(report);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].name == "xcode");
+    CHECK(rows[0].status == Status::Skipped);
+    CHECK_THAT(rows[0].detail, ContainsSubstring("Xcode runs on macOS only"));
+    CHECK_FALSE(asked);
+}
+
+TEST_CASE("a fresh install on a Mac with no Xcode still ends green", "[commands][check][xcode]") {
+    // M11: Xcode is optional. Seeded as an install leaves it, the one row
+    // the section has is a skip, and the report passes.
+    Install install;
+    install.seed();
+    REQUIRE(apogee::harness::seed_data_directory(install.root).ok());
+    CheckInputs inputs = inputs_for(install);
+    inputs.host_target = "macos-arm64";
+    const CheckReport report = run_checks(inputs);
+    const std::vector<apogee::commands::CheckRow> rows = xcode_section(report);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].status == Status::Skipped);
+    INFO(render_report(report, false));
+    CHECK(report.count(Status::Fail) == 0);
+}
+
+TEST_CASE("the Xcode rows through the real probe, stub tools on a PATH without /usr/bin",
+          "[commands][check][xcode][child]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const Install install;
+    const auto real = [&install](std::chrono::milliseconds bound = std::chrono::seconds{5}) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.host_target = "macos-arm64";
+        if (bound == std::chrono::seconds{5}) {
+            inputs.xcode_probe = nullptr;  // the probe check runs
+        } else {
+            inputs.xcode_probe = [bound](std::string& error) {
+                return apogee::platform::xcode_facts(
+                    apogee::platform::CapturedLimits{.timeout = bound}, error);
+            };
+        }
+        return xcode_section(run_checks(inputs));
+    };
+    {
+        const FakeXcode fake;
+        fake.xcode("27.1", "27A9275", true);
+        const std::vector<apogee::commands::CheckRow> rows = real();
+        REQUIRE(names_of(rows) ==
+                std::vector<std::string>{"xcode", "mcpbridge", "acp agents", "approval"});
+        CHECK(rows[0].detail == "Xcode 27.1 (27A9275), " + fake.developer_dir().string());
+        never_warns(rows);
+    }
+    {
+        const FakeXcode fake;
+        fake.xcode("26.2", "17C52", false);
+        const std::vector<apogee::commands::CheckRow> rows = real();
+        REQUIRE(names_of(rows) == std::vector<std::string>{"xcode", "mcpbridge", "acp agents"});
+        CHECK(rows[1].status == Status::Skipped);
+        CHECK(rows[2].status == Status::Skipped);
+    }
+    {
+        // Absent: xcode-select fails, and xcrun is never run.
+        const FakeXcode fake;
+        const std::vector<apogee::commands::CheckRow> rows = real();
+        REQUIRE(rows.size() == 1);
+        CHECK_THAT(rows[0].detail, StartsWith("not installed"));
+        CHECK(fake.logged() == "xcode-select -p\n");
+    }
+    {
+        const FakeXcode fake;
+        fake.command_line_tools();
+        const std::vector<apogee::commands::CheckRow> rows = real();
+        REQUIRE(rows.size() == 1);
+        CHECK_THAT(rows[0].detail, StartsWith("only the Command Line Tools are selected"));
+        CHECK(fake.logged() == "xcode-select -p\n");
+    }
+    {
+        // A tool that never answers: a skipped row inside the bound.
+        const FakeXcode fake;
+        fake.xcode("27.1", "27A9275", true);
+        fake.slow("xcrun");
+        const auto started = std::chrono::steady_clock::now();
+        const std::vector<apogee::commands::CheckRow> rows = real(std::chrono::seconds{1});
+        CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds{4});
+        REQUIRE(rows.size() == 1);
+        CHECK(rows[0].status == Status::Skipped);
+        CHECK_THAT(rows[0].detail, ContainsSubstring("xcrun took longer than 1 seconds"));
+    }
+}
+
+TEST_CASE("check's Xcode rows reach its document, and a stub's stderr reaches neither stream",
+          "[commands][check][xcode][child]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const apogee::testing::CliHome home{"backends:\n  local:\n    type: mock\n"};
+    const FakeXcode fake;
+    fake.xcode("27.1", "27A9275", true);
+    std::string out;
+    std::string err;
+    // Below the run's own capture: a stub that inherited descriptor 2 would
+    // write there, never into `err`, so the descriptors are read too.
+    std::string terminal =
+        apogee::testing::terminal_output([&] { (void)home.run({"check", "--quiet"}, &out, &err); });
+    CHECK_THAT(terminal, !ContainsSubstring("noise nobody should see"));
+    CHECK_THAT(out + err, !ContainsSubstring("noise nobody should see"));
+    terminal = apogee::testing::terminal_output(
+        [&] { (void)home.run({"check", "--output-format", "json"}, &out, &err); });
+    CHECK_THAT(terminal, !ContainsSubstring("noise nobody should see"));
+    CHECK_THAT(out + err, !ContainsSubstring("noise nobody should see"));
+    const nlohmann::json document = nlohmann::json::parse(out);
+    std::vector<std::string> names;
+    for (const nlohmann::json& row : document["rows"]) {
+        if (row["section"] == "Xcode") {
+            names.push_back(row["name"].get<std::string>());
+            CHECK((row["status"] == "ok" || row["status"] == "skipped"));
+        }
+    }
+    if (apogee::platform::host_target().starts_with("macos")) {
+        CHECK(names == std::vector<std::string>{"xcode", "mcpbridge", "acp agents", "approval"});
+        CHECK_THAT(out, ContainsSubstring("Xcode 27.1 (27A9275)"));
+        // The stubs ran, so their silence above is the probe's doing.
+        CHECK_THAT(fake.logged(), ContainsSubstring("xcrun xcodebuild -version\n"));
+    } else {
+        CHECK(names == std::vector<std::string>{"xcode"});
+        CHECK(fake.logged().empty());
+    }
+}
+
+TEST_CASE("check says Windows' code page on Windows alone, warning when it is not UTF-8",
+          "[commands][check][utf8][57j]") {
+    // 57j: the manifest names UTF-8 the process's code page; a Windows older
+    // than 10 version 1903 ignores it, and a non-ASCII argument may not
+    // survive there. Said as a warning, never refused -- and on macOS and
+    // Linux, with no code page to get wrong, no row at all.
+    const Install install;
+    install.seed();
+    const auto code_page = [&install](std::string target, std::string gap) {
+        CheckInputs inputs = inputs_for(install);
+        inputs.host_target = std::move(target);
+        inputs.encoding_probe = [gap] { return gap; };
+        const CheckReport report = run_checks(inputs);
+        const apogee::commands::CheckRow* row = row_with(report, "code page");
+        return row == nullptr ? std::optional<apogee::commands::CheckRow>{}
+                              : std::optional<apogee::commands::CheckRow>{*row};
+    };
+
+    const std::optional<apogee::commands::CheckRow> utf8 = code_page("windows-x64", "");
+    REQUIRE(utf8.has_value());
+    CHECK(utf8->section == "Version");
+    CHECK(utf8->status == Status::Ok);
+    CHECK(utf8->detail.starts_with("UTF-8"));
+
+    const std::string why = "Windows reads this process's text in code page 1252, not UTF-8";
+    const std::optional<apogee::commands::CheckRow> old = code_page("windows-arm64", why);
+    REQUIRE(old.has_value());
+    CHECK(old->status == Status::Warn);
+    CHECK(old->detail == why);
+    CHECK(old->remedy.empty());
+
+    CHECK_FALSE(code_page("macos-arm64", why).has_value());
+    CHECK_FALSE(code_page("linux-x64", why).has_value());
+}
+
+TEST_CASE("the doctor's git row is skipped, saying why, where no program can be started",
+          "[commands][check][tools][57k]") {
+    // Where this build cannot start a program (Windows, today) the git tools
+    // are not offered: "found on PATH" would read as working tools, and
+    // "install git" would change nothing. A check that cannot run is skipped.
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    install.write("config/config.yaml", apogee::harness::config_template());
+    load_into(inputs);
+
+    inputs.child_processes = false;
+    const CheckReport without = run_checks(inputs);
+    const apogee::commands::CheckRow* skipped = row_in(without, "Tools", "git");
+    REQUIRE(skipped != nullptr);
+    CHECK(skipped->status == Status::Skipped);
+    CHECK(skipped->detail ==
+          "not offered -- this build cannot start other programs on Windows yet, so there are no "
+          "git or shell tools");
+    CHECK(skipped->remedy.empty());
+
+    inputs.child_processes = true;
+    const CheckReport with = run_checks(inputs);
+    const apogee::commands::CheckRow* asked = row_in(with, "Tools", "git");
+    REQUIRE(asked != nullptr);
+    CHECK(asked->status != Status::Skipped);
+    CHECK(asked->detail.find("PATH") != std::string::npos);
+
+    // The default is this build's own answer.
+    CHECK(CheckInputs{}.child_processes == apogee::platform::supports_child_processes());
 }

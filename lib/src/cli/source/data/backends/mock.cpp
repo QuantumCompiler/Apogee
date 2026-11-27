@@ -2,8 +2,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -13,6 +15,34 @@
 
 namespace apogee::backends {
 namespace {
+
+/// Every mock's conversation saves in this process (`conversations_saved`).
+std::atomic<std::size_t> g_conversations_saved{0};
+
+/// Calls held `until_cancelled` now, and holds a cancel ended (57r).
+std::atomic<std::size_t> g_calls_held{0};
+std::atomic<std::size_t> g_holds_cancelled{0};
+
+/// A turn held `until_cancelled` waits here for its token, at most
+/// `kMockHoldBound`; cancelled, the call throws as any provider's does.
+void hold(const MockTurn& turn, const harness::CancellationToken& cancellation) {
+    if (!turn.until_cancelled) {
+        return;
+    }
+    g_calls_held.fetch_add(1);
+    const auto deadline = std::chrono::steady_clock::now() + kMockHoldBound;
+    while (!cancellation.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    const bool cancelled = cancellation.stop_requested();
+    if (cancelled) {
+        g_holds_cancelled.fetch_add(1);
+    }
+    g_calls_held.fetch_sub(1);
+    if (cancelled) {
+        throw harness::CancelledError();
+    }
+}
 
 const MockTurn& default_turn() {
     static const MockTurn turn{"mock response", {}, harness::FinishReason::Stop, {}};
@@ -36,18 +66,31 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
     }
     std::string last_tool_result;
     std::string last_user;
+    std::optional<std::string> first_user;
     std::string system;
+    std::string call_ids;
     for (const harness::ChatMessage& message : request.messages) {
         if (message.role == harness::Role::Tool) {
             last_tool_result = message.content.plain_text();
         } else if (message.role == harness::Role::User) {
             last_user = message.content.plain_text();
+            if (!first_user.has_value()) {
+                first_user = last_user;
+            }
         } else if (message.role == harness::Role::System) {
             system += system.empty() ? "" : "\n\n";
             system += message.content.plain_text();
         }
+        for (const harness::ToolCall& call : message.tool_calls) {
+            call_ids += (call_ids.empty() ? "" : ",") + call.id;
+        }
     }
     replace_all(out, "{{last_user}}", last_user);
+    // The first user message as it was sent, and every tool call's id in
+    // the request (57q): so a check on the real binary can see an attachment
+    // still ride an earlier message, and no call sent without its result.
+    replace_all(out, "{{first_user}}", first_user.value_or(std::string{}));
+    replace_all(out, "{{tool_call_ids}}", call_ids);
     // How many tool definitions the request carried (26r), and which (27o).
     replace_all(out, "{{tool_count}}", std::to_string(request.tools.size()));
     if (out.find("{{tool_names}}") != std::string::npos) {
@@ -68,6 +111,10 @@ std::string expand_mock_text(std::string_view text, const harness::ChatRequest& 
                 nlohmann::json(request.transient.response_schema).dump());
     replace_all(out, "{{last_tool_result}}", last_tool_result);
     replace_all(out, "{{system}}", system);
+    // The bound the request carried (54b), or `none`: so a check on the real
+    // binary can see a surface's bound reach the backend.
+    replace_all(out, "{{max_tokens}}",
+                request.max_tokens.has_value() ? std::to_string(*request.max_tokens) : "none");
     // Whether the model was asked to think, and for how long (26i):
     // `on`, `off` or `auto`, with `:N` for a budget and `@level` for a
     // level (39a).
@@ -104,6 +151,7 @@ std::vector<MockTurn> parse_mock_script(const nlohmann::json& script) {
         turn.text = entry.value("text", std::string{});
         turn.delay = std::chrono::milliseconds{entry.value("delay_ms", 0)};
         turn.reasoning = entry.value("reasoning", std::string{});
+        turn.until_cancelled = entry.value("until_cancelled", false);
         if (const auto calls = entry.find("tool_calls"); calls != entry.end()) {
             if (!calls->is_array()) {
                 throw std::runtime_error("mock script: tool_calls must be a list");
@@ -216,6 +264,7 @@ harness::ChatResponse MockProvider::chat(const harness::ChatRequest& request,
     cancellation.throw_if_cancelled();
     record(request);
     const MockTurn& turn = next_turn();
+    hold(turn, cancellation);
     std::string text = expand_mock_text(turn.text, request);
     replace_all(text, "{{conversation}}", conversation_id_);
     replace_all(text, "{{model}}", options_.model);
@@ -227,6 +276,7 @@ harness::ChatResponse MockProvider::stream_chat(const harness::ChatRequest& requ
     options.cancellation.throw_if_cancelled();
     record(request);
     const MockTurn& turn = next_turn();
+    hold(turn, options.cancellation);
 
     if (options.on_status) {
         harness::StatusEvent event;
@@ -355,6 +405,7 @@ void MockProvider::resume_conversation(std::string_view conversation_id) {
 
 void MockProvider::save_conversation(std::string_view conversation_id,
                                      const harness::StatusSink& on_status) {
+    g_conversations_saved.fetch_add(1);
     if (!on_status) {
         return;
     }
@@ -365,6 +416,18 @@ void MockProvider::save_conversation(std::string_view conversation_id,
     event.detail =
         "nothing saved for " + std::string{conversation_id} + ": the mock keeps no state";
     on_status(event);
+}
+
+std::size_t MockProvider::conversations_saved() noexcept {
+    return g_conversations_saved.load();
+}
+
+std::size_t MockProvider::calls_held() noexcept {
+    return g_calls_held.load();
+}
+
+std::size_t MockProvider::holds_cancelled() noexcept {
+    return g_holds_cancelled.load();
 }
 
 }  // namespace apogee::backends

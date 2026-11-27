@@ -1,0 +1,7 @@
+registered MCP server 'xcode'
+  command: /usr/bin/xcrun
+  config:  /Users/someone/.apogee-dev/config/config.json
+
+Test it:  apogee mcp test xcode XcodeListWindows '{}'
+Xcode answers only while it runs with your project open, and with its Settings › Intelligence › Model Context Protocol › "Allow External Agents to Use Xcode Tools" on. The first connection asks you in Xcode to allow this apogee: Xcode approves an agent by its code signature and its binary's hash, and Apogee's macOS builds are ad-hoc signed, so Xcode asks again after every install or update.
+It connects at the start of the next tool-using run.

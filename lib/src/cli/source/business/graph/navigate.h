@@ -29,7 +29,7 @@
 ///
 /// **Read-only.** Nothing here writes -- not a cache row, not a stat -- which
 /// is what lets the toolset register ungated and be served to an external
-/// MCP client by `apogee __mcp-tools`.
+/// MCP client by `apogee mcp serve`.
 ///
 /// **Honest resolution.** A node is addressed by `name`, `kind:name` or, for
 /// code, `path:line`; a code node also by its unqualified name when exactly

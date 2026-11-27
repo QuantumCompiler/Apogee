@@ -254,6 +254,26 @@ public struct RecallListing: Sendable, Equatable {
         return count + named + (pending == 0 ? "" : ", and \(pending) more due one")
     }
 
+    /// Forget's question, as the inspector and Settings both ask it: how
+    /// many summaries go and which, named, from `listing` (GUI M15); the
+    /// count line where the binary printed only that; and, where the read
+    /// just failed, that recall could not be read -- `unread`, the CLI's
+    /// words -- in place of any earlier read's (GUI 6b). Then the command it
+    /// runs and what it keeps.
+    public static func forgetQuestion(listing: RecallListing?, countLine: String?, unread: String?) -> String {
+        let what: String
+        if let unread {
+            what = "Recall could not be read: \(unread). "
+        } else if let listing {
+            what = "These go: \(listing.forgetting). "
+        } else if let countLine {
+            what = "Now: \(countLine). "
+        } else {
+            what = ""
+        }
+        return what + "apogee chats recall --forget --yes -- every chat's summary goes, so no later session recalls them; every transcript stays."
+    }
+
     /// The count line in what `chats recall` printed: its line that begins
     /// `recall holds` -- an M31 binary lists a line per summary after it --
     /// else its last line; `nil` for nothing printed.

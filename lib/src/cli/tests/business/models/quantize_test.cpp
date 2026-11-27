@@ -1,13 +1,16 @@
 #include "models/quantize.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -341,3 +344,124 @@ TEST_CASE("a level is named the way the table spells it", "[models][quantize]") 
     CHECK_FALSE(apogee::models::canonical_quant_type("Q4_K_S").has_value());
     CHECK_FALSE(apogee::models::canonical_quant_type("").has_value());
 }
+
+// ---- a quantization run as a child, stopped on its token (57i) ----------------
+
+TEST_CASE("the child's side says each tensor, then its result, a JSON object a line",
+          "[models][quantize][child]") {
+    // `apogee __quantize` runs this: what the parent reads. A refusal is a
+    // result too -- here the missing input, said before llama.cpp is asked,
+    // in every build.
+    const Scratch scratch;
+    std::ostringstream out;
+    CHECK(apogee::models::quantize_for_parent(scratch.dir / "absent.gguf", scratch.dir / "out.gguf",
+                                              "Q4_K_M", out) == 1);
+    const nlohmann::json said = nlohmann::json::parse(out.str());
+    CHECK(said.at("ok") == false);
+    CHECK(said.at("error").get<std::string>().find("no such file") != std::string::npos);
+    CHECK(out.str().ends_with("}\n"));
+
+    if (!apogee::models::quantize_supported()) {
+        return;
+    }
+    // A real quantization of a 2 KiB model: a tensor line, then the sizes.
+    const std::filesystem::path input =
+        scratch.write("tiny-F16.gguf", apogee::testing::quantizable_gguf());
+    std::ostringstream made;
+    REQUIRE(apogee::models::quantize_for_parent(input, scratch.dir / "tiny-Q4_K_M.gguf", "Q4_K_M",
+                                                made) == 0);
+    std::vector<nlohmann::json> lines;
+    std::istringstream in{made.str()};
+    for (std::string line; std::getline(in, line);) {
+        lines.push_back(nlohmann::json::parse(line));
+    }
+    REQUIRE(lines.size() == 2);
+    CHECK(lines.front() == nlohmann::json{{"tensor", 1}, {"of", 1}});
+    CHECK(lines.back().at("ok") == true);
+    CHECK(lines.back().at("input_bytes").get<std::int64_t>() > 0);
+    CHECK(lines.back().at("output_bytes").get<std::int64_t>() > 0);
+}
+
+TEST_CASE("the child's command is the binary's own hidden verb", "[models][quantize][child]") {
+    const apogee::platform::ChildCommand command = apogee::models::quantize_child_command(
+        "/opt/apogee-dev", "/s/in.gguf", "/s/.incoming-1/out.gguf", "Q4_K_M");
+    CHECK(command.program == "/opt/apogee-dev");
+    CHECK(command.arguments == std::vector<std::string>{"__quantize", "/s/in.gguf",
+                                                        "/s/.incoming-1/out.gguf", "Q4_K_M"});
+}
+
+#if !defined(_WIN32)
+namespace {
+
+/// A stand-in for `apogee __quantize`: `/bin/sh -c <script>`.
+[[nodiscard]] apogee::platform::ChildCommand stand_in(const std::string& script) {
+    apogee::platform::ChildCommand command;
+    command.program = "/bin/sh";
+    command.arguments = {"-c", script};
+    return command;
+}
+
+}  // namespace
+
+TEST_CASE("the parent reads the child's tensors and result, and its stderr stays a tail",
+          "[models][quantize][child]") {
+    std::vector<std::pair<std::size_t, std::size_t>> counted;
+    const QuantizeResult made = apogee::models::quantize_in_child(
+        stand_in("echo 'llama.cpp chatter on stderr' >&2; "
+                 "echo '{\"tensor\":1,\"of\":2}'; echo 'a library print'; "
+                 "echo '{\"tensor\":2,\"of\":2}'; "
+                 "echo '{\"ok\":true,\"input_bytes\":4096,\"output_bytes\":1024}'"),
+        [&counted](std::size_t done, std::size_t total) { counted.emplace_back(done, total); },
+        apogee::harness::CancellationToken::create());
+    CHECK(made.ok);
+    CHECK_FALSE(made.stopped);
+    CHECK(made.input_bytes == 4096);
+    CHECK(made.output_bytes == 1024);
+    CHECK(counted == std::vector<std::pair<std::size_t, std::size_t>>{{1, 2}, {2, 2}});
+
+    // The child's own refusal, in its words.
+    const QuantizeResult refused = apogee::models::quantize_in_child(
+        stand_in("echo '{\"ok\":false,\"error\":\"llama.cpp could not quantize x\"}'; exit 1"), {},
+        apogee::harness::CancellationToken::create());
+    CHECK_FALSE(refused.ok);
+    CHECK(refused.error == "llama.cpp could not quantize x");
+
+    // A child that dies without its result: the last line its stderr said.
+    const QuantizeResult died =
+        apogee::models::quantize_in_child(stand_in("echo 'ggml: out of memory' >&2; exit 3"), {},
+                                          apogee::harness::CancellationToken::create());
+    CHECK_FALSE(died.ok);
+    CHECK_FALSE(died.stopped);
+    CHECK(died.error == "the quantizer ended without a result (exit 3): ggml: out of memory");
+
+    // One that cannot start says what it tried to run.
+    apogee::platform::ChildCommand absent;
+    absent.program = "/nonexistent/apogee";
+    const QuantizeResult unstarted =
+        apogee::models::quantize_in_child(absent, {}, apogee::harness::CancellationToken::create());
+    CHECK_FALSE(unstarted.ok);
+    CHECK(unstarted.error.find("/nonexistent/apogee") != std::string::npos);
+}
+
+TEST_CASE("a stop terminates the child at once, mid-quantize, and says it stopped",
+          "[models][quantize][child][interrupt]") {
+    // llama.cpp's quantizer takes no abort hook: the child is what a stop
+    // ends. This one would run a minute; the token is cancelled on its first
+    // tensor, as a Ctrl-C or the GUI's Stop cancels the command's.
+    const apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    const auto started = std::chrono::steady_clock::now();
+    const QuantizeResult result = apogee::models::quantize_in_child(
+        stand_in("echo '{\"tensor\":1,\"of\":100}'; sleep 60; "
+                 "echo '{\"ok\":true,\"input_bytes\":1,\"output_bytes\":1}'"),
+        [&token](std::size_t /*done*/, std::size_t /*total*/) { token.cancel(); }, token);
+    const auto took = std::chrono::steady_clock::now() - started;
+    CHECK(result.stopped);
+    CHECK_FALSE(result.ok);
+    CHECK(took < std::chrono::seconds{10});  // well inside the GUI's grace
+
+    // A token already stopped -- a Ctrl-C between two stages -- starts nothing.
+    const QuantizeResult never =
+        apogee::models::quantize_in_child(stand_in("echo started > /dev/null"), {}, token);
+    CHECK(never.stopped);
+}
+#endif

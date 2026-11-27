@@ -243,10 +243,17 @@ public final class ReviewViewModel {
     }
 
     /// `review skills show <name>`: the lens whole, its prompt read-only.
+    /// Another skill's detail is cleared at the click, so the panel never
+    /// shows the last one while this one is read, and the reply -- or its
+    /// failure -- lands only while `name` is still the one chosen: a slow
+    /// read answered after the next click is dropped, as the graph's explain
+    /// and the collections' reads drop theirs (GUI 4h, 6h).
     public func show(skill name: String) async {
         selectedSkill = name
+        if shownSkill?.name != name { shownSkill = nil }
         guard let binary else { return }
         let outcome = await runner.read(binary: binary, ["review", "skills", "show", name])
+        guard selectedSkill == name else { return }
         if let document = outcome.document, let skill = ReviewSkill(document: document) {
             shownSkill = skill
         } else {
@@ -337,12 +344,14 @@ public final class ReviewViewModel {
 
     // MARK: - Consent
 
-    /// The person's yes: the one place `--yes`, `--allow-post` and a delete
-    /// are passed.
-    public func confirm() async {
-        guard let pending else { return }
-        self.pending = nil
-        switch pending {
+    /// The person's yes to `answer`, the question the dialog showed: the one
+    /// place `--yes`, `--allow-post` and a delete are passed. The dialog's
+    /// closing clears `pending` before its button's action runs, so the
+    /// answer is handed in (GUI M20); `pending` is cleared only while it is
+    /// still `answer`.
+    public func confirm(_ answer: Pending) async {
+        if pending == answer { pending = nil }
+        switch answer {
         case .post(let shown):
             guard let arguments = runArguments else { return }
             let posting = arguments.map { $0 == "--dry-run" ? "--yes" : $0 }

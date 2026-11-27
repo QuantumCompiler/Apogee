@@ -243,6 +243,14 @@ struct BackendConfig {
     /// offer, and any list on a backend whose API runs none.
     std::vector<std::string> server_tools{};
 
+    /// The model calls `apogee mcp serve` may make on this entry for another
+    /// MCP host (54b): `complete` -- `contracts/mcp_serve.h` holds the table.
+    /// Empty, the default, serves none. Listing one is recorded consent for a
+    /// host to run this entry's model; only an entry whose provider says it
+    /// is local and unmetered may, which the editor asks at write and the
+    /// server again at its start. The loader refuses a name it cannot run.
+    std::vector<std::string> mcp_serve{};
+
     /// The LoRA adapters a local entry applies over `model_path`, in order
     /// (53a): llama.cpp sets every one on each context at its scale; mlx-lm
     /// loads one adapter directory, at the scale its training wrote. Empty,
@@ -271,6 +279,11 @@ struct BackendConfig {
     /// (a newer release's key read by an older binary is one of these), so
     /// they are kept here for `check` to name, never refused.
     std::vector<std::string> unknown_keys{};
+    /// Every key the entry writes, known or not, in the file's order (57f):
+    /// so `check` can tell a typo from a stray twin -- a `Model` beside the
+    /// entry's own `model` is removed, never renamed into a second `model`,
+    /// which the JSONC loader refuses.
+    std::vector<std::string> written_keys{};
 };
 
 /// Every key a backend entry may hold (55g), declared once: each field

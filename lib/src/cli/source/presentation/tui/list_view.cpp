@@ -460,9 +460,13 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return on_typing(event);
         }
         if (event == ftxui::Event::CtrlC && options.progress && options.progress->running()) {
-            // The run stops through its own channel; the shell stays.
-            if (options.progress->cancel()) {
-                notice = "asked the run to stop";
+            // The run stops through its own channel, which says what it did
+            // (57u); the shell stays.
+            if (const std::optional<std::string> said = options.progress->cancel();
+                said.has_value()) {
+                notice = said->empty() ? std::string{"asked the run to stop"} : *said;
+            } else {
+                notice = "the run is already ending -- nothing more to stop";
             }
             return true;
         }

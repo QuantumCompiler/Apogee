@@ -19,18 +19,28 @@ struct PreviewRunner: CommandRunning {
     let refused: [[String]]
     /// Commands the binary refused in its recorded words, before any answer.
     let refusals: [([String], String)]
+    /// Reads the binary refused in its recorded words: an older binary's
+    /// refusal of a verb it lacks, exiting 109 as its parser does for words
+    /// it doesn't take.
+    let readRefusals: [([String], String)]
 
     init(
         reads: [([String], String)], commands: [([String], String)] = [], refused: [[String]] = [],
-        refusals: [([String], String)] = []
+        refusals: [([String], String)] = [], readRefusals: [([String], String)] = []
     ) {
         self.reads = reads
         self.commands = commands
         self.refused = refused
         self.refusals = refusals
+        self.readRefusals = readRefusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        if let stderr = Self.answer(arguments, readRefusals) {
+            var tail = BoundedTail()
+            tail.append(Data(stderr.utf8))
+            return .failed(exit: ChildExit(reason: .exited, status: 109), stderrTail: tail)
+        }
         guard let text = Self.answer(arguments, reads) else {
             return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
         }
@@ -111,6 +121,29 @@ final class PreviewJob: JobRunning {
 struct PreviewJobs: JobStarting {
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
         PreviewJob()
+    }
+}
+
+/// A job that has failed as `check --fix` fails while a row still does
+/// (`check.cpp`: it exits as the report passes): exit 1, nothing on stderr
+/// -- the report is its stdout -- so the fold says it in its own words.
+final class PreviewFailedJob: JobRunning {
+    let updates: AsyncStream<JobUpdate>
+
+    init() {
+        let (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
+        self.updates = updates
+        continuation.yield(.ended(JobEnd(exit: ChildExit(reason: .exited, status: 1), stderrTail: BoundedTail(), interrupted: false)))
+        continuation.finish()
+    }
+
+    func stop(grace: Duration) async {}
+}
+
+/// Starts preview jobs, each already failed (GUI 6c's failed fix).
+struct PreviewFailingJobs: JobStarting {
+    func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
+        PreviewFailedJob()
     }
 }
 

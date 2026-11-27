@@ -168,6 +168,11 @@ nlohmann::json backend_view(std::string_view name, const harness::BackendConfig&
     if (!backend.server_tools.empty()) {
         out["server_tools"] = backend.server_tools;
     }
+    // The model calls a host may run on the entry over `apogee mcp serve`
+    // (54b), as the entry lists them.
+    if (!backend.mcp_serve.empty()) {
+        out["mcp_serve"] = backend.mcp_serve;
+    }
     // The adapters as the entry holds them, each with its pin (53a).
     if (!backend.adapters.empty()) {
         nlohmann::json adapters = nlohmann::json::array();
@@ -464,7 +469,7 @@ HttpResponse admin_set_backend_fields(const AdminConfigContext& context, std::st
             {.field = field, .value = value.is_string() ? value.get<std::string>() : value.dump()});
     }
     const commands::BackendFieldsOutcome outcome =
-        commands::set_backend_fields(context.config_path, name, edits);
+        commands::set_backend_fields(context.config_path, name, edits, context.metered);
     if (!outcome.refusal.empty()) {
         return error_response(400, outcome.refusal);
     }

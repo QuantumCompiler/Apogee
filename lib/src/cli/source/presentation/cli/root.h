@@ -52,7 +52,9 @@ public:
     /// Parses `argv` and runs the selected command.
     /// Returns the process exit code. A bare `apogee` opens the full-screen
     /// shell at an interactive terminal (32b); anywhere else it prints help
-    /// and returns 0, exactly as it always has.
+    /// and returns 0, exactly as it always has. On Windows the console is set
+    /// up for UTF-8 and escape sequences for the run and put back after it
+    /// (`platform::ConsoleScope`, 57j).
     [[nodiscard]] int run(int argc, const char* const* argv);
 
 private:

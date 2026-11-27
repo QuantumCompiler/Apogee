@@ -339,6 +339,32 @@ std::string error_message(long status, std::string_view body) {
     return "HTTP " + std::to_string(status);
 }
 
+std::optional<std::string> blocked_prompt(const nlohmann::json& body) {
+    if (!body.is_object()) {
+        return std::nullopt;
+    }
+    if (const auto candidates = body.find("candidates");
+        candidates != body.end() && candidates->is_array() && !candidates->empty()) {
+        return std::nullopt;
+    }
+    const auto feedback = body.find("promptFeedback");
+    if (feedback == body.end() || !feedback->is_object()) {
+        return std::nullopt;
+    }
+    const auto reason = feedback->find("blockReason");
+    if (reason == feedback->end() || !reason->is_string() ||
+        reason->get_ref<const std::string&>().empty()) {
+        return std::nullopt;
+    }
+    std::string said = "the prompt was blocked (" + reason->get<std::string>() + ")";
+    if (const auto message = feedback->find("blockReasonMessage");
+        message != feedback->end() && message->is_string() &&
+        !message->get_ref<const std::string&>().empty()) {
+        said += ": " + message->get<std::string>();
+    }
+    return said;
+}
+
 std::vector<std::string> server_tool_lines(const nlohmann::json& chunk,
                                            std::vector<std::string>& seen_queries) {
     std::vector<std::string> lines;

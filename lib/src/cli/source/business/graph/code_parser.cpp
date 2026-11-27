@@ -119,26 +119,66 @@ struct Predicate {
     std::uint32_t other = 0;
 };
 
+/// A tree cursor's heap stack, freed whatever leaves the walk: the C API
+/// hands the cursor out by value, so its owner is this guard.
+class TreeCursor {
+public:
+    explicit TreeCursor(TSNode root) : cursor_{ts_tree_cursor_new(root)} {}
+
+    ~TreeCursor() {
+        ts_tree_cursor_delete(&cursor_);
+    }
+
+    TreeCursor(const TreeCursor&) = delete;
+    TreeCursor& operator=(const TreeCursor&) = delete;
+    TreeCursor(TreeCursor&&) = delete;
+    TreeCursor& operator=(TreeCursor&&) = delete;
+
+    [[nodiscard]] TSTreeCursor* get() noexcept {
+        return &cursor_;
+    }
+
+private:
+    TSTreeCursor cursor_;
+};
+
 /// Whether the tree holds an ERROR node: text the grammar could not place,
 /// which the parse skipped. A MISSING node -- a token the parser assumed to
 /// recover, zero bytes wide -- loses no text, and is not counted: the
 /// pinned C++ grammar inserts one for every `= {}` default argument.
-// NOLINTNEXTLINE(misc-no-recursion): bounded by the tree's depth, and only
-// along the branches that carry an error.
-[[nodiscard]] bool contains_error(TSNode node) {
-    if (ts_node_is_error(node)) {
+///
+/// Walked with a tree cursor, never by recursion (57t): the 2 MiB cap bounds
+/// a file's bytes, not its depth -- 400 KB of nested parentheses is 200000
+/// levels -- so the walk's depth lives on the cursor's heap stack, never the
+/// call stack. Only the branches that carry an error are entered.
+[[nodiscard]] bool contains_error(TSNode root) {
+    if (ts_node_is_error(root)) {
         return true;
     }
-    if (!ts_node_has_error(node)) {
+    if (!ts_node_has_error(root)) {
         return false;
     }
-    const std::uint32_t count = ts_node_child_count(node);
-    for (std::uint32_t i = 0; i < count; ++i) {
-        if (contains_error(ts_node_child(node, i))) {
+    TreeCursor walk{root};
+    TSTreeCursor* cursor = walk.get();
+    if (!ts_tree_cursor_goto_first_child(cursor)) {
+        return false;
+    }
+    for (;;) {
+        const TSNode node = ts_tree_cursor_current_node(cursor);
+        if (ts_node_is_error(node)) {
             return true;
         }
+        if (ts_node_has_error(node) && ts_tree_cursor_goto_first_child(cursor)) {
+            continue;
+        }
+        // The next sibling, else up until one has a next sibling; back at
+        // the root, the walk is done.
+        while (!ts_tree_cursor_goto_next_sibling(cursor)) {
+            if (!ts_tree_cursor_goto_parent(cursor)) {
+                return false;
+            }
+        }
     }
-    return false;
 }
 
 [[nodiscard]] std::string_view node_text(std::string_view source, TSNode node) {

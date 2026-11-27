@@ -44,6 +44,7 @@
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
+#include "operations/backend_fields.h"
 #include "operations/training_reads.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
@@ -705,18 +706,85 @@ struct PromoteOutcome {
     return error;
 }
 
+/// What a promotion holds while it runs (57g): its backend's promotion lock,
+/// and the config and the checks as they stand under it.
+struct PromotionHold {
+    training::PromotionLock lock;
+    harness::Config config;
+    PromoteChecks checks;
+};
+
+/// One promotion per backend (57g), for `promote_run` and
+/// `promote_adapter_run` alike: the backend's lock taken before its ledger is
+/// read -- waiting, with a notice, for a promotion already running into it --
+/// and then, under it, the config read again and the checks made again, since
+/// the promotion waited for may have created the entry or repointed it.
+/// nullopt with `outcome` refused or cancelled when it cannot be held.
+[[nodiscard]] std::optional<PromotionHold> hold_promotion(
+    const harness::Config& given, const std::filesystem::path& config_path,
+    const training::TrainingStore& store, const training::RunManifest& manifest,
+    const PromoteRequest& request, const training::MessageSink& on_message,
+    const harness::CancellationToken& cancellation, PromoteOutcome& outcome) {
+    const PromoteChecks first = precheck_promotion(given, manifest, request);
+    if (!first.error.empty()) {
+        outcome.refused = true;
+        outcome.error = first.error;
+        return std::nullopt;
+    }
+    const std::string backend = first.existing_key.empty() ? request.backend : first.existing_key;
+    PromotionHold hold{.lock = training::lock_promotion(
+                           store.versions_dir(), backend,
+                           [&on_message, &backend]() {
+                               if (on_message) {
+                                   on_message("waiting for another promotion into " + backend);
+                               }
+                           },
+                           cancellation),
+                       .config = given,
+                       .checks = first};
+    if (hold.lock.cancelled) {
+        outcome.cancelled = true;
+        outcome.error = "cancelled";
+        return std::nullopt;
+    }
+    if (!hold.lock.held()) {
+        outcome.refused = true;
+        outcome.error = hold.lock.error;
+        return std::nullopt;
+    }
+    std::error_code code;
+    if (config_path.empty() || !std::filesystem::exists(config_path, code)) {
+        return hold;
+    }
+    try {
+        hold.config = harness::load_config(config_path);
+    } catch (const harness::ConfigError& e) {
+        outcome.refused = true;
+        outcome.error = std::string{"the config cannot be read: "} + e.what();
+        return std::nullopt;
+    }
+    hold.checks = precheck_promotion(hold.config, manifest, request);
+    if (!hold.checks.error.empty()) {
+        outcome.refused = true;
+        outcome.error = hold.checks.error;
+        return std::nullopt;
+    }
+    return hold;
+}
+
 [[nodiscard]] PromoteOutcome promote_run(
-    const harness::Config& config, const std::filesystem::path& config_path,
+    const harness::Config& given_config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
     training::Trainer& trainer, const training::Converter& convert, const PromoteRequest& request,
     const training::MessageSink& on_message, const harness::CancellationToken& cancellation) {
     PromoteOutcome outcome;
-    const PromoteChecks checks = precheck_promotion(config, manifest, request);
-    if (!checks.error.empty()) {
-        outcome.refused = true;
-        outcome.error = checks.error;
+    const std::optional<PromotionHold> hold = hold_promotion(
+        given_config, config_path, store, manifest, request, on_message, cancellation, outcome);
+    if (!hold.has_value()) {
         return outcome;
     }
+    const harness::Config& config = hold->config;
+    const PromoteChecks& checks = hold->checks;
     std::string ledger_error;
     training::VersionLedger ledger =
         training::load_ledger(store.versions_dir(), request.backend, ledger_error)
@@ -732,6 +800,25 @@ struct PromoteOutcome {
         outcome.refused = true;
         outcome.error = conflict;
         return outcome;
+    }
+    // 57i: a merged version replaces the base under every adapter the entry
+    // applies -- those added by hand with `config set-backend --adapters`
+    // too, beyond the ledger `target_conflict` reads -- each pinned to the
+    // weights it replaces. Refused here, under the lock and before anything
+    // is fused or stored, as 55e refuses a moved model_path; no re-pin fits a
+    // fine-tune merged over their base. A ledger holding adapter versions
+    // has already been refused above in its own words.
+    if (const harness::BackendConfig* entry =
+            checks.existing_key.empty() ? nullptr : config.find_backend(checks.existing_key);
+        entry != nullptr) {
+        if (std::string refused = base_replaced_under_adapters(
+                checks.existing_key, *entry, "a merged version would replace that base under them",
+                "promote under a new name");
+            !refused.empty()) {
+            outcome.refused = true;
+            outcome.error = std::move(refused);
+            return outcome;
+        }
     }
     const bool mlx = checks.target == training::PromoteTarget::Mlx;
     outcome.target = checks.target;
@@ -984,7 +1071,7 @@ struct PromoteOutcome {
 /// adapter the entry will apply: a candidate under the gate's floor is
 /// removed, never registered.
 [[nodiscard]] PromoteOutcome promote_adapter_run(
-    const harness::Config& config, const std::filesystem::path& config_path,
+    const harness::Config& given_config, const std::filesystem::path& config_path,
     const training::TrainingStore& store, const training::RunManifest& manifest,
     const training::AdapterConverter& convert, const PromoteRequest& request,
     const ServingScorer& score, const training::MessageSink& on_message,
@@ -995,10 +1082,13 @@ struct PromoteOutcome {
         outcome.error = std::move(error);
         return outcome;
     };
-    const PromoteChecks checks = precheck_promotion(config, manifest, request);
-    if (!checks.error.empty()) {
-        return refuse(checks.error);
+    const std::optional<PromotionHold> hold = hold_promotion(
+        given_config, config_path, store, manifest, request, on_message, cancellation, outcome);
+    if (!hold.has_value()) {
+        return outcome;
     }
+    const harness::Config& config = hold->config;
+    const PromoteChecks& checks = hold->checks;
     std::string ledger_error;
     training::VersionLedger ledger =
         training::load_ledger(store.versions_dir(), request.backend, ledger_error)
@@ -1377,7 +1467,59 @@ private:
     int last_percent_ = -1;
 };
 
-void print_pipeline_summary(const training::PipelineRunManifest& manifest) {
+/// The command that resumes a run (57h): bare when a resume without
+/// `--pipeline` finds its spec, else with `--pipeline <spec>` and why not.
+struct ResumeCommand {
+    std::string command;
+    std::string problem;
+};
+
+[[nodiscard]] ResumeCommand resume_command(const training::PipelineRunManifest& manifest,
+                                           const harness::Config& config) {
+    const training::ResumeSpec spec =
+        training::find_resume_spec(manifest, config.training.pipelines);
+    ResumeCommand out;
+    out.command = "apogee train pipeline resume " + manifest.pipeline_run_id;
+    if (spec.ref.empty()) {
+        out.command += " --pipeline <spec>";
+        out.problem = spec.problem;
+    }
+    return out;
+}
+
+/// Where a resume starts, what it leaves, and the command (57h) -- the
+/// status's and the summary's one block. Nothing for a complete run, a cycle
+/// pass or one with no stage left.
+void print_resume_hint(const training::PipelineRunManifest& manifest,
+                       const harness::Config& config) {
+    const std::string from = operations::resume_stage_text(manifest);
+    if (from.empty()) {
+        return;
+    }
+    const std::string kept = operations::kept_failed_text(manifest);
+    const ResumeCommand resume = resume_command(manifest, config);
+    std::cout << "Resume from " << from << (kept.empty() ? "" : "; " + kept) << ":\n  "
+              << resume.command << "\n";
+    if (!resume.problem.empty()) {
+        std::cout << "  (" << resume.problem << ")\n";
+    }
+}
+
+/// A cycle pass's own line in place of a resume (57h): its candidate is the
+/// cycle's alone.
+void print_cycle_pass_line(const training::PipelineRunManifest& manifest) {
+    if (!training::is_cycle_pass(manifest.pipeline_run_id) || manifest.complete()) {
+        return;
+    }
+    std::cout << "A cycle pass: its candidate was discarded, and no other verb resumes it -- "
+                 "'apogee train cycle run' runs the next pass\n";
+}
+
+/// A run's outcome as its verb prints it -- with `config`, where its resume
+/// starts (57h); a regime's pipeline, which `pipeline resume` cannot
+/// continue on its own data, is printed without.
+void print_pipeline_summary(const training::PipelineRunManifest& manifest,
+                            const harness::Config* config) {
     std::cout << (manifest.complete() ? "pipeline complete -- "
                                       : "pipeline " + manifest.status + " -- ")
               << manifest.pipeline_run_id << "\n";
@@ -1396,11 +1538,24 @@ void print_pipeline_summary(const training::PipelineRunManifest& manifest) {
         std::cout << "\nPromote the last passing stage:\n  apogee train promote " << promotable
                   << " --as <backend>\n";
     }
+    // Where its resume starts (57h), unless another process runs it now.
+    if (config != nullptr && !operations::resume_stage_text(manifest).empty() &&
+        !training::pipeline_holder(harness::training_pipelines_dir() / manifest.pipeline_run_id)
+             .has_value()) {
+        std::cout << "\n";
+        print_resume_hint(manifest, *config);
+    }
 }
 
-void print_pipeline_table(const training::PipelineRunManifest& manifest) {
+void print_pipeline_table(const training::PipelineRunManifest& manifest,
+                          const std::optional<platform::PidLock::Holder>& holder,
+                          const harness::Config& config) {
+    // A `running` manifest no live process holds is a run that stopped
+    // without saying so (57g): a crash, a kill.
+    const bool stopped = manifest.status == training::kPipelineRunning && !holder.has_value();
     std::cout << "pipeline " << manifest.pipeline_run_id << "\n"
-              << "  status:  " << manifest.status << "\n";
+              << "  status:  " << manifest.status
+              << (stopped ? " -- stopped: no process holds it" : "") << "\n";
     if (!manifest.spec_name.empty()) {
         std::cout << "  spec:    " << manifest.spec_name << "\n";
     }
@@ -1422,22 +1577,33 @@ void print_pipeline_table(const training::PipelineRunManifest& manifest) {
         std::cout << "  " << pad(std::to_string(stage.index + 1), 4) << pad(stage.name, 22)
                   << pad(stage.status, 12) << pad(score, 16) << stage.run_id << "\n";
     }
+    // A cycle pass's stages are the cycle's to judge and promote (57h): no
+    // other verb is offered them.
+    const bool cycle_pass = training::is_cycle_pass(manifest.pipeline_run_id);
     const std::string promotable = manifest.promote_run_id();
-    if (!promotable.empty()) {
+    if (!promotable.empty() && !cycle_pass) {
         std::cout << "\nPromote the last passing stage:\n  apogee train promote " << promotable
                   << " --as <backend>\n";
     }
-    if (!manifest.complete() && manifest.first_unpassed() < manifest.stages.size()) {
-        std::cout << "Resume from stage " << (manifest.first_unpassed() + 1)
-                  << ":\n  apogee train pipeline resume " << manifest.pipeline_run_id << "\n";
+    // A live holder's run is its to finish: no resume is offered while it
+    // runs (57g).
+    if (holder.has_value()) {
+        std::cout << "This pipeline is " << training::pipeline_holder_text(*holder)
+                  << "; a resume is refused while it runs\n";
+        return;
     }
+    print_cycle_pass_line(manifest);
+    print_resume_hint(manifest, config);
 }
 
 // --- the spec resolvers -------------------------------------------------------------
 
-/// A pipeline by file path, else a `training.pipelines:` entry.
+/// A pipeline by file path, else a `training.pipelines:` entry -- and, with
+/// `ref`, the value a run records to find it again (57h): the file's
+/// absolute path, or the entry's key.
 [[nodiscard]] harness::PipelineSpec resolve_pipeline_spec(const harness::Config& config,
-                                                          const std::string& value) {
+                                                          const std::string& value,
+                                                          std::string* ref = nullptr) {
     std::error_code code;
     const std::filesystem::path path{value};
     if (std::filesystem::is_regular_file(path, code)) {
@@ -1445,13 +1611,22 @@ void print_pipeline_table(const training::PipelineRunManifest& manifest) {
         std::ostringstream text;
         text << in.rdbuf();
         try {
-            return harness::parse_pipeline_spec(text.str(), path.string(), path.stem().string());
+            harness::PipelineSpec spec =
+                harness::parse_pipeline_spec(text.str(), path.string(), path.stem().string());
+            if (ref != nullptr) {
+                const std::filesystem::path absolute = std::filesystem::absolute(path, code);
+                *ref = (code ? path : absolute.lexically_normal()).string();
+            }
+            return spec;
         } catch (const harness::ConfigError& e) {
             fail_user(e.what());
         }
     }
     if (const auto named = config.training.pipelines.find(value);
         named != config.training.pipelines.end()) {
+        if (ref != nullptr) {
+            *ref = value;
+        }
         return named->second;
     }
     if (value.find('/') != std::string::npos || value.ends_with(".yaml") ||
@@ -1552,14 +1727,21 @@ struct PipelineInputs {
     return harness::RegimeSpec{};
 }
 
-void print_cycle_history(const training::CycleHistory& history, bool active) {
+void print_cycle_history(const training::CycleHistory& history,
+                         const training::CycleLockState& lock) {
     std::cout << "cycle for backend " << (history.backend.empty() ? "-" : history.backend) << "\n"
               << "  state:             "
-              << (history.halted ? "HALTED -- " + history.halt_reason
-                  : active       ? std::string{"running now"}
-                                 : std::string{"idle"})
-              << "\n"
-              << "  runs:              " << history.total_runs << " (" << history.consecutive_fails
+              << (history.halted   ? "HALTED -- " + history.halt_reason
+                  : lock.running() ? std::string{"running now"}
+                  : lock.stale()   ? training::stale_lock_text(lock)
+                                   : std::string{"idle"})
+              << "\n";
+    // Halted with a dead pass's lock left: both are in the way of the next
+    // run, so both are said (57g).
+    if (history.halted && lock.stale()) {
+        std::cout << "  lock:              " << training::stale_lock_text(lock) << "\n";
+    }
+    std::cout << "  runs:              " << history.total_runs << " (" << history.consecutive_fails
               << " consecutive failure(s))\n"
               << "  anchor:            "
               << (history.anchor_version > 0
@@ -1806,11 +1988,31 @@ std::string eval_glyph(const std::optional<bool>& passed, const std::optional<do
     return std::string{*passed ? "pass " : "FAIL "} + percent(score.value_or(0.0));
 }
 
+std::optional<nlohmann::json> train_versions_document(const std::string& backend,
+                                                      std::string& refusal) {
+    const training::TrainingStore store{harness::training_dir()};
+    std::string error;
+    (void)training::load_ledger(store.versions_dir(), backend, error);
+    if (!backend.empty() && !error.empty()) {
+        refusal = "the version ledger is unreadable: " + error;
+        return std::nullopt;
+    }
+    std::optional<nlohmann::json> document = operations::training_versions_document(backend);
+    if (!document.has_value()) {
+        refusal = "no version history for backend '" + backend + "'";
+    }
+    return document;
+}
+
 std::string train_status_text(const RootContext& context) {
     std::ostringstream out;
     const harness::Config config = load_config_or_default(context);
     const training::TrainingStore store{harness::training_dir()};
     const std::filesystem::path cycle_dir = harness::training_cycle_dir();
+    // A lock a dead pass left (57g) is said once: as the cycle's state, or
+    // on its own line when the state is something else.
+    const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
+    bool lock_said = false;
     if (training::history_exists(cycle_dir)) {
         std::string error;
         const training::CycleHistory history =
@@ -1818,10 +2020,12 @@ std::string train_status_text(const RootContext& context) {
         if (!error.empty()) {
             out << "Cycle: history unreadable -- " << error << "\n";
         } else {
+            lock_said = !history.halted;
             out << "Cycle: "
-                << (history.halted                         ? "HALTED -- " + history.halt_reason
-                    : training::cycle_lock_held(cycle_dir) ? std::string{"running now"}
-                                                           : std::string{"idle"})
+                << (history.halted   ? "HALTED -- " + history.halt_reason
+                    : lock.running() ? std::string{"running now"}
+                    : lock.stale()   ? training::stale_lock_text(lock)
+                                     : std::string{"idle"})
                 << "; backend " << history.backend << "; " << history.total_runs << " run(s), "
                 << history.consecutive_fails << " consecutive failure(s)"
                 << (history.anchor_version > 0
@@ -1830,11 +2034,18 @@ std::string train_status_text(const RootContext& context) {
                         : std::string{})
                 << "\n";
         }
+    } else if (lock.stale()) {
+        // A first pass killed before it wrote any history.
+        out << "Cycle: " << training::stale_lock_text(lock) << "\n";
+        lock_said = true;
     } else if (config.training.cycle.configured()) {
         out << "Cycle: configured (pipeline '" << config.training.cycle.pipeline << "' -> "
             << config.training.cycle.backend << "), no runs yet ('apogee train cycle run')\n";
     } else {
         out << "Cycle: not configured (training.cycle)\n";
+    }
+    if (lock.stale() && !lock_said) {
+        out << "Cycle lock: " << training::stale_lock_text(lock) << "\n";
     }
     const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
     const std::optional<training::PipelineSummary> active = store.active_pipeline();
@@ -1844,9 +2055,14 @@ std::string train_status_text(const RootContext& context) {
     } else if (pipelines.empty()) {
         out << "Pipeline: none yet ('apogee train pipeline run --pipeline <spec>')\n";
     } else {
-        out << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest "
-            << pipelines.front().id << " " << pipelines.front().status << " ("
-            << pipelines.front().passed << "/" << pipelines.front().stages << " passed)\n";
+        // Not the active one, so a `running` latest is a run no live process
+        // holds (57g): stopped without saying so.
+        const training::PipelineSummary& latest = pipelines.front();
+        out << "Pipeline: none in progress; " << pipelines.size() << " run(s), latest " << latest.id
+            << " "
+            << (latest.status == training::kPipelineRunning ? std::string{"stopped mid-run"}
+                                                            : latest.status)
+            << " (" << latest.passed << "/" << latest.stages << " passed)\n";
     }
     const std::vector<training::RunSummary> runs = store.list_runs();
     int running = 0;
@@ -2213,7 +2429,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.num_layers = *run_layers;
         request.grad_checkpoint = *run_grad;
         request.mask_prompt = *run_mask;
-        request.run_id = training::new_run_id(runs_dir);
+        std::string reserve_error;
+        request.run_id =
+            training::new_run_id(runs_dir, std::chrono::system_clock::now(), {}, reserve_error);
+        if (request.run_id.empty()) {
+            fail_user(reserve_error);
+        }
         request.output_dir = runs_dir / request.run_id;
 
         training::RunManifest manifest;
@@ -2712,16 +2933,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     versions->callback([versions_backend, versions_format]() {
         const training::TrainingStore store{harness::training_dir()};
         if (*versions_format == ReadFormat::Json) {
-            // The body `GET /v1/admin/training/versions` serves (37f).
-            std::string error;
-            (void)training::load_ledger(store.versions_dir(), *versions_backend, error);
-            if (!versions_backend->empty() && !error.empty()) {
-                fail_user("the version ledger is unreadable: " + error);
-            }
+            // The body `GET /v1/admin/training/versions` serves (37f), and
+            // what `mcp serve`'s `train_versions` answers (54a).
+            std::string refusal;
             const std::optional<nlohmann::json> document =
-                operations::training_versions_document(*versions_backend);
+                train_versions_document(*versions_backend, refusal);
             if (!document.has_value()) {
-                fail_user("no version history for backend '" + *versions_backend + "'");
+                fail_user(refusal);
             }
             write_document(std::cout, *document);
             return;
@@ -2826,13 +3044,16 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto resume_judge = std::make_shared<std::string>();
     auto resume_trainer = std::make_shared<std::string>();
     CLI::App* pipe_resume = pipeline->add_subcommand(
-        "resume", "Continue a pipeline from the first stage that has not passed");
+        "resume",
+        "Continue a pipeline after its last passed stage, from that stage's fused weights; an "
+        "earlier stage that failed its gate stays as it is, and a cycle pass is never resumed");
     pipe_resume->add_option("id", *resume_id, "The pipeline run id")
-        ->type_name(kPipelineRunValue)
+        ->type_name(kResumablePipelineRunValue)
         ->required();
     pipe_resume
         ->add_option("--pipeline", *resume_spec,
-                     "The spec, when the run's named pipeline is no longer in the config")
+                     "The spec, when the run's own cannot be found: by the spec it recorded, its "
+                     "key, or the one entry whose name: it carries")
         ->type_name(kPipelineValue);
     pipe_resume->add_flag("--continue-on-fail", *resume_continue,
                           "Go on to the next stage when the cumulative gate fails");
@@ -2851,9 +3072,11 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
     auto pipe_status_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     add_read_format(pipe_status, pipe_status_format);
 
-    // One body for run and resume: resolve, drive, report.
+    // One body for run and resume: resolve, drive, report. `spec_ref` is the
+    // `--pipeline` value that names the spec, recorded for the next resume
+    // (57h) -- for a bare resume, the one its lookup found.
     auto drive_pipeline = [&context](const harness::Config& config,
-                                     const harness::PipelineSpec& spec,
+                                     const harness::PipelineSpec& spec, const std::string& spec_ref,
                                      std::optional<training::PipelineRunManifest> existing,
                                      bool continue_on_fail, const std::string& judge_flag,
                                      const std::string& trainer_flag) {
@@ -2879,11 +3102,20 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         request.gate_mode = training::gate_mode_from_string(config.training.effective_gate_mode());
         request.continue_on_fail = continue_on_fail;
-        request.pipeline_run_id = existing.has_value()
-                                      ? existing->pipeline_run_id
-                                      : training::new_run_id(harness::training_pipelines_dir(),
-                                                             std::chrono::system_clock::now(),
-                                                             training::kPipelineIdPrefix);
+        request.spec_ref = spec_ref;
+        if (existing.has_value()) {
+            request.pipeline_run_id = existing->pipeline_run_id;
+        } else {
+            // Reserved by its directory (57g): two runs started in one second
+            // get two.
+            std::string reserve_error;
+            request.pipeline_run_id = training::new_run_id(
+                harness::training_pipelines_dir(), std::chrono::system_clock::now(),
+                training::kPipelineIdPrefix, reserve_error);
+            if (request.pipeline_run_id.empty()) {
+                fail_user(reserve_error);
+            }
+        }
         // A stream's progress is the relay's (55h); a person's, the console's.
         JobStream* const job = JobStream::current();
         std::optional<PipelineRelay> relay;
@@ -2904,16 +3136,28 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         const InterruptScope interrupt;
         request.cancellation = InterruptScope::token();
-        const std::string header =
+        // A resume says where it starts and what it leaves (57h): the point
+        // the runner takes.
+        const std::string from =
+            existing.has_value() ? operations::resume_stage_text(*existing) : std::string{};
+        const std::string kept =
+            existing.has_value() ? operations::kept_failed_text(*existing) : std::string{};
+        std::vector<std::string> header{
             "[pipeline] " + std::string{existing.has_value() ? "resuming " : ""} + spec.name +
-            " as " + request.pipeline_run_id + ": " + std::to_string(spec.stages.size()) +
-            " stage(s), " + trainer_name + " on " + request.base_model.filename().string() +
+            " as " + request.pipeline_run_id + (from.empty() ? "" : " from " + from) + ": " +
+            std::to_string(spec.stages.size()) + " stage(s), " + trainer_name + " on " +
+            request.base_model.filename().string() +
             (judge.key.empty() ? std::string{"; no judge: unmatched items skip"}
-                               : ", judge " + judge.key);
-        if (job != nullptr) {
-            job->events().on_notice(header);
-        } else {
-            std::cerr << header << "\n";
+                               : ", judge " + judge.key)};
+        if (!kept.empty()) {
+            header.push_back("[pipeline] " + kept);
+        }
+        for (const std::string& line : header) {
+            if (job != nullptr) {
+                job->events().on_notice(line);
+            } else {
+                std::cerr << line << "\n";
+            }
         }
         const training::PipelineOutcome outcome =
             existing.has_value() ? training::resume_pipeline(request, std::move(*existing))
@@ -2922,19 +3166,22 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             // The run's own read, whatever became of it: what `train pipeline
             // status <id> --output-format json` prints, once the run has
             // written its manifest.
+            std::string unread;
             if (const std::optional<nlohmann::json> document =
-                    operations::training_pipeline_document(request.pipeline_run_id);
+                    operations::training_pipeline_document(request.pipeline_run_id, config, unread);
                 document.has_value()) {
                 job->events().emit_document(*document);
             }
         } else {
             console->finish();
-            print_pipeline_summary(outcome.manifest);
+            print_pipeline_summary(outcome.manifest, &config);
         }
+        // The verb's own doors (57h): a command that runs as printed, naming
+        // `--pipeline` when a bare resume would not find the spec.
+        const ResumeCommand resume = resume_command(outcome.manifest, config);
         if (outcome.cancelled) {
-            const std::string said = "cancelled; recorded as " + outcome.manifest.status +
-                                     " -- 'apogee train pipeline resume " +
-                                     request.pipeline_run_id + "' continues it";
+            const std::string said = "cancelled; recorded as " + outcome.manifest.status + " -- '" +
+                                     resume.command + "' continues it";
             std::cerr << "[pipeline] " << said << "\n";
             if (job != nullptr) {
                 job->failed(said);
@@ -2942,9 +3189,14 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             throw CLI::RuntimeError(kCancelled);
         }
         if (!outcome.ok) {
-            std::cerr << "apogee train: " << outcome.error << "\n";
+            const std::string error = outcome.gate_failed
+                                          ? outcome.error + ". Fix the data or the suite and '" +
+                                                resume.command +
+                                                "', or pass --continue-on-fail to go on regardless"
+                                          : outcome.error;
+            std::cerr << "apogee train: " << error << "\n";
             if (job != nullptr) {
-                job->failed(outcome.error);
+                job->failed(error);
             }
             throw CLI::RuntimeError(kBackendError);
         }
@@ -2955,8 +3207,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         run_as_job(*pipe_format, "train pipeline run", [&]() {
             std::filesystem::path config_path;
             const harness::Config config = load_config_strict(context, config_path);
-            const harness::PipelineSpec spec = resolve_pipeline_spec(config, *pipe_spec);
-            drive_pipeline(config, spec, std::nullopt, *pipe_continue, *pipe_judge, *pipe_trainer);
+            std::string ref;
+            const harness::PipelineSpec spec = resolve_pipeline_spec(config, *pipe_spec, &ref);
+            drive_pipeline(config, spec, ref, std::nullopt, *pipe_continue, *pipe_judge,
+                           *pipe_trainer);
         });
     });
 
@@ -2969,37 +3223,56 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             if (!training::valid_run_id(*resume_id)) {
                 fail_user("'" + *resume_id + "' is not a pipeline run id");
             }
-            std::optional<training::PipelineRunManifest> existing = store.get_pipeline(*resume_id);
+            std::string unread;
+            std::optional<training::PipelineRunManifest> existing =
+                store.get_pipeline(*resume_id, unread);
+            if (!unread.empty()) {
+                fail_user("the pipeline run is unreadable: " + unread);
+            }
             if (!existing.has_value()) {
                 fail_user("no pipeline run '" + *resume_id +
                           "' ('apogee train pipeline status' lists them)");
             }
-            harness::PipelineSpec spec;
-            if (!resume_spec->empty()) {
-                spec = resolve_pipeline_spec(config, *resume_spec);
-            } else if (const auto named = config.training.pipelines.find(existing->spec_name);
-                       named != config.training.pipelines.end()) {
-                spec = named->second;
-            } else {
-                fail_user("pipeline '" + existing->spec_name +
-                          "' is not under training.pipelines any more -- pass --pipeline <spec> to "
-                          "resume " +
-                          *resume_id);
-            }
-            if (const std::string refusal = training::resume_check(*existing, spec);
+            // What no spec changes, before one is looked for (57h): a live
+            // holder, a complete run, a cycle pass -- whose own spec would
+            // otherwise be found and trained on the wrong data -- and a
+            // snapshot gone since. Completion offers by the same test.
+            if (const std::string refusal =
+                    training::resume_refusal(*existing, harness::training_dir());
                 !refusal.empty()) {
                 fail_user(refusal);
             }
-            std::error_code code;
-            if (!std::filesystem::is_directory(existing->base_model, code)) {
-                fail_user("the run's snapshot is gone: " + existing->base_model);
+            // The run's own spec when none is named (57h): the reference it
+            // recorded, its key, or the one entry whose `name:` it carries.
+            harness::PipelineSpec spec;
+            std::string ref;
+            if (!resume_spec->empty()) {
+                spec = resolve_pipeline_spec(config, *resume_spec, &ref);
+            } else if (const training::ResumeSpec found =
+                           training::find_resume_spec(*existing, config.training.pipelines);
+                       !found.ref.empty()) {
+                // Recorded too, so a run written before `spec_ref` gains it.
+                spec = resolve_pipeline_spec(config, found.ref, &ref);
+            } else {
+                fail_user(found.problem + " -- pass --pipeline <spec> to resume " + *resume_id);
             }
-            drive_pipeline(config, spec, std::move(existing), *resume_continue, *resume_judge,
+            // Refused while a live process runs it (57g), naming the process,
+            // or once its snapshot is gone -- each read again after the spec.
+            if (const std::string refusal =
+                    training::resume_check(*existing, spec, harness::training_dir());
+                !refusal.empty()) {
+                fail_user(refusal);
+            }
+            drive_pipeline(config, spec, ref, std::move(existing), *resume_continue, *resume_judge,
                            *resume_trainer);
         });
     });
 
-    pipe_status->callback([pipe_status_id, pipe_status_format]() {
+    pipe_status->callback([&context, pipe_status_id, pipe_status_format]() {
+        // The specs a resume would name, from the config as a read finds it
+        // (57h): one that is absent or does not read names none.
+        const harness::Config config =
+            operations::config_for_reads(harness::resolve_config_path(context.config_path));
         if (*pipe_status_format == ReadFormat::Json) {
             // The bodies `GET /v1/admin/training/runs?kind=pipeline` and
             // `GET /v1/admin/training/runs/{id}` serve (55h).
@@ -3010,8 +3283,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             if (!training::valid_run_id(*pipe_status_id)) {
                 fail_user("'" + *pipe_status_id + "' is not a pipeline run id");
             }
+            std::string unread;
             const std::optional<nlohmann::json> document =
-                operations::training_pipeline_document(*pipe_status_id);
+                operations::training_pipeline_document(*pipe_status_id, config, unread);
+            if (!unread.empty()) {
+                fail_user("the pipeline run is unreadable: " + unread);
+            }
             if (!document.has_value()) {
                 fail_user("no pipeline run '" + *pipe_status_id + "'");
             }
@@ -3041,12 +3318,17 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         if (!training::valid_run_id(*pipe_status_id)) {
             fail_user("'" + *pipe_status_id + "' is not a pipeline run id");
         }
+        std::string unread;
         const std::optional<training::PipelineRunManifest> manifest =
-            store.get_pipeline(*pipe_status_id);
+            store.get_pipeline(*pipe_status_id, unread);
+        if (!unread.empty()) {
+            fail_user("the pipeline run is unreadable: " + unread);
+        }
         if (!manifest.has_value()) {
             fail_user("no pipeline run '" + *pipe_status_id + "'");
         }
-        print_pipeline_table(*manifest);
+        print_pipeline_table(
+            *manifest, training::pipeline_holder(store.pipeline_dir(*pipe_status_id)), config);
     });
 
     // ---- pipeline list / show (M30) -------------------------------------------
@@ -3355,9 +3637,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         request.spec = spec;
         request.kits_dir = harness::training_kits_dir();
         request.training_dir = harness::training_dir();
+        std::string reserve_error;
         request.regime_run_id =
             training::new_run_id(harness::training_regime_dir(), std::chrono::system_clock::now(),
-                                 training::kRegimeIdPrefix);
+                                 training::kRegimeIdPrefix, reserve_error);
+        if (request.regime_run_id.empty()) {
+            fail_user(reserve_error);
+        }
         request.work_dir = harness::training_regime_dir() / request.regime_run_id;
         request.base_model = student.path;
         request.generate = make_teacher(providers.harness, teacher.key);
@@ -3398,7 +3684,7 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                       << " call(s) -> " << kit.dataset.string() << "\n";
         }
         if (outcome.pipeline.has_value()) {
-            print_pipeline_summary(outcome.pipeline->manifest);
+            print_pipeline_summary(outcome.pipeline->manifest, nullptr);
         }
         if (!outcome.ok) {
             std::cerr << "apogee train: regime " << spec.name << ": " << outcome.error
@@ -3683,9 +3969,15 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                               ? " -- 'apogee train cycle run' performs one gated pass"
                               : " -- configure training.cycle first")
                       << "\n";
+            // A first pass killed before it wrote any history (57g).
+            if (const std::string stale =
+                    training::stale_lock_text(training::cycle_lock_state(cycle_dir));
+                !stale.empty()) {
+                std::cout << "  " << stale << "\n";
+            }
             return;
         }
-        print_cycle_history(history, training::cycle_lock_held(cycle_dir));
+        print_cycle_history(history, training::cycle_lock_state(cycle_dir));
     });
 
     CLI::App* cycle_halt = cycle->add_subcommand(
@@ -3716,8 +4008,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle "
                      "resume'\n";
-        if (training::cycle_lock_held(cycle_dir)) {
+        // A pass is said only when one is running (57g); a dead one's lock
+        // is said as what it is.
+        if (const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);
+            lock.running()) {
             std::cout << "  the pass running now finishes, and keeps the halt\n";
+        } else if (lock.stale()) {
+            std::cout << "  " << training::stale_lock_text(lock) << "\n";
         }
     });
 

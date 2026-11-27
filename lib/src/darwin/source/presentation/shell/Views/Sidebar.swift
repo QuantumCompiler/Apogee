@@ -21,12 +21,14 @@ struct Sidebar<Sessions: View>: View {
                 sessions()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 Divider()
-                // All seven fit the sidebar's width, so the row never scrolls.
-                HStack(spacing: Spacing.xxs) {
-                    ForEach(Destination.allCases) { PlaceButton(destination: $0, model: model, fill: true) }
+                ScrollView(.horizontal) {
+                    HStack(spacing: Spacing.xxs) {
+                        ForEach(Destination.allCases) { PlaceButton(destination: $0, model: model, fill: true) }
+                    }
+                    .padding(.horizontal, Spacing.s)
+                    .padding(.vertical, Spacing.xs)
                 }
-                .padding(.horizontal, Spacing.s)
-                .padding(.vertical, Spacing.xs)
+                .scrollIndicators(.hidden)
             }
             Divider()
             footer
@@ -82,6 +84,7 @@ struct PlaceButton: View {
             Image(systemName: destination.symbol)
                 .font(.system(size: 15))
                 .frame(width: fill ? nil : Layout.placeWidth, height: Layout.placeHeight)
+                .padding(.horizontal, fill ? Layout.placePadding : 0)
                 .frame(maxWidth: fill ? .infinity : nil)
                 .background(current ? Palette.selection : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
                 .contentShape(Rectangle())

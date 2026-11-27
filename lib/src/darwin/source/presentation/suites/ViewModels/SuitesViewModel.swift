@@ -1,4 +1,5 @@
 import BusinessReads
+import DataProtocol
 import Foundation
 import Observation
 
@@ -47,6 +48,8 @@ public final class SuitesViewModel {
     }
 
     public private(set) var suites: [Suite] = []
+    /// The suite every command resolves under, as `models status` names it
+    /// -- a described one by its name alone (GUI 6d).
     public private(set) var defaultSuite: String?
     public private(set) var selected: String?
     public private(set) var fits: [String: [MemberFit]] = [:]
@@ -89,8 +92,9 @@ public final class SuitesViewModel {
     }
 
     /// The suites (`config get suites`, each `config get suites.<name>`),
-    /// the default (`models status`'s `suite`), the kinds (`models list`), the
-    /// budget (`system`), and each member's sizes (`models info`).
+    /// the default (`models status`'s, by `defaultSuite(in:among:)`), the
+    /// kinds (`models list`), the budget (`system`), and each member's sizes
+    /// (`models info`).
     public func refresh() async {
         guard let binary else {
             failure = "Apogee isn't installed, so there are no suites to read."
@@ -105,14 +109,15 @@ public final class SuitesViewModel {
         }
         failure = nil
         var read: [Suite] = []
-        for name in Suite.names(listing) {
+        let named = Suite.names(listing)
+        for name in named {
             if case .done(let text) = await runner.command(binary: binary, ["config", "get", "suites.\(name)"]) {
                 read.append(Suite(name: name, text: text))
             }
         }
         suites = read
         if let status = await runner.read(binary: binary, ["models", "status"]).document {
-            defaultSuite = Field.list(from: status).first { $0.label == "suite" }?.value
+            defaultSuite = Self.defaultSuite(in: status, among: named)
         }
         if let models = await runner.read(binary: binary, ["models", "list"]).document {
             kinds = ModelKind.byBackend(from: models)
@@ -142,6 +147,20 @@ public final class SuitesViewModel {
         if selected == nil || !read.contains(where: { $0.name == selected }) {
             selected = read.first?.name
         }
+    }
+
+    /// The suite every command resolves under, as `models status` names it:
+    /// the typed footprint's `suite` where the document carries it (the
+    /// CLI's M31), else its `suite` field matched against the suites `config
+    /// get suites` named -- the name alone, or the name before the `   (`
+    /// the CLI writes a suite's description after (its `role_status`; GUI
+    /// 6d). `nil` when it names none. Never `config get
+    /// models.default_suite`, the pointer as typed, which can name a suite
+    /// that no longer resolves: `models status` names only one that does.
+    static func defaultSuite(in status: ReadDocument, among names: [String]) -> String? {
+        if let typed = status.value["footprint"].flatMap(SuiteFootprint.init(typed:)) { return typed.suite }
+        guard let said = Field.list(from: status).first(where: { $0.label == "suite" })?.value else { return nil }
+        return names.first { said == $0 || said.hasPrefix($0 + "   (") }
     }
 
     /// A member's memory for the estimate: none for a cloud one; else its

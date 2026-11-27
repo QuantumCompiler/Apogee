@@ -17,6 +17,8 @@
 #include "httpserver/handler.h"
 #include "httpserver/jobs.h"
 #include "httpserver/mux.h"
+#include "platform/pid_lock.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
 #include "training/cycle.h"
 #include "training/manifest.h"
@@ -135,6 +137,7 @@ TEST_CASE(
     CHECK(empty["active_pipeline"].is_null());
     CHECK(empty["cycle_active"] == false);
     CHECK(empty["cycle"].is_null());
+    CHECK(empty["cycle_error"].is_null());
     CHECK(empty["pipelines"] == 0);
 
     fixture.run("20260919-100000", "complete", true);
@@ -164,8 +167,18 @@ TEST_CASE(
     history.total_runs = 4;
     const std::filesystem::path cycle_dir = fixture.home.path() / "training" / "cycle";
     REQUIRE(apogee::training::save_history(cycle_dir, history).empty());
+    // A `running` manifest is the active pipeline only while a live process
+    // holds its lock (57g): here, this one.
+    CHECK(parsed(apogee::httpserver::admin_training_status(fixture.context()))["active_pipeline"]
+              .is_null());
+    apogee::platform::PidLock::Refusal refusal;
+    const std::optional<apogee::platform::PidLock> pipeline_lock =
+        apogee::platform::PidLock::acquire(
+            fixture.store.pipeline_dir("pipe-20260919-113000") / "pipeline.lock",
+            "pipe-20260919-113000", false, refusal);
+    REQUIRE(pipeline_lock.has_value());
     std::string lock_error;
-    const std::optional<apogee::training::CycleLock> lock =
+    std::optional<apogee::training::CycleLock> lock =
         apogee::training::CycleLock::acquire(cycle_dir, lock_error);
     REQUIRE(lock.has_value());
     const nlohmann::json busy =
@@ -173,11 +186,40 @@ TEST_CASE(
     CHECK(busy["pipelines"] == 2);
     CHECK(busy["active_pipeline"] == "pipe-20260919-113000");
     CHECK(busy["cycle_active"] == true);
+    CHECK(busy["stale_lock"].is_null());
+    // The pipeline's own document names the process that runs it.
+    const nlohmann::json running = parsed(
+        apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-20260919-113000"));
+    CHECK(running["holder"]["pid"] == apogee::platform::current_process_id());
     CHECK(busy["cycle"]["backend"] == "nightly");
     CHECK(busy["cycle"]["halted"] == true);
     CHECK(busy["cycle"]["consecutive_fails"] == 2);
     CHECK(busy["cycle"]["anchor_version"] == 1);
     CHECK(busy["cycle"]["total_runs"] == 4);
+    CHECK(busy["cycle_error"].is_null());
+
+    // A pass killed outright (57g): its lock left with a dead id is never a
+    // running pass -- `cycle_active` false, the file named.
+    lock->release();
+    std::ofstream{cycle_dir / "cycle.lock"} << "999999999\n";
+    const nlohmann::json stale =
+        parsed(apogee::httpserver::admin_training_status(fixture.context()));
+    CHECK(stale["cycle_active"] == false);
+    CHECK(stale["stale_lock"] == (cycle_dir / "cycle.lock").string());
+
+    // An unreadable history (57h): `cycle` null and `cycle_error` naming the
+    // file -- never the fresh install's two nulls.
+    for (const std::string body :
+         {R"({"backend":"x","runs":[)", R"({"backend":"x","runs":{}})", R"({"halted": "yes"})"}) {
+        INFO(body);
+        std::ofstream{cycle_dir / "history.json", std::ios::binary} << body;
+        const nlohmann::json unreadable =
+            parsed(apogee::httpserver::admin_training_status(fixture.context()));
+        CHECK(unreadable["cycle"].is_null());
+        REQUIRE(unreadable["cycle_error"].is_string());
+        CHECK(unreadable["cycle_error"].get<std::string>().starts_with(
+            (cycle_dir / "history.json").string()));
+    }
 }
 
 TEST_CASE(
@@ -218,7 +260,22 @@ TEST_CASE(
     CHECK(parsed(one)["kind"] == "pipeline");
     CHECK(parsed(one)["pipeline"]["pipeline_run_id"] == "pipe-20260919-113000");
     CHECK(parsed(one)["pipeline"]["stages"][0]["run_id"] == "pipe-20260919-113000-s0");
+    CHECK(parsed(one)["holder"].is_null());
+    // Complete: no resume, and no spec reference recorded (57h).
+    CHECK(parsed(one)["resume"].is_null());
+    CHECK(parsed(one)["spec_ref"].is_null());
     CHECK(apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-nope").status == 404);
+    // There and unreadable is said, never a 404 (57h).
+    std::filesystem::create_directories(fixture.store.pipeline_dir("pipe-mistyped"));
+    std::ofstream{fixture.store.pipeline_dir("pipe-mistyped") / "manifest.json"}
+        << R"({"pipeline_run_id": "pipe-mistyped", "stages": [{"index": "one"}]})";
+    const HttpResponse mistyped =
+        apogee::httpserver::admin_get_training_run(fixture.context(), "pipe-mistyped");
+    CHECK(mistyped.status == 500);
+    CHECK(mistyped.body.find("manifest.json") != std::string::npos);
+    // The listing skips it, as it skips a malformed one.
+    CHECK(parsed(apogee::httpserver::admin_list_training_runs(fixture.context(), pipelines))["data"]
+              .size() == 2);
 
     CHECK(apogee::httpserver::admin_training_cycle(fixture.context()).status == 404);
     apogee::training::CycleHistory history;
@@ -236,14 +293,22 @@ TEST_CASE(
     CHECK(idle.status == 200);
     CHECK(parsed(idle)["backend"] == "nightly");
     CHECK(parsed(idle)["active"] == false);
+    CHECK(parsed(idle)["stale_lock"].is_null());
     CHECK(parsed(idle)["anchor_version"] == 1);
     CHECK(parsed(idle)["runs"][0]["gate"] == "pass");
     CHECK(parsed(idle)["halted"] == false);
     std::string lock_error;
-    const std::optional<apogee::training::CycleLock> lock =
+    std::optional<apogee::training::CycleLock> lock =
         apogee::training::CycleLock::acquire(cycle_dir, lock_error);
     REQUIRE(lock.has_value());
     CHECK(parsed(apogee::httpserver::admin_training_cycle(fixture.context()))["active"] == true);
+    // A dead pass's lock (57g): not active, its file named.
+    lock->release();
+    std::ofstream{cycle_dir / "cycle.lock"} << "999999999\n";
+    const nlohmann::json stale =
+        parsed(apogee::httpserver::admin_training_cycle(fixture.context()));
+    CHECK(stale["active"] == false);
+    CHECK(stale["stale_lock"] == (cycle_dir / "cycle.lock").string());
     std::ofstream{cycle_dir / "history.json"} << "{";
     CHECK(apogee::httpserver::admin_training_cycle(fixture.context()).status == 500);
 }

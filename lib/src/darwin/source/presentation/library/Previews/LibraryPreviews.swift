@@ -63,5 +63,59 @@ enum LibraryPreview {
     }
 
     static func mcp(runner: PreviewRunner = LibraryPreview.runner) -> MCPViewModel { MCPViewModel(runner: runner) }
+
+    /// A line typed into the triage prompt.
+    static let triageTyped = triagePrompt + "\nFile each issue under one area.\n"
+
+    /// The person's own triage prompt open in the agents' editor, as `edit`
+    /// opens it: with a line typed; saved, as a save that stood leaves it;
+    /// mid-save; or asked about on Close, the typing unsaved (GUI 6f).
+    static func agentEditor(typed: Bool = false, saved: Bool = false, saving: Bool = false, closing: Bool = false) -> AgentsViewModel {
+        let model = agents()
+        var editor = DefinitionEditor(title: "triage · prompts/triage.txt", path: "/Users/someone/.apogee/prompts/triage.txt", original: triagePrompt)
+        if typed || saved || saving { editor.text = triageTyped }
+        if saved {
+            editor.wrote(triageTyped)
+            editor.endSave(of: triageTyped, verdict: "Saved. Apogee checks an agent's prompt and schema when it runs -- its first run says what is wrong, if anything.", refused: false)
+        }
+        if saving {
+            editor.wrote(triageTyped)
+            editor.saving = true
+        }
+        model.editor = editor
+        if closing { model.requestClose() }
+        return model
+    }
+
+    /// `notes-digest`'s spec as the recording read it (its document is
+    /// tests/business/reads/Fixtures/symphony-show.json), and the same with
+    /// the unknown key `symphony-show-unknown-key.err` refuses.
+    static let notesDigest = """
+        description: Summarize then check.
+        input:
+          description: The text to summarize.
+        stages:
+          - name: summarize
+            role: utility
+            prompt: "Summarize: {{input}}"
+          - name: verify
+            role: chat
+            prompt: "Check this summary against the text. Summary: {{summarize}} Text: {{input}}"
+
+        """
+    static let notesDigestRefused = notesDigest.replacingOccurrences(of: "    role: chat\n", with: "    role: chat\n    temprature: 0.2\n")
+
+    /// The person's own `notes-digest` after a save apogee refused -- the
+    /// refused text in its file, in the binary's recorded words -- and, when
+    /// `closing`, Close asked about (GUI 6f).
+    static func refusedSymphony(closing: Bool = false) -> SymphoniesViewModel {
+        let model = symphonies()
+        var editor = DefinitionEditor(title: "notes-digest", path: "/Users/someone/.apogee/symphonies/notes-digest.yaml", original: notesDigest, text: notesDigestRefused)
+        editor.wrote(notesDigestRefused)
+        editor.endSave(of: notesDigestRefused, verdict: LibraryDocuments.symphonyShowUnknownKey + " (exited with status 1)", refused: true)
+        model.editor = editor
+        if closing { model.requestClose() }
+        return model
+    }
 }
 #endif

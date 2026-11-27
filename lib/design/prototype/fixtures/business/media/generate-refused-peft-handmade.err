@@ -1,0 +1,1 @@
+apogee video generate: a LoRA loads through peft, which the video runtime does not have yet -- apogee train setup --with video

@@ -49,7 +49,9 @@ public:
 
     ThinkingView(TerminalWriter& writer, Options options);
 
-    /// Feeds a chunk of reasoning.
+    /// Feeds a chunk of reasoning, drawn shown and never obeyed (57p): every
+    /// control character U+FFFD, tabs expanded, CR dropped -- in the window
+    /// and under `verbose` alike.
     ///
     /// **An empty chunk opens nothing.** Redacted-thinking models emit thinking
     /// events with an empty payload; opening the view on one renders an empty
@@ -134,6 +136,9 @@ private:
     TerminalWriter& writer_;
     Options options_;
     std::string tail_;
+    /// Where the reasoning's row stands, in cells: where a chunk's tab stops
+    /// start from (57p).
+    std::size_t column_ = 0;
     std::size_t painted_ = 0;
     bool open_ = false;
     bool budget_reached_ = false;

@@ -1,0 +1,9 @@
+apogee train: warning: promoting despite the gate (--force): the eval gate failed for run 20261021-051826 (46%: 11/24 passed). Fix the training or the suite, then re-run eval
+[promote] run 20261021-051826 -> student-tuned v1
+[promote] fusing the adapter into the base model
+[promote]   base:    /Users/someone/work/student
+[promote]   adapter: /Users/someone/.apogee/training/runs/20261021-051826/adapters
+[promote]   output:  /Users/someone/.apogee/training/runs/20261021-051826/fused
+[promote] mock fuse: /Users/someone/.apogee/training/runs/20261021-051826/adapters into /Users/someone/work/student
+[promote] converting the fused model to GGUF (F16): /Users/someone/.apogee/models/student/gguf/.incoming-1c387267417d/student-tuned-v1.gguf
+[promote] mock converter: writing a minimal GGUF

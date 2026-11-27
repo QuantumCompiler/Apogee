@@ -75,6 +75,14 @@ struct RequestOptions {
 
 [[nodiscard]] std::string error_message(long status, std::string_view body);
 
+/// The refusal a blocked prompt is (57c). Gemini answers one with 200, no
+/// `candidates` and `promptFeedback.blockReason` -- streamed, as the first
+/// chunk -- and read as an answer it is an empty one, saved and served as a
+/// normal `stop`. Returns `the prompt was blocked (<reason>)`, with
+/// `: <blockReasonMessage>` when the response carries one; nullopt for a
+/// response with a candidate, or with no block reason.
+[[nodiscard]] std::optional<std::string> blocked_prompt(const nlohmann::json& body);
+
 /// The least a Pro model may think for: it cannot switch thinking off (26i).
 inline constexpr std::int64_t kProMinThinkingBudget = 128;
 /// The most each takes: past it the API refuses the request.

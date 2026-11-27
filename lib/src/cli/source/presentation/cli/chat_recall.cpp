@@ -13,6 +13,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/rag.h"
 #include "agentloop/recall.h"
+#include "ansi/inert.h"
 #include "contracts/layout.h"
 #include "operations/backend_names.h"
 #include "operations/retrieval.h"
@@ -99,10 +100,11 @@ nlohmann::json recall_view(const RecallHoldings& held,
 }
 
 std::string recall_row(const agentloop::RecallEntry& summary) {
-    std::string row = "  " + summary.chat_id;
+    // Each part a line (57p): the title a model chose is drawn, never obeyed.
+    std::string row = "  " + ansi::inert_line(summary.chat_id);
     for (const std::string* part : {&summary.updated_at, &summary.title}) {
         if (!part->empty()) {
-            row += "  " + *part;
+            row += "  " + ansi::inert_line(*part);
         }
     }
     return row;
@@ -156,6 +158,14 @@ std::string summarise_for_recall(const harness::Harness& harness, const harness:
     if (!summary.has_value()) {
         return "not summarised for recall: " + note;
     }
+    // Deleted while the summary was written (57a): a deleted chat is recalled
+    // no more, so its summary is never put back -- and nothing is said of it
+    // here, the session's own deleted line saying it once.
+    if (logger::filed_and_gone(session)) {
+        std::error_code code;
+        fs::remove(recall_marker(session.chat_id), code);
+        return {};
+    }
     agentloop::RecallIndex index{harness::recall_index_path(), free_embedder(harness, config)};
     std::string updated = session.updated_at.empty() ? session.started_at : session.updated_at;
     if (updated.empty()) {
@@ -182,6 +192,12 @@ std::string summarise_for_recall(const harness::Harness& harness, const harness:
     }
     std::error_code code;
     fs::remove(recall_marker(session.chat_id), code);
+    // A delete that landed between the check above and the write: its
+    // `forget_recall` came first, so the summary just put is taken out again.
+    if (logger::filed_and_gone(session)) {
+        (void)index.remove(session.chat_id);
+        return {};
+    }
     return "summarised for recall by " + model + (note.empty() ? "" : " -- " + note);
 }
 
@@ -191,6 +207,7 @@ ChatRecall::ChatRecall(const harness::Harness& harness, const harness::Config& c
 
 Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBudget& budget,
                               std::int64_t share_used, std::string_view rag_collection,
+                              const harness::CancellationToken& cancellation,
                               const agentloop::SideCallSink& on_side_call) {
     Recalled out;
     if (!active()) {
@@ -212,6 +229,7 @@ Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBud
         turn.header = std::string{agentloop::kRecallHeader};
         turn.harness = &harness_;
         turn.config = &config_;
+        turn.cancellation = cancellation;
         turn.on_side_call = on_side_call;
         const agentloop::RagResult result = agentloop::retrieve_for_turn(turn);
         if (result.error.empty() && !result.prefix.empty()) {
@@ -241,8 +259,8 @@ Recalled ChatRecall::for_turn(const std::string& query, const agentloop::TurnBud
     if (const std::string knowledge = config_.knowledge.collection();
         left > 0 && knowledge != rag_collection) {
         const agentloop::RagResult records = retrieve_for_collection(
-            harness_, config_, knowledge, query, left, {}, "off", {}, session_.backend, budget,
-            share_used + out.tokens, on_side_call);
+            harness_, config_, knowledge, query, left, {}, "off", cancellation, session_.backend,
+            budget, share_used + out.tokens, on_side_call);
         if (records.error.empty() && !records.prefix.empty()) {
             out.prefix.insert(out.prefix.end(), records.prefix.begin(), records.prefix.end());
             out.decisions = static_cast<int>(records.chunks);
@@ -318,8 +336,11 @@ std::vector<std::string> ChatRecall::catch_up(const harness::CancellationToken& 
             fs::remove(marker, code);
             continue;
         }
-        said.push_back(summarise_for_recall(harness_, config_, *chat, cancellation) + " (" +
-                       chat_id + ", left by a chat that did not finish)");
+        // Nothing to say for a chat deleted while it was summarised (57a).
+        if (const std::string line = summarise_for_recall(harness_, config_, *chat, cancellation);
+            !line.empty()) {
+            said.push_back(line + " (" + chat_id + ", left by a chat that did not finish)");
+        }
     }
     return said;
 }

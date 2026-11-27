@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 # build.sh -- the Apogee macOS application's one build entry point.
 #
-#   build.sh build  [--target T] [--jobs N]   Apogee.app in Release, signed ad hoc
+#   build.sh build  [--channel C] [--target T] [--jobs N]   the app, signed ad hoc (release)
 #   build.sh test   [--target T] [--jobs N]   the whole suite (the scheme's tests), hermetic
-#   build.sh open   [--target T] [--jobs N]   build, then open the app
-#   build.sh package [--target T]             the built app zipped with its README
+#   build.sh open   [--channel C] [--target T] [--jobs N]   build, then open the app (dev)
+#   build.sh package [--target T]             the built release app zipped with its README
 #   build.sh clean  [--target T]              remove build/<T>/
+#
+# The channel (GUI M18; the CLI's install channels) is the CLI the app drives,
+# one per build, decided when it is built. `release` -- the Release
+# configuration, Apogee.app, com.quantumcompiler.apogee -- is what CI and a
+# release carry, as it always was, and what `build` and `package` make unless
+# told otherwise. `dev` -- the Debug configuration, "Apogee Dev.app",
+# com.quantumcompiler.apogee.dev, the amber icon -- drives apogee-dev alone and
+# keeps its own settings, so trying a branch never touches the installed app,
+# the release apogee or ~/.apogee; it is what `open` makes, and what Xcode's
+# Run makes. `package` makes what a release carries, so it packages the
+# release channel alone: a dev build is tried where it is built.
 #
 # The application is an Xcode project, Apogee.xcodeproj beside this directory,
 # that owns its whole build -- the repo's one-application-one-build rule --
@@ -21,11 +32,19 @@
 # Everything lands under build/<target>/, which the repository ignores:
 #
 #   build/<target>/xcode/       xcodebuild's derived data, both configurations
-#   build/<target>/Apogee.app   the release build's bundle, its signature
-#                               verified
+#   build/<target>/Apogee.app   the release build's bundle, its identity, its
+#                               signature and its icon verified (scripts/icon.sh)
+#   build/<target>/Apogee Dev.app
+#                               the dev build's, verified the same way
 #   build/<target>/apogee-gui-darwin.zip
 #                               `package`'s: Apogee-<version>/ holding the app
-#                               and a README -- what CI keeps as its artifact
+#                               and a README -- what CI keeps as its artifact,
+#                               and what a release carries (GUI M17)
+#   build/<target>/apogee-gui-darwin.source
+#                               the commit and the source TREE it was built
+#                               from, as the CLI's archives record theirs --
+#                               how the release after a merge proves the app
+#                               is the merged source (release-from-pr.sh)
 #
 # Signing is ad hoc (CODE_SIGN_IDENTITY "-" in the project): the user's call,
 # 2026-10-20 -- no Developer ID and no notarization for now, so no signing
@@ -50,7 +69,7 @@ die() {
 }
 
 usage() {
-    sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -65,8 +84,14 @@ esac
 
 target="macos-arm64"
 jobs="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+channel=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --channel)
+            [[ $# -ge 2 ]] || die "--channel needs release or dev"
+            channel="$2"
+            shift
+            ;;
         --target)
             [[ $# -ge 2 ]] || die "--target needs a target"
             target="$2"
@@ -83,6 +108,30 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+# The channel: what each command makes unless told, and what a channel is
+# built as -- its configuration, its bundle's name and its identifier.
+case "$command" in
+    build | package) channel="${channel:-release}" ;;
+    open) channel="${channel:-dev}" ;;
+    *) [[ -z "$channel" ]] || die "--channel is for build, open and package" ;;
+esac
+case "$channel" in
+    "") ;;
+    release)
+        configuration=Release
+        app_name="Apogee"
+        identifier="com.quantumcompiler.apogee"
+        ;;
+    dev)
+        configuration=Debug
+        app_name="Apogee Dev"
+        identifier="com.quantumcompiler.apogee.dev"
+        ;;
+    *) die "unknown channel '${channel}' (release, dev)" ;;
+esac
+[[ "$command" != package || "$channel" == release ]] ||
+    die "package makes what a release carries, the release channel: try a dev build with '$0 open'"
+
 known=0
 for t in "${TARGETS[@]}"; do [[ "$t" == "$target" ]] && known=1; done
 [[ $known -eq 1 ]] || die "the macOS application builds only for ${TARGETS[*]} (asked for ${target})"
@@ -90,7 +139,7 @@ for t in "${TARGETS[@]}"; do [[ "$t" == "$target" ]] && known=1; done
 app_dir="$(cd "$(dirname "$0")/.." && pwd)"
 build_dir="${app_dir}/build/${target}"
 derived="${build_dir}/xcode"
-bundle="${build_dir}/Apogee.app"
+bundle="${build_dir}/${app_name:-Apogee}.app"
 
 if [[ "$command" == "clean" ]]; then
     log "cleaning ${build_dir}/"
@@ -123,20 +172,40 @@ xcodebuild_app() {
         -jobs "$jobs" -quiet "$@"
 }
 
+# The bundle is the channel's: its identifier, its name and the channel its
+# Info.plist names, each read back -- so a release build that would move the
+# installed app's identity, or a dev build that would share it, stops here.
+verify_identity() {
+    local plist="${bundle}/Contents/Info.plist" key wanted said
+    [[ -f "$plist" ]] || die "${bundle} has no Contents/Info.plist"
+    for key in CFBundleIdentifier CFBundleName ApogeeChannel; do
+        case "$key" in
+            CFBundleIdentifier) wanted="$identifier" ;;
+            CFBundleName) wanted="$app_name" ;;
+            ApogeeChannel) wanted="$channel" ;;
+        esac
+        said="$(plutil -extract "$key" raw "$plist" 2>/dev/null)" || said="nothing"
+        [[ "$said" == "$wanted" ]] ||
+            die "${bundle##*/}'s ${key} is ${said}: the ${channel} channel's is ${wanted}"
+    done
+}
+
 build_app() {
     local version
     version="$(release_version)"
-    log "[${target}] building Apogee.app ${version} (Release, ${jobs} jobs)"
-    xcodebuild_app -configuration Release \
+    log "[${target}] building ${app_name}.app ${version} (the ${channel} channel: ${configuration}, ${jobs} jobs)"
+    xcodebuild_app -configuration "$configuration" \
         MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$version" build
-    local built="${derived}/Build/Products/Release/Apogee.app"
+    local built="${derived}/Build/Products/${configuration}/${app_name}.app"
     [[ -d "$built" ]] || die "xcodebuild reported success but built no ${built}"
     rm -rf "$bundle"
     ditto "$built" "$bundle"
+    verify_identity
     local said
     said="$(codesign --verify --deep --strict --verbose=1 "$bundle" 2>&1)" ||
         die "the signature does not verify: ${said}"
-    log "[${target}] ${bundle}: Apogee ${version}, signed ad hoc, signature verified"
+    "${app_dir}/scripts/icon.sh" verify "$bundle"
+    log "[${target}] ${bundle}: ${app_name} ${version} (${identifier}), signed ad hoc, signature verified"
 }
 
 # The built app, zipped with a README that says what it is and what its
@@ -144,13 +213,16 @@ build_app() {
 # signature must still verify.
 package_app() {
     [[ -d "$bundle" ]] || die "no ${bundle} -- run '$0 build' first"
-    local said version stage zip check
+    local said version stage zip check record
+    verify_identity
     said="$(codesign --verify --deep --strict "$bundle" 2>&1)" || die "the signature does not verify: ${said}"
+    "${app_dir}/scripts/icon.sh" verify "$bundle"
     version="$(plutil -extract CFBundleShortVersionString raw "${bundle}/Contents/Info.plist" 2>/dev/null)" ||
         die "${bundle} carries no version: build it with '$0 build'"
     stage="${build_dir}/package/Apogee-${version}"
     zip="${build_dir}/apogee-gui-darwin.zip"
-    rm -rf "${build_dir}/package" "$zip"
+    record="${build_dir}/apogee-gui-darwin.source"
+    rm -rf "${build_dir}/package" "$zip" "$record"
     mkdir -p "$stage"
     ditto "$bundle" "${stage}/Apogee.app"
     cat >"${stage}/README.txt" <<README
@@ -177,7 +249,14 @@ README
         die "the packaged app's signature does not verify: ${said}"
     }
     rm -rf "$check"
-    log "[${target}] ${zip}: Apogee ${version}, the app and its README, its signature verified once unpacked"
+    # The tree, not the commit, is the identity: CI builds a pull request's
+    # test merge, and the merge GitHub then makes is another commit with the
+    # same tree.
+    {
+        echo "commit $(git -C "$app_dir" rev-parse HEAD)"
+        echo "tree $(git -C "$app_dir" rev-parse 'HEAD^{tree}')"
+    } >"$record" || die "could not record what ${zip} was built from"
+    log "[${target}] ${zip}: Apogee ${version}, the app and its README, its signature verified once unpacked; its source in ${record}"
 }
 
 # Each failed test and its messages, from a result bundle.

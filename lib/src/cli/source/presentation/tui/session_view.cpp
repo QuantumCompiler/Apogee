@@ -14,6 +14,7 @@
 
 #include "agentloop/recall.h"
 #include "ansi/ansi.h"
+#include "ansi/inert.h"
 #include "ansi/text_width.h"
 #include "contracts/errors.h"
 #include "markdown/layout.h"
@@ -51,6 +52,9 @@ struct Block {
     // Thinking: the turn's reasoning and its side calls, until the answer;
     // and its one-line summary (43), unless it is drawn raw after all.
     std::string reasoning{};
+    /// Where the reasoning's row stands, in cells: a chunk's tab stops start
+    /// there (57p).
+    std::size_t reasoning_column = 0;
     std::vector<std::string> notes{};
     std::string summary{};
     bool raw = false;
@@ -159,6 +163,10 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
     std::size_t cursor = 0;
     std::vector<std::string> history;
     std::optional<std::size_t> history_at;
+    /// A private conversation runs (57a): `history` is its own, and the
+    /// shell's lines wait in `kept_history` until it ends.
+    bool private_history = false;
+    std::vector<std::string> kept_history;
     commands::Suggester suggest;
     /// Whether a turn's reasoning is drawn as its one-line summary (43).
     bool summarize_reasoning = false;
@@ -267,7 +275,24 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
         blocks.push_back(Block{.kind = Block::Kind::Line, .text = std::move(line)});
     }
 
-    void begin_conversation(commands::Suggester completer) {
+    /// A private conversation's lines dropped, the shell's put back (57a):
+    /// nothing typed in one is recalled into another.
+    void end_private_history() {
+        if (private_history) {
+            history = std::move(kept_history);
+            kept_history.clear();
+            private_history = false;
+        }
+        history_at.reset();
+    }
+
+    void begin_conversation(commands::Suggester completer, bool private_conversation) {
+        end_private_history();
+        if (private_conversation) {
+            kept_history = std::move(history);
+            history.clear();
+            private_history = true;
+        }
         mode = Mode::Conversation;
         blocks.clear();
         header.clear();
@@ -352,8 +377,24 @@ struct SessionView::State : std::enable_shared_from_this<SessionView::State> {
                             }
                         }
                     } else if (!block.reasoning.empty()) {
-                        std::vector<markdown::Row> reasoning = markdown::wrap(
-                            {span(block.reasoning, dim_look())}, width, {span("  ")}, {span("  ")});
+                        // Row by row, as the terminal's window wraps it (57p):
+                        // a newline starts a row, and a blank one is dropped.
+                        std::vector<markdown::Row> reasoning;
+                        const std::string_view text = block.reasoning;
+                        for (std::size_t start = 0; start < text.size();) {
+                            const std::size_t newline = text.find('\n', start);
+                            const std::size_t end =
+                                newline == std::string_view::npos ? text.size() : newline;
+                            const std::string_view line = text.substr(start, end - start);
+                            if (line.find_first_not_of(' ') != std::string_view::npos) {
+                                for (markdown::Row& row :
+                                     markdown::wrap({span(std::string{line}, dim_look())}, width,
+                                                    {span("  ")}, {span("  ")})) {
+                                    reasoning.push_back(std::move(row));
+                                }
+                            }
+                            start = end + 1;
+                        }
                         const std::size_t keep = std::min(kReasoningRows, reasoning.size());
                         rows.insert(rows.end(), reasoning.end() - static_cast<std::ptrdiff_t>(keep),
                                     reasoning.end());
@@ -895,13 +936,17 @@ public:
     }
 
     void on_thinking_token(std::string_view chunk) override {
+        // Through the one neutraliser, as the terminal's window draws it
+        // (57p): `markdown::wrap` counts what it is handed, and a control
+        // character FTXUI never draws would be a cell counted and not there.
         post([text = std::string{chunk}](SessionView::State& state) {
-            state.thinking().reasoning += text;
+            Block& block = state.thinking();
+            block.reasoning += ansi::inert_text(text, block.reasoning_column);
         });
     }
 
     void on_thinking_summary(std::string_view line) override {
-        post([text = std::string{line}](SessionView::State& state) {
+        post([text = ansi::inert_line(line)](SessionView::State& state) {
             state.thinking().summary = text;
         });
     }
@@ -1044,14 +1089,20 @@ void SessionView::show_picker(std::vector<PickerEntry> entries,
     });
 }
 
-void SessionView::begin_session() {
+void SessionView::begin_session(bool private_conversation) {
     {
         // A line left for a conversation that never read it -- one that
         // refused to start -- is not the next one's.
         const std::lock_guard lock{state_->mutex};
         state_->entered.clear();
     }
-    state_->post([](State& state) { state.begin_conversation({}); });
+    state_->post([private_conversation](State& state) {
+        state.begin_conversation({}, private_conversation);
+    });
+}
+
+void SessionView::end_session() {
+    state_->post([](State& state) { state.end_private_history(); });
 }
 
 void SessionView::set_completion(commands::Suggester suggest) {

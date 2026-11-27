@@ -110,6 +110,25 @@ struct RecallSeenTests {
         #expect(runner.calls.contains("run chats recall --forget --yes"))
     }
 
+    @Test("6b: a failed read leaves no earlier count line or listing, and Forget, still offered, says recall could not be read in the Sessions inspector's words")
+    func failedReadSaysSo() async {
+        let runner = RecallForgetTests().runner()
+        let model = SettingsViewModel(runner: runner, starter: NoJobs(), preferences: Preferences(store: MemoryStore()))
+        model.hasTrack52 = { true }
+        await model.connect(binary: RecallForgetTests.binary, version: "0.2.0")
+        #expect(model.recallHolds != nil && model.recallUnread == nil)
+        var tail = BoundedTail()
+        tail.append(Data("apogee chats: the recall index could not be opened\n".utf8))
+        runner.when(["chats", "recall"], .failed(exit: ChildExit(reason: .exited, status: 1), stderrTail: tail))
+        await model.askToForget()
+        #expect(model.recallHolds == nil && model.recallListing == nil, "nothing of the earlier read")
+        #expect(model.recallUnread == "apogee chats: the recall index could not be opened (exited with status 1)")
+        #expect(model.forgetting, "still offered: the CLI says nothing to forget itself")
+        #expect(!model.forgetMessage.contains("Now: recall holds"))
+        #expect(model.forgetMessage.hasPrefix("Recall could not be read: apogee chats: the recall index could not be opened (exited with status 1). "))
+        #expect(model.forgetMessage == RecallListing.forgetQuestion(listing: nil, countLine: nil, unread: model.recallUnread), "one wording, the inspector's too")
+    }
+
     @Test("a build before 52e reads nothing of recall and asks nothing")
     func olderBuild() async {
         let runner = RecallForgetTests().runner()

@@ -5,12 +5,29 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <vector>
 
 #include "support/env_guard.h"
+#include "support/file_link.h"
+
+#if defined(_WIN32)
+#include <windows.h>
+// After windows.h: the Documents known folder (57k), and the allocator that
+// frees the path the shell hands back.
+#include <objbase.h>
+#include <shlobj.h>
+#include <winioctl.h>
+#endif
 
 namespace {
 
@@ -152,3 +169,544 @@ TEST_CASE("a terminal that cannot place the cursor is refused a full screen, wit
         CHECK(apogee::platform::full_screen_refusal().empty());
     }
 }
+
+TEST_CASE("a private directory is made where nothing was, its owner's alone, never found",
+          "[platform][private]") {
+    // 57a: a private chat's folder is claimed, never taken over -- a
+    // directory, file or link already under the name is refused, and what is
+    // made is 0700 from its first instant.
+    const apogee::testing::TempDir root{"platform-private-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path made = root.path() / "made";
+    bool exists = true;
+    REQUIRE(apogee::platform::create_private_directory(made, exists));
+    CHECK_FALSE(exists);
+    CHECK(std::filesystem::is_directory(made));
+    CHECK(apogee::platform::owned_by_this_user(made));
+#if !defined(_WIN32)
+    CHECK((std::filesystem::status(made).permissions() & std::filesystem::perms::all) ==
+          std::filesystem::perms::owner_all);
+#endif
+
+    // Something already there -- a directory, a file -- is never this one's.
+    CHECK_FALSE(apogee::platform::create_private_directory(made, exists));
+    CHECK(exists);
+    const std::filesystem::path file = root.path() / "file";
+    std::ofstream{file} << "planted";
+    CHECK_FALSE(apogee::platform::create_private_directory(file, exists));
+    CHECK(exists);
+    CHECK(std::filesystem::is_regular_file(file));
+
+    // Nowhere to make it: refused, and not for being there.
+    CHECK_FALSE(apogee::platform::create_private_directory(root.path() / "no" / "such", exists));
+    CHECK_FALSE(exists);
+    CHECK_FALSE(apogee::platform::owned_by_this_user(root.path() / "no" / "such"));
+}
+
+namespace {
+
+/// `path`'s UTF-8 bytes, as `std::string`.
+[[nodiscard]] std::string utf8_of(const std::filesystem::path& path) {
+    const std::u8string bytes = path.u8string();
+    return {bytes.begin(), bytes.end()};
+}
+
+/// The whole of `path`'s text, or empty.
+[[nodiscard]] std::string slurp(const std::filesystem::path& path) {
+    std::ifstream in{path, std::ios::binary};
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+#if defined(_WIN32)
+/// A variable set through the Win32 call alone -- never the C runtime's copy
+/// -- for the life of the object, put back after (57j's guardrail).
+class Win32EnvGuard {
+public:
+    Win32EnvGuard(const wchar_t* name, const std::wstring& value) : name_{name} {
+        std::wstring previous(32767, L'\0');
+        const DWORD got =
+            GetEnvironmentVariableW(name_, previous.data(), static_cast<DWORD>(previous.size()));
+        if (got > 0 && got < previous.size()) {
+            previous.resize(got);
+            previous_ = previous;
+            had_ = true;
+        }
+        (void)SetEnvironmentVariableW(name_, value.c_str());
+    }
+
+    ~Win32EnvGuard() {
+        (void)SetEnvironmentVariableW(name_, had_ ? previous_.c_str() : nullptr);
+    }
+
+    Win32EnvGuard(const Win32EnvGuard&) = delete;
+    Win32EnvGuard& operator=(const Win32EnvGuard&) = delete;
+    Win32EnvGuard(Win32EnvGuard&&) = delete;
+    Win32EnvGuard& operator=(Win32EnvGuard&&) = delete;
+
+private:
+    const wchar_t* name_;
+    std::wstring previous_;
+    bool had_ = false;
+};
+#endif
+
+}  // namespace
+
+// 57j: Windows read the environment and argv in the ANSI code page, and named
+// files through ANSI calls -- a profile folder named `C:\Users\José` made
+// every command exit 1. These hold the seam to UTF-8 on every platform; on
+// CI's Windows rows they are the proof, since no Windows host runs here.
+
+TEST_CASE("this process reads its text as UTF-8", "[platform][utf8][57j]") {
+    // The manifest every executable carries -- the test binary's too --
+    // names UTF-8 the code page, so the Windows test runs read text as users'
+    // runs do. Elsewhere there is no code page to get wrong.
+    CHECK(apogee::platform::text_encoding_gap().empty());
+#if defined(_WIN32)
+    CHECK(GetACP() == CP_UTF8);
+#endif
+}
+
+TEST_CASE("the manifest names UTF-8 and parses", "[platform][utf8][57j]") {
+    // Windows refuses to start a process whose manifest does not parse, and
+    // XML forbids two hyphens inside a comment -- a typo here would stop
+    // every Windows run, and only a Windows run would say so.
+    const std::filesystem::path source{APOGEE_SOURCE_DIR};
+    const std::string manifest = slurp(source / "apogee.manifest");
+    REQUIRE_FALSE(manifest.empty());
+    CHECK(manifest.find("<activeCodePage xmlns=\"http://schemas.microsoft.com/SMI/2019/"
+                        "WindowsSettings\">UTF-8</activeCodePage>") != std::string::npos);
+    std::size_t comments = 0;
+    for (std::size_t open = manifest.find("<!--"); open != std::string::npos;
+         open = manifest.find("<!--", open + 4)) {
+        const std::size_t close = manifest.find("-->", open + 4);
+        REQUIRE(close != std::string::npos);
+        const std::string body = manifest.substr(open + 4, close - open - 4);
+        INFO("comment: " << body);
+        CHECK(body.find("--") == std::string::npos);
+        CHECK((body.empty() || body.back() != '-'));
+        ++comments;
+    }
+    CHECK(comments > 0);
+    // The resource script builds that file in, as the manifest resource.
+    CHECK(slurp(source / "apogee.rc").find("1 24 \"apogee.manifest\"") != std::string::npos);
+}
+
+TEST_CASE("an environment value comes back as UTF-8", "[platform][utf8][57j]") {
+    // "¿Qué tal el café?", written as its bytes.
+    const std::string value = "\xC2\xBFQu\xC3\xA9 tal el caf\xC3\xA9?";
+    {
+        const apogee::testing::EnvGuard set{"APOGEE_TEST_UTF8", value};
+        CHECK(apogee::platform::utf8_environment("APOGEE_TEST_UTF8") == value);
+    }
+    CHECK_FALSE(apogee::platform::utf8_environment("APOGEE_TEST_UTF8").has_value());
+}
+
+TEST_CASE("a path built from UTF-8 names those characters", "[platform][utf8][57j]") {
+    const std::filesystem::path name = apogee::platform::path_from_utf8("Jos\xC3\xA9");
+#if defined(_WIN32)
+    CHECK(name.wstring() == L"Jos\u00e9");
+#else
+    CHECK(name.string() == "Jos\xC3\xA9");
+#endif
+    CHECK(utf8_of(name) == "Jos\xC3\xA9");
+}
+
+TEST_CASE("an exclusive file is created under its non-ASCII name", "[platform][utf8][57j]") {
+    // The owner marker beside a staging folder: `CreateFileA` named it in the
+    // ANSI code page, so on Windows it landed under a mis-decoded name.
+    const apogee::testing::TempDir root{"platform-exclusive-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path owner =
+        root.path() / apogee::platform::path_from_utf8("na\xC3\xAFve-owner");
+    bool exists = true;
+    REQUIRE(apogee::platform::create_exclusive_file(owner, "1234\n", exists));
+    CHECK_FALSE(exists);
+    CHECK(std::filesystem::exists(owner));
+    CHECK(slurp(owner) == "1234\n");
+    // That name and no other: the folder holds exactly it.
+    std::vector<std::filesystem::path> entries;
+    for (const auto& entry : std::filesystem::directory_iterator{root.path()}) {
+        entries.push_back(entry.path().filename());
+    }
+    REQUIRE(entries.size() == 1);
+    CHECK(utf8_of(entries.front()) == "na\xC3\xAFve-owner");
+    // A second claim finds it there.
+    CHECK_FALSE(apogee::platform::create_exclusive_file(owner, "5678\n", exists));
+    CHECK(exists);
+    CHECK(slurp(owner) == "1234\n");
+}
+
+#if defined(_WIN32)
+TEST_CASE("a non-ASCII profile folder comes back as its UTF-8 bytes", "[platform][utf8][57j]") {
+    // Set through the Win32 call, never the C runtime's copy: the home
+    // directory is read from the process's environment itself, wide.
+    const std::wstring profile = std::filesystem::temp_directory_path().wstring() + L"\\Jos\u00e9";
+    const Win32EnvGuard guard{L"USERPROFILE", profile};
+    const std::optional<std::string> home = apogee::platform::home_directory();
+    REQUIRE(home.has_value());
+    CHECK(home->ends_with("\\Jos\xC3\xA9"));
+    CHECK(apogee::platform::path_from_utf8(*home).wstring() == profile);
+}
+#endif
+
+TEST_CASE("the console is left alone where no standard stream is one", "[platform][console][57j]") {
+    // Under ctest every standard stream is a pipe: nothing to set up, and
+    // nothing put back. A scope inside a live one never changes anything --
+    // the outermost owns the console -- and a restore with nothing changed
+    // is safe, from anywhere.
+    std::istringstream in;
+    std::streambuf* const old_in = std::cin.rdbuf(in.rdbuf());
+    bool outer_changed = true;
+    bool inner_changed = true;
+    {
+        const apogee::platform::ConsoleScope outer;
+        outer_changed = outer.changed();
+        {
+            const apogee::platform::ConsoleScope inner;
+            inner_changed = inner.changed();
+        }
+    }
+    std::cin.rdbuf(old_in);
+    CHECK_FALSE(inner_changed);
+    if (apogee::platform::host_os() != apogee::platform::OperatingSystem::Windows) {
+        CHECK_FALSE(outer_changed);
+    }
+    apogee::platform::restore_console();
+    // Escape sequences render wherever no Windows console says otherwise.
+    using apogee::platform::renders_escape_sequences;
+    using apogee::platform::StandardStream;
+    CHECK(renders_escape_sequences(StandardStream::In));
+    if (apogee::platform::host_os() != apogee::platform::OperatingSystem::Windows) {
+        CHECK(renders_escape_sequences(StandardStream::Out));
+        CHECK(renders_escape_sequences(StandardStream::Err));
+    }
+}
+
+// 57k: the Windows x64 build's libstdc++ cannot see a link -- `remove_all`
+// empties a junction's target, `weakly_canonical` follows none -- so `reset`
+// and `uninstall` emptied a model store linked to another drive, and the file
+// sandbox let a junction out of its root. These hold the seam's own link calls
+// on every platform: a junction on Windows, a symlink elsewhere, made by
+// `support/file_link`, which a case REQUIREs rather than skipping past.
+
+namespace {
+
+/// A folder outside the tree a test removes, holding one file.
+struct Outside {
+    apogee::testing::TempDir root{"platform-links-" + std::to_string(std::random_device{}())};
+    std::filesystem::path outside = root.path() / "outside";
+    std::filesystem::path kept = outside / "kept.txt";
+
+    Outside() {
+        std::filesystem::create_directories(outside);
+        std::ofstream{kept} << "kept";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a directory link is seen as itself, never as what it points at",
+          "[platform][links][57k]") {
+    const Outside box;
+    const std::filesystem::path linked = box.root.path() / "linked";
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside, linked);
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    std::error_code code;
+    CHECK(apogee::platform::is_link(linked, code));
+    CHECK_FALSE(code);
+    // What it points at, and what is read through it, are no links.
+    CHECK_FALSE(apogee::platform::is_link(box.outside, code));
+    CHECK_FALSE(apogee::platform::is_link(box.kept, code));
+    CHECK_FALSE(apogee::platform::is_link(linked / "kept.txt", code));
+    CHECK_FALSE(code);
+    // Nothing there is no link, and no error.
+    CHECK_FALSE(apogee::platform::is_link(box.root.path() / "nothing", code));
+    CHECK_FALSE(code);
+}
+
+TEST_CASE("an entry a listing gives is seen as a link exactly as its path is",
+          "[platform][links][57y]") {
+    // The git tools' walk (57y) asks each entry of a listing, so a store of
+    // loose objects costs no lstat per file: the answer must be the path
+    // form's, a directory link (a junction on Windows) above all.
+    const Outside box;
+    const std::filesystem::path listed = box.root.path() / "listed";
+    std::filesystem::create_directories(listed / "folder");
+    std::ofstream{listed / "file.txt"} << "file";
+    const apogee::testing::LinkMade folder_link =
+        apogee::testing::make_directory_link(box.outside, listed / "folder-link");
+    INFO(folder_link.why);
+    REQUIRE(folder_link.made);
+    const apogee::testing::LinkMade file_link =
+        apogee::testing::make_file_link(box.kept, listed / "file-link");
+    std::size_t links = 0;
+    std::size_t entries = 0;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator{listed}) {
+        INFO(entry.path().string());
+        std::error_code entry_code;
+        std::error_code path_code;
+        const bool by_entry = apogee::platform::is_link(entry, entry_code);
+        CHECK(by_entry == apogee::platform::is_link(entry.path(), path_code));
+        CHECK_FALSE(entry_code);
+        CHECK_FALSE(path_code);
+        links += by_entry ? 1 : 0;
+        ++entries;
+    }
+    // Not vacuous: every entry was asked, and each link seen as one.
+    CHECK(entries == (file_link.made ? 4U : 3U));
+    CHECK(links == (file_link.made ? 2U : 1U));
+    if (!file_link.made) {
+        WARN("the file link was not made, so only the directory link was asked: " << file_link.why);
+    }
+}
+
+TEST_CASE("a tree goes with its links removed as themselves, what they point at left whole",
+          "[platform][links][57k]") {
+    const Outside box;
+    const std::filesystem::path tree = box.root.path() / "tree";
+    std::filesystem::create_directories(tree / "sub");
+    std::ofstream{tree / "a.txt"} << "a";
+    std::ofstream{tree / "sub" / "b.txt"} << "b";
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside, tree / "sub" / "linked");
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    std::error_code code;
+    apogee::platform::remove_tree(tree, code);
+    CHECK_FALSE(code);
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::symlink_status(tree)));
+    // The finding: the link's target is untouched, its file and its bytes.
+    REQUIRE(std::filesystem::exists(box.kept));
+    std::ifstream in{box.kept};
+    CHECK(std::string{std::istreambuf_iterator<char>{in}, {}} == "kept");
+
+    // A link removed by name goes alone.
+    const std::filesystem::path alone = box.root.path() / "alone";
+    REQUIRE(apogee::testing::make_directory_link(box.outside, alone).made);
+    apogee::platform::remove_tree(alone, code);
+    CHECK_FALSE(code);
+    CHECK_FALSE(apogee::platform::is_link(alone, code));
+    CHECK(std::filesystem::exists(box.kept));
+
+    // Nothing there is nothing to remove.
+    apogee::platform::remove_tree(box.root.path() / "nothing", code);
+    CHECK_FALSE(code);
+}
+
+TEST_CASE("a path through a directory link resolves where the link points",
+          "[platform][links][57k]") {
+    const Outside box;
+    const std::filesystem::path linked = box.root.path() / "linked";
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside, linked);
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    std::error_code code;
+    const std::filesystem::path outside = apogee::platform::resolve_path(box.outside, code);
+    REQUIRE_FALSE(code);
+    CHECK(outside.is_absolute());
+    CHECK(apogee::platform::resolve_path(linked, code) == outside);
+    CHECK(apogee::platform::resolve_path(linked / "kept.txt", code) ==
+          apogee::platform::resolve_path(box.kept, code));
+    // A file about to be made under it lands where it points.
+    CHECK(apogee::platform::resolve_path(linked / "new" / "file.txt", code) ==
+          outside / "new" / "file.txt");
+    CHECK_FALSE(code);
+    // And a path that exists nowhere is absolute and normalised.
+    const std::filesystem::path nowhere =
+        apogee::platform::resolve_path(box.root.path() / "no" / "." / "such", code);
+    CHECK_FALSE(code);
+    CHECK(nowhere.is_absolute());
+    CHECK(nowhere.filename() == "such");
+    CHECK(nowhere.parent_path().filename() == "no");
+}
+
+TEST_CASE("a file link is seen as itself, resolves to its target and is removed alone",
+          "[platform][links][57k]") {
+    const Outside box;
+    const std::filesystem::path link = box.root.path() / "link.txt";
+    const apogee::testing::LinkMade made = apogee::testing::make_file_link(box.kept, link);
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::error_code code;
+    CHECK(apogee::platform::is_link(link, code));
+    CHECK(apogee::platform::resolve_path(link, code) ==
+          apogee::platform::resolve_path(box.kept, code));
+    apogee::platform::remove_tree(link, code);
+    CHECK_FALSE(code);
+    CHECK_FALSE(apogee::platform::is_link(link, code));
+    CHECK(std::filesystem::exists(box.kept));
+}
+
+TEST_CASE("the Documents folder is the one the platform keeps", "[platform][57k]") {
+    const std::filesystem::path documents = apogee::platform::documents_directory();
+#if defined(_WIN32)
+    // The known folder, as the shell itself answers it: wherever a OneDrive
+    // or policy redirect put it, and so where install.ps1's
+    // GetFolderPath('MyDocuments') put its stub. Both ask the shell, which
+    // verifies the folder, so both are empty where the shell answers no
+    // Documents folder for the account. CI's Windows runners do (2026-11-26):
+    // C:\Users\runneradmin\Documents exists, and the shell still answers an
+    // error. Uninstall then looks under <home>/Documents alone.
+    // FOLDERID_Documents, spelled as platform.cpp spells it.
+    static constexpr GUID kDocuments{
+        0xfdd39ad0, 0x238f, 0x46af, {0xad, 0xb4, 0x6c, 0x85, 0x48, 0x03, 0x69, 0xc7}};
+    PWSTR said = nullptr;
+    const HRESULT result = SHGetKnownFolderPath(kDocuments, 0, nullptr, &said);
+    const std::filesystem::path shell = SUCCEEDED(result) && said != nullptr
+                                            ? std::filesystem::path{std::wstring{said}}
+                                            : std::filesystem::path{};
+    CoTaskMemFree(said);
+    CHECK(documents == shell);
+    if (documents.empty()) {
+        WARN("the shell answers no Documents folder for this account, HRESULT "
+             << static_cast<unsigned long>(result));
+    } else {
+        CHECK(documents.is_absolute());
+        CHECK(std::filesystem::is_directory(documents));
+    }
+#else
+    const std::optional<std::string> home = apogee::platform::home_directory();
+    REQUIRE(home.has_value());
+    CHECK(documents == apogee::platform::path_from_utf8(*home) / "Documents");
+#endif
+}
+
+TEST_CASE("a binary no process runs is deleted, and one already gone is nothing to remove",
+          "[platform][57k]") {
+    // Windows refuses to delete a running image; everywhere else it may go.
+    CHECK(apogee::platform::running_binary_deletable() ==
+          (apogee::platform::host_os() != apogee::platform::OperatingSystem::Windows));
+    const apogee::testing::TempDir root{"platform-binary-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path binary = root.path() / "apogee-copy";
+    std::ofstream{binary} << "not running";
+    const apogee::platform::OwnBinaryRemoval removed = apogee::platform::remove_own_binary(binary);
+    INFO(removed.error);
+    CHECK(removed.outcome == apogee::platform::OwnBinaryOutcome::Removed);
+    CHECK_FALSE(std::filesystem::exists(binary));
+    CHECK(removed.aside.empty());
+    CHECK(apogee::platform::remove_own_binary(binary).outcome ==
+          apogee::platform::OwnBinaryOutcome::Removed);
+    // The first step alone does the same for a binary no process runs.
+    std::ofstream{binary} << "not running";
+    const apogee::platform::OwnBinaryRemoval first =
+        apogee::platform::delete_or_rename_own_binary(binary);
+    INFO(first.error);
+    CHECK(first.outcome == apogee::platform::OwnBinaryOutcome::Removed);
+    CHECK_FALSE(std::filesystem::exists(binary));
+    CHECK(first.aside.empty());
+}
+
+#if defined(_WIN32)
+TEST_CASE("a program mapped as an image is renamed aside, and its name no longer runs",
+          "[platform][57k]") {
+    // A file mapped as an image section refuses deletion as a running
+    // program does: a copy of cmd.exe, mapped the way the loader maps one.
+    // The first step alone: `remove_own_binary`'s delete-at-restart request
+    // would outlive the test on an elevated host (a pending rename until the
+    // next restart), so it is never made here -- the stand-in removers in
+    // lifecycle_test cover what each outcome prints.
+    const apogee::testing::TempDir root{"platform-image-" + std::to_string(std::random_device{}())};
+    std::wstring system(MAX_PATH, L'\0');
+    system.resize(GetSystemDirectoryW(system.data(), static_cast<UINT>(system.size())));
+    const std::filesystem::path program = root.path() / "apogee.exe";
+    std::error_code code;
+    std::filesystem::copy_file(std::filesystem::path{system} / "cmd.exe", program, code);
+    INFO(code.message());
+    REQUIRE_FALSE(code);
+    const HANDLE file =
+        CreateFileW(program.c_str(), GENERIC_READ | GENERIC_EXECUTE,
+                    FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    REQUIRE(file != INVALID_HANDLE_VALUE);
+    const HANDLE mapping =
+        CreateFileMappingW(file, nullptr, PAGE_READONLY | SEC_IMAGE, 0, 0, nullptr);
+    const LPVOID view =
+        mapping != nullptr ? MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0) : nullptr;
+
+    const apogee::platform::OwnBinaryRemoval removed =
+        apogee::platform::delete_or_rename_own_binary(program);
+    INFO(removed.error);
+    INFO(removed.aside.string());
+
+    if (view != nullptr) {
+        (void)UnmapViewOfFile(view);
+    }
+    if (mapping != nullptr) {
+        (void)CloseHandle(mapping);
+    }
+    (void)CloseHandle(file);
+    if (!removed.aside.empty()) {
+        (void)DeleteFileW(removed.aside.c_str());
+    }
+    REQUIRE(view != nullptr);
+
+    // Whatever Windows allowed, the name is gone and nothing failed: renamed
+    // aside, never "Access is denied." with the name in place -- and no
+    // deletion was scheduled.
+    CHECK(removed.outcome != apogee::platform::OwnBinaryOutcome::Failed);
+    CHECK(removed.outcome != apogee::platform::OwnBinaryOutcome::DeletedAtRestart);
+    CHECK_FALSE(std::filesystem::exists(program));
+    if (removed.outcome != apogee::platform::OwnBinaryOutcome::Removed) {
+        CHECK(removed.aside.parent_path() == program.parent_path());
+        CHECK(removed.aside.filename().wstring().starts_with(L"apogee.exe.uninstalled-"));
+    }
+}
+
+TEST_CASE("a reparse point that is no link is the file it is", "[platform][links][57k]") {
+    // A OneDrive placeholder or a deduplicated file is a reparse point and no
+    // link: never removed as one, never resolved as one. A third-party tag
+    // stands in for them -- where Windows lets this process set one.
+    const apogee::testing::TempDir root{"platform-reparse-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path file = root.path() / "placeholder.txt";
+    std::ofstream{file} << "a file";
+    constexpr DWORD kTag = 0x00001234;  // no Microsoft bit: a third party's
+    constexpr GUID kOwner{
+        0x6a7d7c84, 0x7e9f, 0x4c63, {0x9b, 0x1a, 0x57, 0x6b, 0x00, 0x2a, 0x11, 0x5e}};
+
+    struct GuidBuffer {
+        DWORD tag;
+        WORD length;
+        WORD reserved;
+        GUID owner;
+        BYTE data[4];
+    };
+
+    GuidBuffer set{kTag, 4, 0, kOwner, {1, 2, 3, 4}};
+    const HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+    DWORD returned = 0;
+    const BOOL made = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &set, sizeof set, nullptr, 0,
+                                      &returned, nullptr);
+    const DWORD why = GetLastError();
+    if (made == 0) {
+        CloseHandle(handle);
+        SKIP("Windows would not set a third-party reparse point here: error " +
+             std::to_string(why));
+    }
+    std::error_code code;
+    const bool link = apogee::platform::is_link(file, code);
+    const DWORD attributes = GetFileAttributesW(file.c_str());
+    // Taken off again, so the folder can be removed as plain files.
+    GuidBuffer clear{kTag, 0, 0, kOwner, {}};
+    (void)DeviceIoControl(handle, FSCTL_DELETE_REPARSE_POINT, &clear, 24, nullptr, 0, &returned,
+                          nullptr);
+    CloseHandle(handle);
+
+    CHECK((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+    CHECK_FALSE(code);
+    CHECK_FALSE(link);
+}
+#endif

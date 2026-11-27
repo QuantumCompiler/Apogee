@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,18 +42,23 @@ public:
     Progress(Progress&&) = delete;
     Progress& operator=(Progress&&) = delete;
 
+    /// The way a run is stopped: what it did, in a line for the notice row
+    /// (57u: a task's run says which task it asked, or that there was nothing
+    /// to stop) -- empty for the caller's own words.
+    using Cancel = std::function<std::string()>;
+
     /// Starts `work` on a thread of its own under `heading` -- the lines of
     /// the last run cleared -- with `cancel` the way to stop it. False, and
     /// nothing started, while a run is going. `ended` is told on the shell's
     /// thread once the work has returned and its every line is in. Any
     /// thread: a view's worker starts one as readily as its keys do.
-    bool start(std::string heading, std::function<void(const Say& say)> work,
-               std::function<void()> cancel = {}, std::function<void()> ended = {});
+    bool start(std::string heading, std::function<void(const Say& say)> work, Cancel cancel = {},
+               std::function<void()> ended = {});
 
     /// Stops the run through the channel `start` was given, once: a second
-    /// ask, or one with no run, does nothing. Returns whether it asked. Any
-    /// thread.
-    bool cancel();
+    /// ask, or one with no run, does nothing and returns nullopt. Otherwise
+    /// what the channel said, empty when it said nothing. Any thread.
+    std::optional<std::string> cancel();
 
     /// A run was started and its end is not yet in. Any thread.
     [[nodiscard]] bool running() const;

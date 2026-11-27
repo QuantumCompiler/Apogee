@@ -316,8 +316,9 @@ TEST_CASE(
     FakeExtractor fake;
     fake.answers["alpha one"] = about({"Atlas"});
     fake.answers["beta one"] = about({"Vault"});
-    // A node that already exists, described and mentioned: the build finds
-    // it unchanged and does not re-embed it.
+    // A node that already exists, described and mentioned, with no vector:
+    // the build finds its text unchanged -- and embeds it anyway, since
+    // nothing else ever would (57t, inverting 26's "existed unchanged").
     const std::int64_t existing =
         scratch.store.upsert_node("Atlas", "concept", "already described").id;
     (void)scratch.store.add_mention(existing, scratch.store.chunks_by_source("a.md").front().id);
@@ -330,11 +331,16 @@ TEST_CASE(
     BuildOptions options = opts();
     options.embed_model = "mock-space";
     const BuildResult result = apogee::graph::build(scratch.store, fake.fn(), embed, options);
-    CHECK(result.nodes_embedded == 1);  // Vault is new; Atlas existed unchanged
-    CHECK(embedded == std::vector<std::string>{"Vault"});
+    CHECK(result.nodes_embedded == 2);  // Vault is new; Atlas had no vector
+    CHECK(embedded == std::vector<std::string>{"Atlas: already described", "Vault"});
     CHECK(scratch.store.node_vector(scratch.store.find_nodes("Vault").front().id).size() == 2);
     CHECK(scratch.store.graph_meta("embed_model") == "mock-space");
-    CHECK(scratch.store.graph_stats().nodes_with_vectors == 1);
+    CHECK(scratch.store.graph_stats().nodes_with_vectors == 2);
+    // With every vector in place, an unchanged node is not embedded again.
+    embedded.clear();
+    const BuildResult again = apogee::graph::build(scratch.store, fake.fn(), embed, options);
+    CHECK(again.nodes_embedded == 0);
+    CHECK(embedded.empty());
 
     // A failing embedder stops the phase, keeps the build, records no model.
     scratch.store.delete_graph();
@@ -349,6 +355,128 @@ TEST_CASE(
     CHECK(scratch.store.graph_stats().nodes == 2);
     CHECK(scratch.store.graph_meta("embed_model").empty());
     CHECK(scratch.store.source_states().size() == 2);
+}
+
+TEST_CASE("an embed that failed partway heals on the next build: every entity, and the model",
+          "[graph][build][embed][57t]") {
+    Scratch scratch;
+    seed(scratch.store);
+    FakeExtractor fake;
+    fake.answers["alpha one"] = about({"Atlas", "Vault"});
+    fake.answers["alpha two"] = about({"Ledger"});
+    fake.answers["beta one"] = about({"Quarry"});
+    int vectors = 0;
+    const apogee::graph::EmbedFn flaky = [&vectors](std::string_view,
+                                                    const apogee::harness::CancellationToken&) {
+        if (vectors == 1) {
+            throw std::runtime_error("endpoint down");
+        }
+        ++vectors;
+        return std::vector<float>{1.0F, 0.0F};
+    };
+    BuildOptions options = opts();
+    options.embed_model = "mock-space";
+    const BuildResult broken = apogee::graph::build(scratch.store, fake.fn(), flaky, options);
+    CHECK(broken.embed_error == "endpoint down");
+    CHECK(broken.nodes_embedded == 1);
+    CHECK(scratch.store.graph_stats().nodes_with_vectors == 1);
+    CHECK(scratch.store.graph_meta("embed_model").empty());
+
+    // The re-run "re-run to embed them" promised: nothing to extract, and
+    // every entity left without a vector embedded, the model recorded.
+    std::vector<std::string> embedded;
+    const apogee::graph::EmbedFn working = [&embedded](std::string_view text,
+                                                       const apogee::harness::CancellationToken&) {
+        embedded.emplace_back(text);
+        return std::vector<float>{0.0F, 1.0F};
+    };
+    const BuildResult healed = apogee::graph::build(scratch.store, fake.fn(), working, options);
+    CHECK(healed.files_planned == 0);
+    CHECK(healed.embed_error.empty());
+    CHECK(healed.nodes_embedded == 3);
+    CHECK(embedded.size() == 3);
+    CHECK(scratch.store.graph_stats().nodes_with_vectors == 4);
+    CHECK(scratch.store.graph_meta("embed_model") == "mock-space");
+    CHECK(scratch.store.nodes_without_vectors().empty());
+    // `--force` re-extracts and still finds nothing left to embed.
+    options.force = true;
+    embedded.clear();
+    CHECK(apogee::graph::build(scratch.store, fake.fn(), working, options).nodes_embedded == 0);
+}
+
+TEST_CASE("a cancel in the embed phase heals the same way", "[graph][build][embed][57t]") {
+    Scratch scratch;
+    seed(scratch.store);
+    FakeExtractor fake;
+    fake.answers["alpha one"] = about({"Atlas", "Vault"});
+    fake.answers["beta one"] = about({"Ledger"});
+    apogee::harness::CancellationToken token = apogee::harness::CancellationToken::create();
+    const apogee::graph::EmbedFn stopping = [&token](std::string_view,
+                                                     const apogee::harness::CancellationToken&) {
+        token.cancel();  // the user stops the build while the first vector lands
+        return std::vector<float>{1.0F, 0.0F};
+    };
+    BuildOptions options = opts();
+    options.embed_model = "mock-space";
+    options.cancellation = token;
+    const BuildResult stopped = apogee::graph::build(scratch.store, fake.fn(), stopping, options);
+    CHECK(stopped.cancelled);
+    CHECK(scratch.store.graph_stats().nodes_with_vectors == 1);
+    CHECK(scratch.store.nodes_without_vectors().size() == 2);
+
+    const apogee::graph::EmbedFn working = [](std::string_view,
+                                              const apogee::harness::CancellationToken&) {
+        return std::vector<float>{0.0F, 1.0F};
+    };
+    options.cancellation = apogee::harness::CancellationToken{};
+    const BuildResult healed = apogee::graph::build(scratch.store, fake.fn(), working, options);
+    CHECK_FALSE(healed.cancelled);
+    CHECK(healed.nodes_embedded == 2);
+    CHECK(scratch.store.nodes_without_vectors().empty());
+    CHECK(scratch.store.graph_meta("embed_model") == "mock-space");
+}
+
+TEST_CASE("a dedupe survivor that lost its vector is embedded by the next build, and merges again",
+          "[graph][build][embed][dedupe][57t]") {
+    Scratch scratch;
+    seed(scratch.store);
+    FakeExtractor fake;
+    ExtractResult first;
+    first.entities = {
+        Entity{.name = "K8s", .type = "system", .description = ""},
+        Entity{.name = "Kubernetes", .type = "system", .description = "orchestrator"}};
+    fake.answers["alpha one"] = first;
+    ExtractResult second;
+    second.entities = {Entity{.name = "Kube", .type = "system", .description = ""}};
+    fake.answers["beta one"] = second;
+    // Every name embeds alike, so all three are one cluster's.
+    const apogee::graph::EmbedFn embed = [](std::string_view,
+                                            const apogee::harness::CancellationToken&) {
+        return std::vector<float>{1.0F, 0.0F, 0.0F};
+    };
+    BuildOptions options = opts();
+    options.embed_model = "mock-space";
+    (void)apogee::graph::build(scratch.store, fake.fn(), embed, options);
+    REQUIRE(scratch.store.graph_stats().nodes_with_vectors == 3);
+
+    // The survivor K8s takes Kubernetes' description and loses its vector;
+    // Kube folds in too.
+    REQUIRE(scratch.store.dedupe_nodes(0.92, false).size() == 1);
+    const std::int64_t k8s = scratch.store.find_nodes("K8s").front().id;
+    CHECK(scratch.store.nodes_by_ids({k8s}).front().dim == 0);
+
+    // The next build, with nothing to extract, embeds the survivor ...
+    const BuildResult rebuilt = apogee::graph::build(scratch.store, fake.fn(), embed, options);
+    CHECK(rebuilt.files_planned == 0);
+    CHECK(rebuilt.nodes_embedded == 1);
+    CHECK(scratch.store.nodes_by_ids({k8s}).front().dim == 3);
+    // ... so a later namesake merges into it rather than standing apart.
+    const std::int64_t kubectl = scratch.store.upsert_node("Kubectl cluster", "system", "").id;
+    scratch.store.update_node_embedding(kubectl, {1.0F, 0.0F, 0.0F});
+    const std::vector<apogee::embedstore::MergeGroup> again =
+        scratch.store.dedupe_nodes(0.92, true);
+    REQUIRE(again.size() == 1);
+    CHECK(again.front().kept.id == k8s);
 }
 
 TEST_CASE(

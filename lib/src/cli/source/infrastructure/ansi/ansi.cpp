@@ -75,7 +75,8 @@ std::string_view color_code(Color color) noexcept {
     return {};
 }
 
-bool resolve_color(ColorMode mode, bool stdout_is_terminal, bool no_color_set) noexcept {
+bool resolve_color(ColorMode mode, bool stdout_is_terminal, bool no_color_set,
+                   bool renders_escapes) noexcept {
     switch (mode) {
         case ColorMode::Never:
             return false;
@@ -87,14 +88,16 @@ bool resolve_color(ColorMode mode, bool stdout_is_terminal, bool no_color_set) n
             break;
     }
     // Per the NO_COLOR convention its PRESENCE disables colour, whatever the
-    // value: NO_COLOR=0 still means no colour.
-    return stdout_is_terminal && !no_color_set;
+    // value: NO_COLOR=0 still means no colour. And a terminal that would print
+    // the codes as text gets none (57j).
+    return stdout_is_terminal && renders_escapes && !no_color_set;
 }
 
 Style Style::detect(ColorMode mode) {
     const bool no_color_set = std::getenv("NO_COLOR") != nullptr;
     const bool is_terminal = platform::is_terminal(platform::StandardStream::Out);
-    return Style{resolve_color(mode, is_terminal, no_color_set)};
+    const bool renders = platform::renders_escape_sequences(platform::StandardStream::Out);
+    return Style{resolve_color(mode, is_terminal, no_color_set, renders)};
 }
 
 std::string Style::dim(std::string_view text) const {

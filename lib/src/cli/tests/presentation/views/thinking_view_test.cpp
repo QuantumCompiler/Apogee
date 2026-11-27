@@ -580,3 +580,83 @@ TEST_CASE("off, a summary line changes nothing the raw window draws", "[ux][thin
     const std::string before = last_paint(h.bytes());
     CHECK(before == "✻ Thinking…\n  raw reasoning");
 }
+
+// ---------------------------------------------------------------------------
+// Shown, never obeyed (57p)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The sweep's entry 4: a reasoning chunk steered by fetched content -- an
+/// OSC 52 that writes `rm -rf ~` to the clipboard, and a cursor move into
+/// the scrollback.
+constexpr std::string_view kSteered = "Let me think\x1b]52;c;cm0gLXJmIH4K\x07 about it\x1b[3Aup";
+
+/// `bytes` with the view's own erases taken out: what is left must hold no
+/// escape at all.
+std::string without_own_erases(std::string bytes) {
+    for (const std::string_view own : {kEraseLine, kUpAndErase}) {
+        for (std::size_t at = bytes.find(own); at != std::string::npos; at = bytes.find(own, at)) {
+            bytes.erase(at, own.size());
+        }
+    }
+    return bytes;
+}
+
+}  // namespace
+
+TEST_CASE("steered reasoning in the window sends no OSC or CSI of the model's, and the erase holds",
+          "[ux][thinking][57p]") {
+    Harness h;
+    ThinkingView view = h.make();
+    view.write(kSteered);
+    const std::size_t painted = view.painted_rows();
+    REQUIRE(painted >= 2);
+    const std::string first = h.bytes();
+    CHECK(first.find("\x1b]") == std::string::npos);
+    CHECK(without_own_erases(first).find('\x1b') == std::string::npos);
+    CHECK(first.find('\x07') == std::string::npos);
+    CHECK(first.find("Let me think\xEF\xBF\xBD]52;c;cm0gLXJmIH4K\xEF\xBF\xBD about it") !=
+          std::string::npos);
+
+    // The next repaint erases exactly the rows the first painted: the cursor
+    // move never ran, so the count still holds.
+    view.write(" and then some more of it");
+    const std::string second = h.bytes().substr(first.size());
+    CHECK(second.rfind(std::string{kEraseLine}, 0) == 0);
+    CHECK(count(second, kUpAndErase) == painted - 1);
+    CHECK(without_own_erases(h.bytes()).find('\x1b') == std::string::npos);
+
+    // The summary line too: a vendor's one-line summary of it.
+    ThinkingView summarised = h.make();
+    summarised.set_summarized(true);
+    summarised.write("hidden");
+    const std::size_t before = h.bytes().size();
+    summarised.summary("weighing \x1b]0;OWNED\x07the \x1b[2Jfix");
+    const std::string drawn = h.bytes().substr(before);
+    CHECK(without_own_erases(drawn).find('\x1b') == std::string::npos);
+    CHECK(drawn.find('\x07') == std::string::npos);
+    CHECK(drawn.find("weighing \xEF\xBF\xBD]0;OWNED\xEF\xBF\xBDthe \xEF\xBF\xBD[2Jfix") !=
+          std::string::npos);
+}
+
+TEST_CASE("steered reasoning under -v is the transcript, drawn and never obeyed",
+          "[ux][thinking][57p]") {
+    // The sweep's probe sent the whole chunk unchanged under -v.
+    Harness h;
+    ThinkingView::Options options;
+    options.verbose = true;
+    ThinkingView view = h.make(options);
+    view.write(kSteered);
+    view.write("\tand a tab");
+    view.finish();
+    const std::string all = h.bytes();
+    CHECK(all.find('\x1b') == std::string::npos);
+    CHECK(all.find('\x07') == std::string::npos);
+    CHECK(all.find(
+              "Let me think\xEF\xBF\xBD]52;c;cm0gLXJmIH4K\xEF\xBF\xBD about it\xEF\xBF\xBD[3Aup") ==
+          0);
+    // The tab expanded from where the chunk before it left the row: cell 47,
+    // so one space to the stop at 48.
+    CHECK(all.find("[3Aup and a tab") != std::string::npos);
+}

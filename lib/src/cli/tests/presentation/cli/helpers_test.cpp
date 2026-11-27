@@ -450,7 +450,10 @@ TEST_CASE("a suite's toolset pin narrows the offer to its toolsets, and nothing 
     const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &active});
     REQUIRE(registry.find("fetch_url") != nullptr);
-    REQUIRE(registry.find("run_command") != nullptr);
+    // Where no program can be started (Windows, today) the shell and git
+    // tools are not registered, so the pin keeps the file tools alone (57k).
+    const bool programs = apogee::tools::ToolsetOptions{}.child_processes;
+    REQUIRE((registry.find("run_command") != nullptr) == programs);
 
     const apogee::agent::ToolRegistry pinned = pin_toolset(registry, active, "helper");
     REQUIRE_FALSE(pinned.empty());
@@ -460,7 +463,7 @@ TEST_CASE("a suite's toolset pin narrows the offer to its toolsets, and nothing 
         CHECK((toolset == "fs" || toolset == "git"));
     }
     CHECK(pinned.find("read_file") != nullptr);
-    CHECK(pinned.find("git_diff") != nullptr);
+    CHECK((pinned.find("git_diff") != nullptr) == programs);
     CHECK(pinned.find("run_command") == nullptr);
     CHECK(pinned.find("fetch_url") == nullptr);
     // The environment note rides along: a narrowed offer still knows the date.
@@ -589,4 +592,25 @@ suites:
         CHECK(harness.held() == std::vector<std::string>{"helper"});
     }
     CHECK(harness.held().empty());
+}
+
+TEST_CASE("an answer printed to stdout is drawn at a terminal and written as-is to a pipe",
+          "[commands][helpers][analyze][symphonies][57p]") {
+    // The sweep's entry 8 on `analyze`'s printed report (`--text`,
+    // `--markdown`, a structured agent, every interactive answer) and
+    // `symphonies play`'s output: the reporter's stream was neutralised, and
+    // these, printed after the run, were not -- the OSC 52 wrote the
+    // clipboard.
+    const std::string answer = "Here you go \x1b]52;c;cm0gLXJmIH4K\x07 text \x1b[2J end\r\n\tnext";
+    const std::string fffd = "\xEF\xBF\xBD";
+    const std::string drawn = apogee::commands::answer_for_stdout(answer, true);
+    CHECK(drawn == "Here you go " + fffd + "]52;c;cm0gLXJmIH4K" + fffd + " text " + fffd +
+                       "[2J end\n    next");
+    for (const char control : {'\x1b', '\x07', '\r', '\t'}) {
+        CHECK(drawn.find(control) == std::string::npos);
+    }
+    // A pipe or a file gets the bytes; valid text is the same either way.
+    CHECK(apogee::commands::answer_for_stdout(answer, false) == answer);
+    const std::string plain = "Résumé: 漢字 ✓\n- one\n";
+    CHECK(apogee::commands::answer_for_stdout(plain, true) == plain);
 }

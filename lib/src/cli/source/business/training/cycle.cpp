@@ -130,6 +130,8 @@ CycleHistory load_history(const std::filesystem::path& cycle_dir, std::string_vi
         error = path.string() + " is not JSON";
         return fresh;
     }
+    // A field of the wrong type throws the library's own error, not a
+    // runtime_error (57h): caught beside it, so the read names the file.
     try {
         CycleHistory history = history_from_json(json);
         if (history.backend.empty()) {
@@ -137,6 +139,9 @@ CycleHistory load_history(const std::filesystem::path& cycle_dir, std::string_vi
         }
         return history;
     } catch (const std::runtime_error& e) {
+        error = path.string() + ": " + e.what();
+        return fresh;
+    } catch (const nlohmann::json::exception& e) {
         error = path.string() + ": " + e.what();
         return fresh;
     }
@@ -223,9 +228,27 @@ std::optional<CycleLock> CycleLock::acquire(const std::filesystem::path& cycle_d
     return CycleLock{std::move(*lock)};
 }
 
-bool cycle_lock_held(const std::filesystem::path& cycle_dir) {
-    std::error_code code;
-    return std::filesystem::exists(cycle_dir / kLockFileName, code);
+CycleLockState cycle_lock_state(const std::filesystem::path& cycle_dir) {
+    CycleLockState state;
+    const std::filesystem::path path = cycle_dir / kLockFileName;
+    const std::optional<platform::PidLock::Holder> holder = platform::PidLock::holder(path);
+    if (!holder.has_value()) {
+        return state;
+    }
+    state.pid = holder->pid;
+    state.path = path;
+    state.kind = holder->running || holder->pid == 0 ? CycleLockState::Kind::Running
+                                                     : CycleLockState::Kind::Stale;
+    return state;
+}
+
+std::string stale_lock_text(const CycleLockState& state) {
+    if (!state.stale()) {
+        return {};
+    }
+    return "stopped -- " + std::string{kLockFileName} + " is left by process " +
+           std::to_string(state.pid) + ", which is not running; remove " + state.path.string() +
+           " to run again";
 }
 
 // --- the breaker ----------------------------------------------------------------
@@ -602,8 +625,16 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     PipelineRequest pipeline;
     pipeline.spec = &spec;
     pipeline.stages = std::move(stages);
-    pipeline.pipeline_run_id = new_run_id(request.training_dir / kPipelinesDirName,
-                                          std::chrono::system_clock::now(), kCycleIdPrefix);
+    // Reserved under the cycle's lock, and by its directory (57g), so no
+    // other run -- a pipeline's, a regime's -- can be given it.
+    std::string reserve_error;
+    pipeline.pipeline_run_id =
+        new_run_id(request.training_dir / kPipelinesDirName, std::chrono::system_clock::now(),
+                   kCycleIdPrefix, reserve_error);
+    if (pipeline.pipeline_run_id.empty()) {
+        outcome.error = "reserving the pass's pipeline: " + reserve_error;
+        return outcome;
+    }
     pipeline.base_model = request.base_model;
     pipeline.training_dir = request.training_dir;
     pipeline.trainer = request.trainer;
@@ -625,6 +656,15 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         return outcome;
     }
 
+    // What a failed pass leaves (57h): its own words, never a pipeline's door
+    // -- the candidate is the cycle's alone, and the data waits for the next
+    // pass, which is how a cycle retries.
+    const std::string retried =
+        queues.empty()
+            ? std::string{"the candidate is discarded; the next 'apogee train cycle run' takes "
+                          "the same sessions again"}
+            : std::string{"the candidate is discarded; the queue keeps its files for the next "
+                          "'apogee train cycle run'"};
     auto fail = [&](std::string reason) {
         record.gate = std::string{kGateFail};
         record.gate_reason = std::move(reason);
@@ -639,7 +679,7 @@ CycleOutcome run_cycle(const CycleRequest& request) {
                 current.runs.back().note = current.halt_reason;
             }
         });
-        say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason);
+        say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason + " -- " + retried);
         if (outcome.halted_now) {
             say(kPassHalted, "[cycle] " + history.halt_reason +
                                  " -- the loop is halted; 'apogee train cycle "

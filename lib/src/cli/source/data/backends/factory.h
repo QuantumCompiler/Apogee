@@ -25,7 +25,7 @@ struct BackendStatus {
     std::string name;
     bool constructed = false;
     /// Why it was skipped, when it was. Empty on success.
-    std::string reason;
+    std::string reason{};
 };
 
 struct BuildResult {

@@ -109,7 +109,7 @@ struct PrivateSessionsSurviveTests {
     }
 
     @Test("a switch away from a private conversation asks first: Keep keeps it, End ends it")
-    func switchAsks() async {
+    func switchAsks() async throws {
         let runner = ScriptedRunner()
         let next = ScriptedSession("next")
         let (library, starter, secret) = await Lifecycle.privateConversation(runner, children: [next, ScriptedSession()])
@@ -123,7 +123,7 @@ struct PrivateSessionsSurviveTests {
         #expect(secret.isLive)
         await library.newSession()
         #expect(library.pending == .endPrivate(for: .new), "a new session asks too")
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         await Lifecycle.law(starter, "ending it")
         #expect(secret.calls.contains("stop"))
         #expect(await eventually { starter.openedCount == 3 })
@@ -233,7 +233,7 @@ struct QuitTests {
         #expect(ledger.all.filter { $0.hasPrefix("run chats delete") }.count == 1, "asked again, nothing runs twice")
     }
 
-    @Test("a session that won't die is given up after the grace, and the quit still returns")
+    @Test("a session that won't die is given up after the grace -- its SIGTERM sent before the quit returns -- and the quit still returns")
     func givenUpAfterTheGrace() async {
         let ledger = Ledger()
         let runner = ScriptedRunner(ledger: ledger)
@@ -258,8 +258,39 @@ struct QuitTests {
         clock.advance(by: .milliseconds(1))
         let report = await quitting.value
         #expect(report == ShutdownReport(ended: false, deleteFailure: nil))
-        #expect(ledger.all == ["stubborn: stop"], "given up, not ended")
+        #expect(ledger.all == ["stubborn: stop", "stubborn: terminate"], "given up, not ended -- but signalled first (6a)")
         stubborn.releaseStop()
+    }
+
+    @Test("6a: a private fallback session given up at quit: its SIGTERM first, then its promised delete, and the report says the child was still ending")
+    func privateDeletedOnlyAfterTheSignal() async {
+        let ledger = Ledger()
+        let runner = ScriptedRunner(ledger: ledger)
+        runner.reading(["chats", "list"], Lifecycle.list)
+        let first = ScriptedSession("first", ledger: ledger)
+        let secret = ScriptedSession("private", stopping: .whenReleased, ledger: ledger)
+        let starter = ScriptedStarter(sessions: [first, secret])
+        let clock = ScriptedClock()
+        let library = Lifecycle.library(runner, starter, clock: clock)
+        await library.start(inView: true)
+        first.emit(Lifecycle.older)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        await library.newPrivateSession()
+        #expect(await eventually { starter.openedCount == 2 })
+        secret.emit(Lifecycle.older)
+        #expect(await eventually { library.current.transcript.status == .ready })
+        runner.reading(["chats", "list"], Self.savedAsP9)
+        await Lifecycle.converse(library, secret)
+        #expect(await eventually { library.current.chatID == "p9" })
+        let before = ledger.all.count
+        let quitting = Task { await library.quit() }
+        #expect(await eventually { clock.sleeping == 1 && ledger.all.count == before + 1 })
+        #expect(!ledger.all.contains("run chats delete p9"), "no delete while the child may still save it")
+        clock.advance(by: SessionViewModel.grace)
+        let report = await quitting.value
+        #expect(Array(ledger.all.dropFirst(before)) == ["private: stop", "private: terminate", "run chats delete p9"])
+        #expect(report == ShutdownReport(ended: false, deleteFailure: nil, deletedWhileEnding: true))
+        secret.releaseStop()
     }
 
     @Test("a child that ends in time: the grace's timer is called off, and nothing waits on the clock")
@@ -380,7 +411,7 @@ final class Flag {
 @MainActor
 struct OneLiveChildMatrixTests {
     @Test("after every step of the lifecycle, at most one child lives")
-    func everyStep() async {
+    func everyStep() async throws {
         let runner = ScriptedRunner()
         runner.reading(["chats", "list"], Lifecycle.list)
         let starter = ScriptedStarter(sessions: (0..<12).map { ScriptedSession("child \($0)") })
@@ -425,7 +456,7 @@ struct OneLiveChildMatrixTests {
         await Lifecycle.law(starter, "keeping it")
         #expect(secret?.isLive == true)
         await library.newSession()
-        await library.confirm()
+        try await library.confirm(#require(library.pending))
         await Lifecycle.law(starter, "ending it for a new session")
         #expect(secret?.isLive == false)
         _ = await speak()

@@ -1,0 +1,7 @@
+Local backends
+
+SafeTensors
+BACKEND           MODEL                                          SOURCE       ARCH     STATE        VERIFIED
+(not configured)  Llama3.2-1B-Instruct/safetensors/edaba290ce7f  huggingface  Llama    safetensors  9 file(s) on record
+(not configured)  Qwen3-VL-8B-Instruct/safetensors/63f2634a2019  huggingface  Qwen3VL  safetensors  14 file(s) on record
+1 snapshot consumed by a conversion is folded -- --all lists it

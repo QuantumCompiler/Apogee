@@ -118,6 +118,47 @@ TEST_CASE(
     CHECK(f.graph.graph_stats().nodes == 0);
 }
 
+TEST_CASE("reconcile recounts a relation by the chunks still there to state it",
+          "[embedstore][graph][multi][reconcile][57t]") {
+    Fixture f;
+    // Stated by both docs chunks and the meetings chunk: weight 3.
+    const std::int64_t ledger = f.graph.upsert_node("Ledger", "system", "").id;
+    REQUIRE(f.graph.add_mention(ledger, "docs", f.docs_a1));
+    for (const ChunkRef& chunk : {ChunkRef{.collection = "docs", .chunk_id = f.docs_a1},
+                                  ChunkRef{.collection = "docs", .chunk_id = f.docs_a2},
+                                  ChunkRef{.collection = "meetings", .chunk_id = f.meet_m1}}) {
+        f.graph.upsert_edge(f.atlas, ledger, "feeds", "", chunk);
+    }
+    const auto weight = [&] {
+        for (const apogee::embedstore::Neighbor& neighbor : f.graph.node_neighbors(f.atlas)) {
+            if (neighbor.relation == "feeds") {
+                return neighbor.weight;
+            }
+        }
+        return std::int64_t{0};
+    };
+    REQUIRE(weight() == 3);
+    CHECK(f.graph.reconcile_graph_multi(f.members()).total() == 0);
+    CHECK(weight() == 3);
+
+    // A member dropped: its chunk stops counting.
+    const ReconcileResult dropped = f.graph.reconcile_graph_multi(MemberStores{{"docs", &f.docs}});
+    CHECK(dropped.edges_pruned == 0);
+    CHECK(weight() == 2);
+
+    // A re-ingest kills both docs chunks' ids: the relation no surviving
+    // chunk states is pruned, while the support-less edge an earlier build
+    // wrote (`stores readings in`) is left to the mention sweep, as before.
+    f.docs.replace_source("a.md", {"Atlas collects readings", "The Vault keeps them"});
+    (void)f.graph.add_mention(f.atlas, "docs", f.docs.chunks_by_source("a.md").front().id);
+    (void)f.graph.add_mention(ledger, "docs", f.docs.chunks_by_source("a.md").front().id);
+    const ReconcileResult reingested =
+        f.graph.reconcile_graph_multi(MemberStores{{"docs", &f.docs}});
+    CHECK(weight() == 0);
+    CHECK(reingested.edges_pruned == 2);                // `feeds` unstated; Vault's edge with Vault
+    CHECK(f.graph.nodes_by_ids({ledger}).size() == 1);  // still mentioned
+}
+
 TEST_CASE("a vanished source in a member prunes its state row", "[embedstore][graph][multi]") {
     Fixture f;
     (void)f.meetings.delete_source("m.md");

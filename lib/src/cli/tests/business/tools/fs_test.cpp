@@ -7,13 +7,18 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
+#include <system_error>
+#include <vector>
 
 #include "agent/tool.h"
 #include "contracts/text_diff.h"
+#include "platform/platform.h"
 #include "support/env_guard.h"
+#include "support/file_link.h"
 
 /// The filesystem toolset: the sandbox above all, then each tool's contract.
 namespace {
@@ -62,27 +67,8 @@ TEST_CASE("the sandbox refuses every spelling of a path outside the root", "[too
     CHECK_FALSE(resolve_in_root(box.root, (box.outside / "secret.md").string(), error).has_value());
     CHECK_FALSE(resolve_in_root(box.root, box.outside.string(), error).has_value());
 
-    // A symlink inside that points outside is judged by where it points.
-    std::error_code code;
-    std::filesystem::create_symlink(box.outside / "secret.md", box.root / "link.md", code);
-    if (!code) {
-        CHECK_FALSE(resolve_in_root(box.root, "link.md", error).has_value());
-        CHECK(box.run("read_file", R"({"path":"link.md"})").is_error);
-        CHECK(box.run("edit_file", R"({"path":"link.md","old_string":"not","new_string":"now"})")
-                  .is_error);
-        CHECK(box.run("grep_files", R"({"pattern":"yours","path":"link.md"})").is_error);
-        // Found by a search of the root, it is still judged where it points:
-        // the secret's text never comes back.
-        const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
-        CHECK(searched.content.find("not yours") == std::string::npos);
-        CHECK(searched.content.starts_with("No matches"));
-    }
-    // A directory link out of the root is not walked either.
-    std::filesystem::create_directory_symlink(box.outside, box.root / "linked", code);
-    if (!code) {
-        CHECK(box.run("grep_files", R"({"pattern":"yours"})").content.starts_with("No matches"));
-        CHECK(box.run("grep_files", R"({"pattern":"yours","path":"linked"})").is_error);
-    }
+    // Links pointing out are the next two cases: made by `file_link`, never
+    // skipped silently where a link cannot be made (57k).
 
     // The tools themselves refuse, naming the root, and touch nothing.
     for (const char* tool : {"read_file", "delete_file", "list_directory"}) {
@@ -113,6 +99,371 @@ TEST_CASE("the sandbox refuses every spelling of a path outside the root", "[too
     }
     std::ifstream secret{box.outside / "secret.md"};
     CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+TEST_CASE("a directory link out of the root is refused by every file tool, and never walked",
+          "[tools][fs][sandbox][links][57k]") {
+    // A junction on Windows -- the link the x64 build's library cannot see,
+    // which let `linked/.ssh/id_ed25519` be read and `linked/...` written --
+    // and a directory symlink elsewhere. Made, never skipped.
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside, box.root / "linked");
+    INFO(made.why);
+    REQUIRE(made.made);
+
+    std::string error;
+    for (const char* path : {"linked/secret.md", "linked", "linked/new.md", "linked/sub/new.md"}) {
+        INFO(path);
+        CHECK_FALSE(resolve_in_root(box.root, path, error).has_value());
+        CHECK(error.find("outside the allowed root") != std::string::npos);
+    }
+    const auto refused = [&box](std::string_view tool, const std::string& arguments) {
+        INFO(tool << " " << arguments);
+        const ToolOutcome outcome = box.run(tool, arguments);
+        CHECK(outcome.is_error);
+        CHECK(outcome.content.find("outside the allowed root") != std::string::npos);
+    };
+    refused("read_file", R"({"path":"linked/secret.md"})");
+    refused("write_file", R"({"path":"linked/new.md","content":"x"})");
+    refused("write_file", R"({"path":"linked/secret.md","content":"overwritten"})");
+    refused("edit_file",
+            R"({"path":"linked/secret.md","old_string":"not yours","new_string":"mine"})");
+    refused("delete_file", R"({"path":"linked/secret.md"})");
+    refused("list_directory", R"({"path":"linked"})");
+    refused("search_files", R"({"pattern":"*.md","root":"linked"})");
+    refused("grep_files", R"({"pattern":"yours","path":"linked"})");
+    refused("grep_files", R"({"pattern":"yours","path":"linked/secret.md"})");
+
+    // A search of the root never walks into it: the secret's text never
+    // comes back, and its name is never listed.
+    const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
+    CHECK(searched.content.starts_with("No matches"));
+    CHECK(searched.content.find("not yours") == std::string::npos);
+    const ToolOutcome found = box.run("search_files", R"({"pattern":"*.md"})");
+    CHECK(found.content.find("secret.md") == std::string::npos);
+
+    // And the outside is exactly as it was.
+    CHECK_FALSE(std::filesystem::exists(box.outside / "new.md"));
+    std::ifstream secret{box.outside / "secret.md"};
+    CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+TEST_CASE("a directory link back into the root resolves inside it and is never walked twice",
+          "[tools][fs][sandbox][links][57k]") {
+    // A link inside the root to a folder inside it is the root's own: read
+    // through it. A walk never enters it, so a link to its own parent -- a
+    // loop -- cannot spin a search (Windows' walk followed every junction).
+    const Sandbox box;
+    REQUIRE(apogee::testing::make_directory_link(box.root / "sub", box.root / "alias").made);
+    REQUIRE(apogee::testing::make_directory_link(box.root, box.root / "sub" / "loop").made);
+
+    std::string error;
+    CHECK(resolve_in_root(box.root, "alias/b.md", error).has_value());
+    CHECK(box.run("read_file", R"({"path":"alias/b.md"})").content == "beta");
+    CHECK(box.run("grep_files", R"({"pattern":"alpha|beta"})").content ==
+          "a.md:1: alpha\nsub/b.md:1: beta");
+    const ToolOutcome found = box.run("search_files", R"({"pattern":"*.md"})");
+    CHECK(found.content == "a.md\nsub/b.md");
+}
+
+TEST_CASE("a file link out of the root is judged where it points",
+          "[tools][fs][sandbox][links][57k]") {
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_file_link(box.outside / "secret.md", box.root / "link.md");
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::string error;
+    CHECK_FALSE(resolve_in_root(box.root, "link.md", error).has_value());
+    CHECK(box.run("read_file", R"({"path":"link.md"})").is_error);
+    CHECK(box.run("edit_file", R"({"path":"link.md","old_string":"not","new_string":"now"})")
+              .is_error);
+    CHECK(box.run("write_file", R"({"path":"link.md","content":"overwritten"})").is_error);
+    CHECK(box.run("grep_files", R"({"pattern":"yours","path":"link.md"})").is_error);
+    // Found by a search of the root, it is still judged where it points: the
+    // secret's text never comes back.
+    const ToolOutcome searched = box.run("grep_files", R"({"pattern":"yours"})");
+    CHECK(searched.content.find("not yours") == std::string::npos);
+    CHECK(searched.content.starts_with("No matches"));
+    std::ifstream secret{box.outside / "secret.md"};
+    CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+namespace {
+
+/// Whether a refusal is the sandbox's: it names the root -- and on POSIX, where
+/// the link is read and followed, says the path lands outside it. Windows x64's
+/// library cannot read a link (57k), so there a path through one that does not
+/// open is refused as unresolvable, naming the root too.
+void check_sandbox_refusal(const std::filesystem::path& root, const std::string& said) {
+    INFO(said);
+    std::error_code code;
+    const std::filesystem::path canonical = apogee::platform::resolve_path(root, code);
+    CHECK(said.find(canonical.string()) != std::string::npos);
+#if !defined(_WIN32)
+    CHECK(said.find("outside the allowed root") != std::string::npos);
+#endif
+}
+
+/// Dispatch with a checker that allows every edit unasked -- accept-edits, or
+/// the config's `allow` -- and a prompt that must never be reached.
+ToolOutcome dispatch_allowed(const ToolRegistry& registry, std::string name, std::string arguments,
+                             int& asked) {
+    apogee::agent::DispatchContext context;
+    context.permission = [](const apogee::agent::GateRequest& request) {
+        return request.edits ? apogee::agent::Permission::Allow : apogee::agent::Permission::Ask;
+    };
+    context.confirm = [&asked](const apogee::agent::GateRequest&) {
+        ++asked;
+        return true;
+    };
+    return apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            .id = "c", .name = std::move(name), .arguments = std::move(arguments)},
+        context);
+}
+
+}  // namespace
+
+TEST_CASE("a dangling file link out of the root is refused, and its target never created",
+          "[tools][fs][sandbox][links][57o]") {
+    // The sweep's probe (57o): `notes.txt -> ../rootX/planted.txt`, the target
+    // absent. `weakly_canonical` took the link for a file not yet made, inside
+    // the root, and the write followed it out: `planted.txt` held `PWNED`.
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_file_link(box.outside / "planted.txt", box.root / "notes.txt");
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::string error;
+    CHECK_FALSE(resolve_in_root(box.root, "notes.txt", error).has_value());
+    check_sandbox_refusal(box.root, error);
+#if !defined(_WIN32)
+    CHECK(error.find("through the link") != std::string::npos);
+    CHECK(error.find("notes.txt") != std::string::npos);
+#endif
+
+    // Through the tool, and through dispatch with the call allowed unasked --
+    // the config's allow and accept-edits both answer a call like this.
+    const ToolOutcome ran = box.run("write_file", R"({"path":"notes.txt","content":"PWNED"})");
+    CHECK(ran.is_error);
+    check_sandbox_refusal(box.root, ran.content);
+    int asked = 0;
+    const ToolOutcome dispatched = dispatch_allowed(
+        box.registry, "write_file", R"({"path":"notes.txt","content":"PWNED"})", asked);
+    CHECK(dispatched.is_error);
+    check_sandbox_refusal(box.root, dispatched.content);
+    for (const char* tool : {"edit_file", "delete_file"}) {
+        INFO(tool);
+        CHECK(dispatch_allowed(box.registry, tool,
+                               R"({"path":"notes.txt","old_string":"a","new_string":"b"})", asked)
+                  .is_error);
+    }
+    CHECK(asked == 0);  // refused before the gate, never asked about
+    CHECK_FALSE(std::filesystem::exists(box.outside / "planted.txt"));
+    // The link is left as it was. Asked of the platform, which reads a
+    // Windows symlink's reparse tag: Windows x64's library answers no link
+    // there whatever is on disk (57k).
+    std::error_code code;
+    CHECK(apogee::platform::is_link(box.root / "notes.txt", code));
+    CHECK_FALSE(code);
+}
+
+TEST_CASE("a dangling folder link out of the root is refused, and nothing is made through it",
+          "[tools][fs][sandbox][links][57o]") {
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_directory_link(box.outside / "newdir", box.root / "d");
+    INFO(made.why);
+    REQUIRE(made.made);
+    std::string error;
+    for (const char* path : {"d", "d/x.txt", "d/deeper/x.txt"}) {
+        INFO(path);
+        CHECK_FALSE(resolve_in_root(box.root, path, error).has_value());
+        check_sandbox_refusal(box.root, error);
+    }
+    int asked = 0;
+    for (const char* path : {"d/x.txt", "d/deeper/x.txt"}) {
+        INFO(path);
+        const ToolOutcome wrote =
+            dispatch_allowed(box.registry, "write_file",
+                             R"({"path":")" + std::string{path} + R"(","content":"x"})", asked);
+        CHECK(wrote.is_error);
+        check_sandbox_refusal(box.root, wrote.content);
+    }
+    CHECK(asked == 0);
+    CHECK_FALSE(std::filesystem::exists(box.outside / "newdir"));
+}
+
+TEST_CASE("a two-hop chain whose second hop leaves the root is refused",
+          "[tools][fs][sandbox][links][57o]") {
+    // `a -> b` inside the root, `b -> ../rootX/far.txt` outside and absent:
+    // every hop is followed and the last is judged.
+    const Sandbox box;
+    const apogee::testing::LinkMade second =
+        apogee::testing::make_file_link(box.outside / "far.txt", box.root / "b");
+    if (!second.made) {
+        SKIP(second.why);
+    }
+    REQUIRE(apogee::testing::make_file_link("b", box.root / "a").made);
+    std::string error;
+    CHECK_FALSE(resolve_in_root(box.root, "a", error).has_value());
+    check_sandbox_refusal(box.root, error);
+    int asked = 0;
+    CHECK(dispatch_allowed(box.registry, "write_file", R"({"path":"a","content":"x"})", asked)
+              .is_error);
+    CHECK(asked == 0);
+    CHECK_FALSE(std::filesystem::exists(box.outside / "far.txt"));
+}
+
+TEST_CASE("a `..` past a missing folder never steps over a link unread",
+          "[tools][fs][sandbox][links][57o]") {
+    // `missing/../out.md` is `out.md` once `weakly_canonical` normalises the
+    // part that does not exist -- and `out.md` is a link out of the root,
+    // which that normalisation never read.
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_file_link(box.outside / "secret.md", box.root / "out.md");
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::string error;
+    CHECK_FALSE(resolve_in_root(box.root, "missing/../out.md", error).has_value());
+    CHECK(box.run("read_file", R"({"path":"missing/../out.md"})").is_error);
+    int asked = 0;
+    CHECK(dispatch_allowed(box.registry, "write_file",
+                           R"({"path":"missing/../out.md","content":"overwritten"})", asked)
+              .is_error);
+    std::ifstream secret{box.outside / "secret.md"};
+    CHECK(std::string{std::istreambuf_iterator<char>{secret}, {}} == "not yours");
+}
+
+TEST_CASE("a dangling link whose target is inside the root is written at its target",
+          "[tools][fs][sandbox][links][57o]") {
+    // The recorded default (57o): a link that leads inside the root is the
+    // root's own, followed -- the write lands at its target, the link kept.
+#if defined(_WIN32)
+    SKIP(
+        "Windows x64's library cannot read a link (57k): a path through a dangling one is "
+        "refused there rather than followed");
+#endif
+    const Sandbox box;
+    const apogee::testing::LinkMade made =
+        apogee::testing::make_file_link("sub/real.txt", box.root / "alias.txt");
+    if (!made.made) {
+        SKIP(made.why);
+    }
+    std::string error;
+    const std::optional<std::filesystem::path> resolved =
+        resolve_in_root(box.root, "alias.txt", error);
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->filename() == "real.txt");
+    const apogee::agent::Tool* write = box.registry.find("write_file");
+    CHECK(write->describe_target(R"({"path":"alias.txt","content":"hi"})") == "sub/real.txt");
+    int asked = 0;
+    const ToolOutcome wrote = dispatch_allowed(box.registry, "write_file",
+                                               R"({"path":"alias.txt","content":"hi"})", asked);
+    REQUIRE_FALSE(wrote.is_error);
+    std::ifstream real{box.root / "sub" / "real.txt"};
+    CHECK(std::string{std::istreambuf_iterator<char>{real}, {}} == "hi");
+    CHECK(std::filesystem::is_symlink(box.root / "alias.txt"));
+}
+
+TEST_CASE("a file writer names the file it writes, and a path outside is refused before asking",
+          "[tools][fs][permission][57o]") {
+    // The sweep's other probe: the model's path repaints the prompt line and
+    // `..` drops a component that does not exist, so the prompt read
+    // `write_file -> notes.txt` while victim.txt was overwritten. The target
+    // is now the file written, named relative to the root.
+    const Sandbox box;
+    std::ofstream{box.root / "victim.txt"} << "original";
+    const std::string probe =
+        "x\r\x1b[2K\x1b[35m[perm]\x1b[0m write_file -> notes.txt\x1b[8m/../victim.txt";
+    const std::string arguments =
+        nlohmann::json{{"path", probe}, {"content", "overwritten"}}.dump();
+    for (const char* tool : {"write_file", "edit_file", "delete_file"}) {
+        INFO(tool);
+        CHECK(box.registry.find(tool)->describe_target(arguments) == "victim.txt");
+        CHECK(box.registry.find(tool)->target_refusal(arguments).empty());
+    }
+    CHECK(box.registry.find("write_file")->describe_target(R"({"path":"sub/../a.md"})") == "a.md");
+
+    std::vector<std::string> asked_about;
+    apogee::agent::DispatchContext context;
+    context.permission = [](const apogee::agent::GateRequest&) {
+        return apogee::agent::Permission::Ask;
+    };
+    context.confirm = [&asked_about](const apogee::agent::GateRequest& request) {
+        asked_about.emplace_back(request.target);
+        return true;
+    };
+    const ToolOutcome wrote = apogee::agent::dispatch(
+        box.registry, apogee::harness::ToolCall{"w", "write_file", arguments}, context);
+    REQUIRE_FALSE(wrote.is_error);
+    CHECK(asked_about == std::vector<std::string>{"victim.txt"});
+    std::ifstream victim{box.root / "victim.txt"};
+    CHECK(std::string{std::istreambuf_iterator<char>{victim}, {}} == "overwritten");
+
+    // Outside the root: refused unrun, in the sandbox's words, nobody asked.
+    asked_about.clear();
+    const ToolOutcome outside = apogee::agent::dispatch(
+        box.registry,
+        apogee::harness::ToolCall{"o", "write_file", R"({"path":"../rootX/new.md","content":"x"})"},
+        context);
+    CHECK(outside.is_error);
+    CHECK(outside.content.find("outside the allowed root") != std::string::npos);
+    CHECK(asked_about.empty());
+    CHECK_FALSE(std::filesystem::exists(box.outside / "new.md"));
+    CHECK_FALSE(apogee::agent::permitted(*box.registry.find("write_file"),
+                                         R"({"path":"../rootX/new.md","content":"x"})", context));
+    CHECK(asked_about.empty());
+}
+
+TEST_CASE(
+    "write_file still refuses a file the person may not write, and never writes through a "
+    "hard link",
+    "[tools][fs][permission][57o]") {
+    // write_file renames a new file over the old (57o): that alone would
+    // replace a read-only file it used to refuse (the review), so it is asked
+    // first whether the file opens for writing.
+    const Sandbox box;
+    const std::filesystem::path locked = box.root / "ro.txt";
+    std::ofstream{locked, std::ios::binary} << "original";
+    std::filesystem::permissions(locked,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::group_read |
+                                     std::filesystem::perms::others_read,
+                                 std::filesystem::perm_options::replace);
+    const bool unwritable =
+        !std::fstream{locked, std::ios::in | std::ios::out | std::ios::binary}.is_open();
+    if (unwritable) {  // not so for root, who may write anything
+        const ToolOutcome refused =
+            box.run("write_file", R"({"path":"ro.txt","content":"overwritten"})");
+        CHECK(refused.is_error);
+        CHECK(refused.content.find("for writing") != std::string::npos);
+        std::ifstream kept{locked, std::ios::binary};
+        CHECK(std::string{std::istreambuf_iterator<char>{kept}, {}} == "original");
+    }
+    std::filesystem::permissions(locked, std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
+
+    // A hard link to a file outside the root: the write lands at the name
+    // in the root, and the file outside keeps what it held.
+    std::ofstream{box.outside / "shared.txt", std::ios::binary} << "outside";
+    std::error_code code;
+    std::filesystem::create_hard_link(box.outside / "shared.txt", box.root / "hl.txt", code);
+    if (code) {
+        SKIP("a hard link cannot be made here: " << code.message());
+    }
+    REQUIRE_FALSE(box.run("write_file", R"({"path":"hl.txt","content":"inside"})").is_error);
+    std::ifstream inside{box.root / "hl.txt", std::ios::binary};
+    CHECK(std::string{std::istreambuf_iterator<char>{inside}, {}} == "inside");
+    std::ifstream shared{box.outside / "shared.txt", std::ios::binary};
+    CHECK(std::string{std::istreambuf_iterator<char>{shared}, {}} == "outside");
 }
 
 TEST_CASE("read_file returns the text, and a file past the cap as its size instead",

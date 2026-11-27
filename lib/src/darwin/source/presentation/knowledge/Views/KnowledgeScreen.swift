@@ -90,13 +90,16 @@ struct RecordsView: View {
                     TextField("Ask the records", text: $model.question)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { Task { await model.search() } }
-                    if model.query != nil { Button("Clear") { model.clearSearch() } }
+                    if model.asked != nil { Button("Clear") { model.clearSearch() } }
                     Picker("Branch", selection: $model.branch) {
                         Text("Every branch").tag(String?.none)
                         ForEach(KnowledgeRecord.statuses, id: \.self) { Text($0.capitalized).tag(String?.some($0)) }
                     }
                     .labelsHidden()
                     .fixedSize()
+                    // A question standing is asked again under the branch
+                    // picked, never left answering the old one (GUI 6h).
+                    .onChange(of: model.branch) { Task { await model.branchChanged() } }
                 }
                 .padding(Spacing.m)
                 if let run = model.run {
@@ -142,7 +145,11 @@ struct RecordsView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete the record and its archive", role: .destructive) { Task { await model.confirmDelete() } }
+            // The record is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pendingDelete {
+                Button("Delete the record and its archive", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text("apogee knowledge delete \(model.pendingDelete?.id ?? "") -- the record and its raw conversation are removed; this can't be undone.")
@@ -321,7 +328,9 @@ struct CollectionsView: View {
             isPresented: Binding(get: { model.pendingDelete != nil }, set: { if !$0 { model.pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { Task { await model.confirmDelete() } }
+            if let answer = model.pendingDelete {
+                Button("Delete", role: .destructive) { Task { await model.confirmDelete(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pendingDelete = nil }
         } message: {
             Text("apogee " + (model.pendingDelete?.arguments.joined(separator: " ") ?? "") + " -- this can't be undone.")
@@ -670,6 +679,16 @@ struct IngestSheet: View {
 
 #Preview("A text-only collection") {
     CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.notes)
+        .frame(width: 720, height: 560)
+}
+
+#Preview("A vectorised collection: its vectors, their width and model") {
+    CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.vectorised)
+        .frame(width: 720, height: 560)
+}
+
+#Preview("A collection whose vectors come from two models") {
+    CollectionPage(model: KnowledgePreview.collections(), info: KnowledgePreview.mixed)
         .frame(width: 720, height: 560)
 }
 

@@ -1,6 +1,7 @@
 #include "tools/shell.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -266,4 +267,40 @@ TEST_CASE("a command printing megabytes returns its ends in under 17 KiB", "[too
     CHECK(outcome.content.starts_with("line 000001 "));
     CHECK(outcome.content.ends_with("line 100000 " + std::string(44, 'x') + "\n[exit 0]"));
     CHECK(omitted_count(outcome.content) > 5'000'000);
+}
+
+TEST_CASE("run_command's prompt has the command whole and where it runs; the target stays cut",
+          "[tools][shell][permission][57p]") {
+    // The sweep's entry 2: the prompt showed the first 77 characters, and the
+    // tail ran unseen. The target keeps its form -- the ledger, the task
+    // narration and `always` are unchanged -- and the detail says it all.
+    const apogee::testing::TempDir temp{"tools-shell-d-" + std::to_string(std::random_device{}())};
+    ToolRegistry registry;
+    apogee::tools::register_shell_tool(registry, temp.path(), std::chrono::seconds{10});
+    const apogee::agent::Tool* tool = registry.find("run_command");
+    REQUIRE(tool != nullptr);
+    REQUIRE(tool->describe_detail);
+    const std::string command =
+        "echo checking the build status of the project before continuing with tests;   "
+        "touch PWNED-and-the-rest-of-the-payload-that-the-prompt-never-showed";
+    REQUIRE(command.size() > 130);
+    const std::filesystem::path elsewhere = temp.path() / "elsewhere";
+    const std::string arguments =
+        nlohmann::json{{"command", command}, {"cwd", elsewhere.string()}}.dump();
+
+    const std::string target = tool->describe_target(arguments);
+    CHECK(target == command.substr(0, 77) + "...");
+    CHECK(tool->describe_detail(arguments) == command + "\ncwd: " + elsewhere.string());
+    // No cwd given: the default it runs in, named.
+    CHECK(tool->describe_detail(nlohmann::json{{"command", "make"}}.dump()) ==
+          "make\ncwd: " + temp.path().string());
+    // A relative one says where it lands.
+    const std::string relative =
+        tool->describe_detail(nlohmann::json{{"command", "make"}, {"cwd", "sub"}}.dump());
+    CHECK(relative.starts_with("make\ncwd: "));
+    CHECK(std::filesystem::path{relative.substr(10)}.is_absolute());
+    CHECK(relative.ends_with("sub"));
+    // Nothing to describe for a call that cannot run.
+    CHECK(tool->describe_detail("not json").empty());
+    CHECK(tool->describe_detail(R"({"command":""})").empty());
 }

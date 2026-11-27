@@ -94,6 +94,13 @@ struct VideoViewModelTests {
 
         #expect(VideoViewModel.installCommand(in: "no runtime -- apogee train setup --with voice.") == ["train", "setup", "--with", "voice"])
         #expect(VideoViewModel.installCommand(in: "a failure of another kind") == nil)
+        // M19: a refusal naming the rebuild is the rebuild, answered by the
+        // sheet -- the CLI asks only at a terminal, which the app is not.
+        let rebuild = VideoViewModel.installCommand(
+            in: "apogee train: the Python environment at /h/venv is on Python 3.14.5, and the 'video' set runs on >=3.10 -- rebuild it on a Python that fits: apogee train setup --rebuild --with video")
+        #expect(rebuild == ["train", "setup", "--rebuild", "--yes", "--with", "video"])
+        #expect(InstallConsent(arguments: rebuild ?? [], said: "").rebuilds)
+        #expect(!InstallConsent(arguments: ["train", "setup", "--with", "video"], said: "").rebuilds)
     }
 
     @Test("run again and continue are --from the record and --extend the clip")

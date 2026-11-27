@@ -5,6 +5,9 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
+
+#include "modelstore/snapshot.h"
 
 /// The record written beside every acquired model: where it came from, and
 /// what it is.
@@ -133,6 +136,17 @@ struct Sidecar {
 /// written only AFTER its model is in place, so a sidecar never describes a
 /// file that is not there.
 [[nodiscard]] bool write_sidecar(const std::filesystem::path& model, const Sidecar& sidecar);
+
+/// The record beside a stored GGUF -- a model or its projector -- once the
+/// model its source lies in is stored under a new name (57i): a `ref` that
+/// is a handle naming a set of `from`, what a GGUF conversion and a
+/// quantization record their source by, names the same set under `to`
+/// (`renamed_handle`), written back through `write_sidecar` -- only when the
+/// record re-serializes byte for byte as it reads, else left and `Failed`,
+/// the guard `rename_snapshot_base` keeps. A pull's `ref` is never a handle,
+/// and is never touched.
+[[nodiscard]] BaseRename rename_sidecar_ref(const std::filesystem::path& model,
+                                            std::string_view from, std::string_view to);
 
 /// Told the bytes hashed so far as a file is hashed; returning false stops it.
 using HashProgress = std::function<bool(std::int64_t hashed)>;

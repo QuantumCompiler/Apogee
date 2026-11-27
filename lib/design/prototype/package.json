@@ -1,0 +1,42 @@
+{
+  "name": "apogee-design",
+  "private": true,
+  "description": "The Apogee design prototype: a layered React app built into one self-contained lib/design/main.html.",
+  "type": "module",
+  "engines": {
+    "node": "26.x"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --project unit",
+    "layering": "vitest run --project layering",
+    "stale": "vitest run --project bundle",
+    "e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run layering && npm run stale && npm run e2e",
+    "baseline": "node scripts/baseline.ts",
+    "parity": "node scripts/parity.ts",
+    "capture": "node scripts/capture.ts"
+  },
+  "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "playwright": "1.64.1",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vite-plugin-singlefile": "2.3.4",
+    "vitest": "5.1.0"
+  }
+}

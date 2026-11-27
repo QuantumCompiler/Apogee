@@ -38,8 +38,30 @@ std::string percent_of(double score) {
     return std::to_string(static_cast<int>(std::lround(score * 100.0))) + "%";
 }
 
+/// A live holder's refusal, the same words a resume check and a run that
+/// lost the lock to it say.
+std::string held_refusal(std::string_view id, const platform::PidLock::Holder& holder) {
+    return "pipeline " + std::string{id} + " is " + pipeline_holder_text(holder) +
+           " -- it cannot be resumed while it runs; 'apogee train pipeline status " +
+           std::string{id} + "' shows how far it has got";
+}
+
+/// The pipeline's lock for the whole run (57g): taken over from a dead
+/// holder, so a crashed run resumes with nothing to delete; refused while a
+/// live one has it. nullopt with `error` set.
+std::optional<platform::PidLock> take_pipeline_lock(const std::filesystem::path& pipeline_dir,
+                                                    std::string_view id, std::string& error) {
+    platform::PidLock::Refusal refusal;
+    std::optional<platform::PidLock> lock = platform::PidLock::acquire(
+        pipeline_dir / kPipelineLockFileName, id, /*take_stale=*/true, refusal);
+    if (!lock.has_value()) {
+        error = refusal.holder.has_value() ? held_refusal(id, *refusal.holder) : refusal.error;
+    }
+    return lock;
+}
+
 /// The whole orchestration, shared by `run_pipeline` and `resume_pipeline`:
-/// every stage from the first unpassed one.
+/// every stage from `resume_from()` on.
 class StageRunner {
 public:
     StageRunner(const PipelineRequest& request, PipelineRunManifest manifest)
@@ -50,17 +72,12 @@ public:
 
     [[nodiscard]] PipelineOutcome run() {
         const harness::PipelineSpec& spec = *request_.spec;
-        // The resume point: after the last passed stage, from its fused
-        // checkpoint when it left one.
-        std::size_t resume_from = 0;
+        // The resume point every surface reports (57h): after the last passed
+        // stage, from its fused checkpoint when it left one.
+        const std::size_t resume_from = manifest_.resume_from();
         std::filesystem::path current_base{manifest_.base_model};
-        for (std::size_t i = 0; i < manifest_.stages.size(); ++i) {
-            if (manifest_.stages[i].status == kStagePassed) {
-                resume_from = i + 1;
-                if (!manifest_.stages[i].fused_dir.empty()) {
-                    current_base = manifest_.stages[i].fused_dir;
-                }
-            }
+        if (resume_from > 0 && !manifest_.stages[resume_from - 1].fused_dir.empty()) {
+            current_base = manifest_.stages[resume_from - 1].fused_dir;
         }
         manifest_.status = std::string{kPipelineRunning};
         if (const std::string failure = save(); !failure.empty()) {
@@ -99,7 +116,7 @@ public:
                 }
             }
             record.dataset = dataset.string();
-            // A stage trained again -- a resume's first unpassed -- holds no
+            // A stage trained again -- a resume's `resume_from()` -- holds no
             // score until it is evaluated again (M30): the last attempt's
             // eval, its gate and the weights it left are not this attempt's.
             record.eval.reset();
@@ -245,13 +262,13 @@ public:
                     "[gate] stage '" + stage.name + "' FAILED the cumulative eval -- " + tally);
                 record.status = std::string{kStageFailed};
                 if (request_.gate_mode == GateMode::Hard && !request_.continue_on_fail) {
-                    return finish(kPipelineAborted,
-                                  "pipeline aborted -- stage '" + stage.name +
-                                      "' failed the cumulative eval gate (" + tally +
-                                      "). Fix the data or the suite and 'apogee train pipeline "
-                                      "resume " +
-                                      manifest_.pipeline_run_id +
-                                      "', or pass --continue-on-fail to go on regardless");
+                    // Why the stage stopped, and nothing more (57h): the
+                    // verb that ran it adds its own door, so the cycle, which
+                    // reuses this runner, never relays one.
+                    gate_failed_ = true;
+                    return finish(kPipelineAborted, "pipeline aborted -- stage '" + stage.name +
+                                                        "' failed the cumulative eval gate (" +
+                                                        tally + ")");
                 }
                 say(index, stage.name, kStageEvaluating,
                     request_.continue_on_fail
@@ -324,6 +341,7 @@ private:
         }
         outcome.ok = status == kPipelineComplete && error.empty();
         outcome.cancelled = cancelled;
+        outcome.gate_failed = gate_failed_;
         outcome.error = std::move(error);
         outcome.manifest = manifest_;
         return outcome;
@@ -333,6 +351,7 @@ private:
     PipelineRunManifest manifest_;
     std::filesystem::path pipeline_dir_;
     std::filesystem::path runs_dir_;
+    bool gate_failed_ = false;
 };
 
 }  // namespace
@@ -347,13 +366,25 @@ int PipelineRunManifest::last_passed() const noexcept {
     return last;
 }
 
-std::size_t PipelineRunManifest::first_unpassed() const noexcept {
+std::size_t PipelineRunManifest::resume_from() const noexcept {
+    std::size_t from = 0;
     for (std::size_t i = 0; i < stages.size(); ++i) {
-        if (stages[i].status != kStagePassed) {
-            return i;
+        if (stages[i].status == kStagePassed) {
+            from = i + 1;
         }
     }
-    return stages.size();
+    return from;
+}
+
+std::vector<std::size_t> PipelineRunManifest::kept_failed() const {
+    std::vector<std::size_t> kept;
+    const std::size_t from = resume_from();
+    for (std::size_t i = 0; i < from; ++i) {
+        if (stages[i].status != kStagePassed) {
+            kept.push_back(i);
+        }
+    }
+    return kept;
 }
 
 std::string PipelineRunManifest::promote_run_id() const {
@@ -389,6 +420,11 @@ nlohmann::json pipeline_manifest_to_json(const PipelineRunManifest& manifest) {
     if (!manifest.completed_at.empty()) {
         out["completed_at"] = manifest.completed_at;
     }
+    // Additive (57h): a manifest written before it has none, and reads back
+    // the same.
+    if (!manifest.spec_ref.empty()) {
+        out["spec_ref"] = manifest.spec_ref;
+    }
     return out;
 }
 
@@ -402,6 +438,7 @@ PipelineRunManifest pipeline_manifest_from_json(const nlohmann::json& json) {
         throw std::runtime_error("pipeline manifest: no pipeline_run_id");
     }
     manifest.spec_name = json.value("spec_name", std::string{});
+    manifest.spec_ref = json.value("spec_ref", std::string{});
     manifest.student = json.value("student", std::string{});
     manifest.base_model = json.value("base_model", std::string{});
     manifest.status = json.value("status", std::string{kPipelineRunning});
@@ -469,9 +506,15 @@ std::optional<PipelineRunManifest> read_pipeline_manifest(const std::filesystem:
         error = path.string() + " is not JSON";
         return std::nullopt;
     }
+    // A field of the wrong type throws the library's own error, which is not
+    // a runtime_error (57h): caught beside it, so the file is named and a
+    // list can skip it.
     try {
         return pipeline_manifest_from_json(json);
     } catch (const std::runtime_error& e) {
+        error = path.string() + ": " + e.what();
+        return std::nullopt;
+    } catch (const nlohmann::json::exception& e) {
         error = path.string() + ": " + e.what();
         return std::nullopt;
     }
@@ -479,6 +522,62 @@ std::optional<PipelineRunManifest> read_pipeline_manifest(const std::filesystem:
 
 std::string stage_run_id(std::string_view pipeline_run_id, int index) {
     return std::string{pipeline_run_id} + "-s" + std::to_string(index);
+}
+
+bool is_cycle_pass(std::string_view pipeline_run_id) noexcept {
+    return pipeline_run_id.starts_with(kCycleIdPrefix);
+}
+
+ResumeSpec find_resume_spec(
+    const PipelineRunManifest& manifest,
+    const std::map<std::string, harness::PipelineSpec, std::less<>>& pipelines) {
+    ResumeSpec found;
+    if (!manifest.spec_ref.empty()) {
+        // A spec file is recorded by its absolute path; a key never is one.
+        if (const std::filesystem::path file{manifest.spec_ref}; file.is_absolute()) {
+            std::error_code code;
+            if (std::filesystem::is_regular_file(file, code)) {
+                found.ref = manifest.spec_ref;
+            } else {
+                found.problem = "pipeline " + manifest.pipeline_run_id +
+                                " ran from the spec file " + manifest.spec_ref +
+                                ", which is not there any more";
+            }
+            return found;
+        }
+        if (pipelines.contains(manifest.spec_ref)) {
+            found.ref = manifest.spec_ref;
+            return found;
+        }
+    }
+    if (pipelines.contains(manifest.spec_name)) {
+        found.ref = manifest.spec_name;
+        return found;
+    }
+    std::vector<std::string> named;
+    for (const auto& [key, spec] : pipelines) {
+        if (!manifest.spec_name.empty() && spec.name == manifest.spec_name) {
+            named.push_back(key);
+        }
+    }
+    if (named.size() == 1) {
+        found.ref = named.front();
+        return found;
+    }
+    if (named.size() > 1) {
+        std::string keys;
+        for (const std::string& key : named) {
+            keys += (keys.empty() ? "'" : ", '") + key + "'";
+        }
+        found.problem = "pipeline '" + manifest.spec_name +
+                        "' is the name of more than one entry under training.pipelines (" + keys +
+                        ")";
+        return found;
+    }
+    found.problem = "pipeline '" +
+                    (manifest.spec_ref.empty() ? manifest.spec_name : manifest.spec_ref) +
+                    "' is not under training.pipelines any more";
+    return found;
 }
 
 PipelineOutcome run_pipeline(const PipelineRequest& request) {
@@ -503,6 +602,7 @@ PipelineOutcome run_pipeline(const PipelineRequest& request) {
     PipelineRunManifest manifest;
     manifest.pipeline_run_id = request.pipeline_run_id;
     manifest.spec_name = request.spec->name;
+    manifest.spec_ref = request.spec_ref;
     manifest.student = request.spec->student;
     manifest.base_model = request.base_model.string();
     manifest.started_at = rfc3339_now();
@@ -514,12 +614,78 @@ PipelineOutcome run_pipeline(const PipelineRequest& request) {
         record.dataset = stage.dataset;
         manifest.stages.push_back(std::move(record));
     }
+    std::string held;
+    const std::optional<platform::PidLock> lock =
+        take_pipeline_lock(request.training_dir / kPipelinesDirName / request.pipeline_run_id,
+                           request.pipeline_run_id, held);
+    if (!lock.has_value()) {
+        outcome.error = held;
+        return outcome;
+    }
     return StageRunner{request, std::move(manifest)}.run();
 }
 
-std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec) {
+std::optional<platform::PidLock::Holder> pipeline_holder(
+    const std::filesystem::path& pipeline_dir) {
+    std::optional<platform::PidLock::Holder> holder =
+        platform::PidLock::holder(pipeline_dir / kPipelineLockFileName);
+    // A file that names no process is never taken over, so it holds the
+    // pipeline as surely as a running one.
+    if (holder.has_value() && !holder->running && holder->pid != 0) {
+        return std::nullopt;
+    }
+    return holder;
+}
+
+std::string pipeline_holder_text(const platform::PidLock::Holder& holder) {
+    return holder.pid > 0 ? "running now (process " + std::to_string(holder.pid) + ")"
+                          : std::string{"running now (its lock names no process it can read)"};
+}
+
+std::string resume_refusal(const PipelineRunManifest& existing) {
     if (existing.complete()) {
         return "pipeline " + existing.pipeline_run_id + " is already complete";
+    }
+    // Not complete and no live holder: the pass ended without a candidate
+    // the cycle promoted, so its candidate was discarded (57h).
+    if (is_cycle_pass(existing.pipeline_run_id)) {
+        return "pipeline " + existing.pipeline_run_id +
+               " is a cycle pass, and its candidate was discarded -- 'apogee train cycle run' "
+               "runs the next pass";
+    }
+    return {};
+}
+
+std::string resume_refusal(const PipelineRunManifest& existing,
+                           const std::filesystem::path& training_dir) {
+    if (const std::optional<platform::PidLock::Holder> holder =
+            pipeline_holder(training_dir / kPipelinesDirName / existing.pipeline_run_id);
+        holder.has_value()) {
+        return held_refusal(existing.pipeline_run_id, *holder);
+    }
+    if (std::string refusal = resume_refusal(existing); !refusal.empty()) {
+        return refusal;
+    }
+    // The snapshot it trains from, deleted since it began (`models delete`):
+    // no spec brings it back.
+    std::error_code code;
+    if (!std::filesystem::is_directory(existing.base_model, code)) {
+        return "the run's snapshot is gone: " + existing.base_model;
+    }
+    return {};
+}
+
+std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec,
+                         const std::filesystem::path& training_dir) {
+    if (const std::string refusal = resume_refusal(existing, training_dir); !refusal.empty()) {
+        return refusal;
+    }
+    return resume_check(existing, spec);
+}
+
+std::string resume_check(const PipelineRunManifest& existing, const harness::PipelineSpec& spec) {
+    if (const std::string refusal = resume_refusal(existing); !refusal.empty()) {
+        return refusal;
     }
     if (spec.stages.size() != existing.stages.size()) {
         return "the spec has " + std::to_string(spec.stages.size()) + " stage(s) but pipeline " +
@@ -536,6 +702,28 @@ PipelineOutcome resume_pipeline(const PipelineRequest& request, PipelineRunManif
         outcome.error = request.spec == nullptr ? "the pipeline spec has no stages" : "no trainer";
         return outcome;
     }
+    if (!valid_run_id(existing.pipeline_run_id)) {
+        outcome.error = "'" + existing.pipeline_run_id + "' is not a pipeline run id";
+        outcome.manifest = std::move(existing);
+        return outcome;
+    }
+    const std::filesystem::path dir =
+        request.training_dir / kPipelinesDirName / existing.pipeline_run_id;
+    std::string held;
+    const std::optional<platform::PidLock> lock =
+        take_pipeline_lock(dir, existing.pipeline_run_id, held);
+    if (!lock.has_value()) {
+        outcome.error = held;
+        outcome.manifest = std::move(existing);
+        return outcome;
+    }
+    // The record as it reads under the lock: a holder that finished between
+    // the caller's read and this has moved it on.
+    std::string unread;
+    if (std::optional<PipelineRunManifest> current = read_pipeline_manifest(dir, unread);
+        current.has_value()) {
+        existing = std::move(*current);
+    }
     if (const std::string refusal = resume_check(existing, *request.spec); !refusal.empty()) {
         outcome.error = refusal;
         outcome.manifest = std::move(existing);
@@ -545,6 +733,11 @@ PipelineOutcome resume_pipeline(const PipelineRequest& request, PipelineRunManif
         outcome.error = "the spec has " + std::to_string(request.spec->stages.size()) +
                         " stage(s) but " + std::to_string(request.stages.size()) + " were resolved";
         return outcome;
+    }
+    // The spec this resume was handed by name is the one the next resume
+    // tries first (57h).
+    if (!request.spec_ref.empty()) {
+        existing.spec_ref = request.spec_ref;
     }
     return StageRunner{request, std::move(existing)}.run();
 }

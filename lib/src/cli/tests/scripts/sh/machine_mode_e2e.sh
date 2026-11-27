@@ -394,21 +394,222 @@ assert refused.returncode == 1 and "compaction by broken failed: " in refused.st
 print("record-truth: compaction, numbering, resume notices and outside edits told truly - OK")
 PY
 
+# --- a deleted chat stays deleted, a private one leaves nothing (57a) ---------
+# The second bug sweep's probes, on the real binary in a home of its own and a
+# temporary directory of its own: a private driven chat -- a driver's hello,
+# an attachment, a turn, a compact -- leaves the data directory byte for byte
+# as it was, `logs/` included; ended by SIGTERM or SIGHUP while idle, it
+# still ends by that signal, and leaves no `apogee-private-*` folder behind;
+# one a killed run left is swept by the next private chat -- even one whose
+# pid that chat was given again, which never indexes into it; and a resumed
+# chat deleted from outside, then closed with no turn, says so once.
+GN_HOME="$WORK_DIR/gone"
+GN_TMP="$WORK_DIR/gone-tmp"
+mkdir -p "$GN_HOME" "$GN_TMP"
+gn() { APOGEE_HOME="$GN_HOME" TMPDIR="$GN_TMP" "$APOGEE_BIN" "$@" </dev/null >/dev/null; }
+gn config init || fail "gone: config init"
+gn config add-backend mock --type mock --model mock-1 || fail "gone: add mock"
+gn config set-default mock || fail "gone: set-default"
+printf 'zebra private attachment text\n' >"$WORK_DIR/gone-note.txt"
+python3 - "$APOGEE_BIN" "$GN_HOME" "$GN_TMP" "$WORK_DIR/gone-note.txt" <<'PY' || fail "a deleted or private chat left something behind"
+import json, os, signal, subprocess, sys, time
+
+binary, home, tmp, note = sys.argv[1:5]
+env = {**os.environ, "APOGEE_HOME": home, "TMPDIR": tmp}
+
+def tree():
+    out = {}
+    for root, dirs, files in os.walk(home):
+        for name in dirs:
+            out[os.path.relpath(os.path.join(root, name), home) + "/"] = b""
+        for name in files:
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                out[os.path.relpath(path, home)] = f.read()
+    return out
+
+def private_left():
+    return sorted(n for n in os.listdir(tmp) if n.startswith("apogee-private-"))
+
+opening = [{"type": "hello", "client": {"name": "e2e-host"}},
+           {"type": "attach", "path": note},
+           {"type": "user", "text": "first question"}]
+
+def private_child():
+    child = subprocess.Popen([binary, "chat", "--private", "--output-format", "stream-json",
+                              "--input-format", "stream-json"], env=env, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    for line in opening:
+        child.stdin.write(json.dumps(line) + "\n")
+    child.stdin.flush()
+    while True:
+        line = child.stdout.readline()
+        assert line, "the private chat ended early: " + child.stderr.read()
+        if json.loads(line)["type"] in ("result", "error"):
+            return child
+
+before = tree()
+
+# A clean close: nothing under the home, and its folder gone with it.
+text = "".join(json.dumps(l) + "\n" for l in opening + [{"type": "compact"}])
+got = subprocess.run([binary, "chat", "--private", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, input=text,
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+assert private_left() == [], private_left()
+
+# Ended by a signal while idle: still ended by that signal, and no folder.
+for signum in (signal.SIGTERM, signal.SIGHUP):
+    child = private_child()
+    held = private_left()
+    assert len(held) == 1, held  # the run's own, while it runs
+    child.send_signal(signum)
+    code = child.wait(timeout=30)
+    assert code == -signum, (signum, code, child.stderr.read())
+    assert private_left() == [], (signum, private_left())
+
+# A run killed outright leaves its folder; the next private chat's opening
+# sweeps it -- and leaves a live run's.
+child = private_child()
+held = private_left()
+assert len(held) == 1, held
+child.kill()
+child.wait(timeout=30)
+assert private_left() == held, private_left()
+live = private_child()
+got = subprocess.run([binary, "chat", "--private", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, input=text,
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+left = private_left()
+assert held[0] not in left, left
+assert len(left) == 1 and left[0].startswith("apogee-private-%d-" % live.pid), left
+live.stdin.close()
+assert live.wait(timeout=30) == 0, live.stderr.read()
+assert private_left() == [], private_left()
+
+# A run killed outright whose id the next private chat is given again -- a
+# reused pid, a restarted container's apogee always the same one: the folder
+# it left under that id is no folder of the new run's. Its attachment's text
+# never reaches the new conversation, and the folder does not survive it.
+# `sh` renames the leftover for its own pid, then `exec`s the chat in place.
+work = os.path.dirname(note)
+secret = os.path.join(work, "gone-secret.txt")
+with open(secret, "w") as f:
+    f.write("the zebra launch code is 7741 confidential\n")
+other = os.path.join(work, "gone-other.txt")
+with open(other, "w") as f:
+    f.write("a short note about giraffes and their long necks\n")
+driven = ["chat", "--private", "--output-format", "stream-json", "--input-format", "stream-json"]
+child = subprocess.Popen([binary] + driven, env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+for line in ({"type": "attach", "path": secret}, {"type": "user", "text": "keep this safe"}):
+    child.stdin.write(json.dumps(line) + "\n")
+child.stdin.flush()
+while json.loads(child.stdout.readline() or '{"type": "error"}')["type"] not in ("result", "error"):
+    pass
+held = private_left()
+assert len(held) == 1, held
+child.kill()
+child.wait(timeout=30)
+assert private_left() == held, private_left()
+asked = [{"type": "attach", "path": other},
+         {"type": "user", "text": "what is the zebra launch code?"}]
+got = subprocess.run(["sh", "-c", 't=$1 p=$2 b=$3; shift 3; '
+                      'mv "$t/$p" "$t/apogee-private-$$-1" && exec "$b" "$@"', "sh",
+                      tmp, held[0], binary] + driven, env=env,
+                     input="".join(json.dumps(l) + "\n" for l in asked),
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+reused = [json.loads(l) for l in got.stdout.splitlines() if l.strip()]
+named = [s["file"] for e in reused if e["type"] == "sources" for s in e["sources"]]
+assert all("gone-secret" not in n for n in named), named
+assert "gone-secret" not in got.stdout and "7741" not in got.stdout, got.stdout
+assert private_left() == [], private_left()
+
+# Nothing of any of them under the home: no log line naming one, no hello.
+after = tree()
+assert after == before, sorted(set(after) ^ set(before))
+
+# A resumed chat deleted from outside, closed with no turn: said once.
+lines = [{"type": "user", "text": "first q"}, {"type": "user", "text": "second q"}]
+got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env,
+                     input="".join(json.dumps(l) + "\n" for l in lines),
+                     capture_output=True, text=True, timeout=60)
+assert got.returncode == 0, got.stderr
+chat_id = json.loads(got.stdout.splitlines()[0])["chat_id"]
+child = subprocess.Popen([binary, "chat", "--output-format", "stream-json", "--input-format",
+                          "stream-json", "--resume", chat_id], env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+opened = json.loads(child.stdout.readline())
+assert opened["type"] == "session" and opened["chat_id"] == chat_id, opened
+deleted = subprocess.run([binary, "chats", "delete", chat_id], env=env, capture_output=True,
+                         text=True, stdin=subprocess.DEVNULL, timeout=60)
+assert deleted.stdout.strip() == "deleted " + chat_id, deleted
+child.stdin.close()
+rest = [json.loads(l) for l in child.stdout.read().splitlines() if l.strip()]
+assert child.wait(timeout=60) == 0, child.stderr.read()
+said = [e["text"] for e in rest if e["type"] == "notice"]
+assert said == ["chat " + chat_id + " was deleted while this session ran -- it stays deleted, "
+                "and nothing more of it is saved"], rest
+assert not os.path.exists(os.path.join(home, "sessions", chat_id + ".json"))
+print("gone: deleted and private chats leave nothing, on every close - OK")
+PY
+
+# --- a session's MCP warnings reach the driver (56b) ---------------------------
+# A driver reads no stderr: a configured server that will not start was said
+# there alone. Now what the startup said that stays -- each warning -- is one
+# `notice` after the `session` event, the dying server's last line in it once;
+# stderr keeps it as before, and the server that connected is no notice.
+MW_HOME="$WORK_DIR/mcp-warnings"
+mkdir -p "$MW_HOME"
+printf '#!/bin/sh\necho "fatal: no upstream" >&2\nexit 1\n' >"$MW_HOME/dying.sh"
+chmod +x "$MW_HOME/dying.sh"
+mw() { APOGEE_HOME="$MW_HOME" "$APOGEE_BIN" "$@" </dev/null >/dev/null; }
+mw config init || fail "mcp-warnings: config init"
+mw config add-backend mock --type mock --model mock-1 || fail "mcp-warnings: add mock"
+mw config set-default mock || fail "mcp-warnings: set-default"
+mw mcp create dying --command "$MW_HOME/dying.sh" || fail "mcp-warnings: register dying"
+mw mcp create self --command "$APOGEE_BIN" --args mcp serve || fail "mcp-warnings: register self"
+APOGEE_HOME="$MW_HOME" "$APOGEE_BIN" chat --tools --private --output-format stream-json \
+    --input-format stream-json </dev/null >"$MW_HOME/out.jsonl" 2>"$MW_HOME/err.txt" \
+    || fail "mcp-warnings: the driven chat failed: $(cat "$MW_HOME/err.txt")"
+python3 - "$MW_HOME/out.jsonl" "$MW_HOME/err.txt" <<'PY' || fail "a session's MCP warnings did not reach the driver"
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert events and events[0]["type"] == "session", events
+said = [e["text"] for e in events if e["type"] == "notice" and "[mcp]" in e["text"]]
+assert len(said) == 1, said
+assert said[0].startswith("[mcp] warning: dying: connect failed (skipped)"), said
+assert said[0].count("fatal: no upstream") == 1, said
+assert "connected" not in said[0] and "connecting" not in said[0], said
+assert "[mcp] warning: dying: connect failed" in open(sys.argv[2]).read()
+print("mcp-warnings: one notice after the session, stderr as before - OK")
+PY
+
 # --- turn ids and cancel (28f) ------------------------------------------------
 # A driver over real pipes: every turn-scoped event carries its turn; a cancel
 # with nothing in flight changes nothing; a cancel mid-stream ends the turn in
 # one `result` with finish_reason `cancelled` and the text streamed so far, the
 # half-turn kept out of the saved session, and the same child answers the next
-# turn; a cancel while a question waits fails the turn the same way; a turn
-# that fails ends in `error`, never a `result` carrying the user's own words.
+# turn; a cancel while a question waits fails the turn the same way, and one
+# at a permission question ends the call it asks about `failed` first (56a); a
+# question a `delegate` sub-session asks names a call the stream reported, and
+# that call ends; a turn that fails ends in `error`, never a `result` carrying
+# the user's own words.
 TC_DIR="$WORK_DIR/turns"
 mkdir -p "$TC_DIR/bin"
 printf '%s' '{"turns":[{"text":"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffgggggggghhhhhhhh","delay_ms":150},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/slow.json"
 printf '%s' '{"turns":[{"text":"","tool_calls":[{"name":"ask_user","arguments":{"questions":[{"header":"Pick","question":"Which?","multi_select":false,"options":[{"label":"a","description":"A"},{"label":"b","description":"B"}]}]}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/asks.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"id":"w-1","name":"write_file","arguments":{"path":"never.txt","content":"x"}}]},{"text":"echo: {{last_user}}"}]}' >"$TC_DIR/writes.json"
+printf '%s' '{"turns":[{"text":"","tool_calls":[{"id":"d-1","name":"delegate","arguments":{"brief":"write sub.txt"}}]},{"text":"","tool_calls":[{"id":"s-1","name":"write_file","arguments":{"path":"sub.txt","content":"x"}}]},{"text":"sub: {{last_tool_result}}"},{"text":"delegated: {{last_tool_result}}"}]}' >"$TC_DIR/delegates.json"
 printf '#!/bin/sh\necho x\n' >"$TC_DIR/bin/ollama"
 chmod +x "$TC_DIR/bin/ollama"
 "$APOGEE_BIN" config add-backend slow --type mock --model-path "$TC_DIR/slow.json" >/dev/null || fail "add slow"
 "$APOGEE_BIN" config add-backend asks --type mock --model-path "$TC_DIR/asks.json" >/dev/null || fail "add asks"
+"$APOGEE_BIN" config add-backend writes --type mock --model-path "$TC_DIR/writes.json" >/dev/null || fail "add writes"
+"$APOGEE_BIN" config add-backend delegates --type mock --model-path "$TC_DIR/delegates.json" >/dev/null || fail "add delegates"
 "$APOGEE_BIN" config add-backend down --type ollama-cli --model m >/dev/null || fail "add down"
 python3 - "$APOGEE_HOME/config/config.json" "$TC_DIR/bin/ollama" <<'PY' || fail "could not point the down backend"
 import json, sys
@@ -419,17 +620,17 @@ assert entry in text
 text = text.replace(entry, entry + '      "host": "127.0.0.1:9",\n      "binary": ' + json.dumps(binary) + ',\n', 1)
 open(path, "w").write(text)
 PY
-python3 - "$APOGEE_BIN" "$APOGEE_HOME" <<'PY' || fail "turn ids and cancel"
+python3 - "$APOGEE_BIN" "$APOGEE_HOME" "$TC_DIR" <<'PY' || fail "turn ids and cancel"
 import glob, json, os, subprocess, sys, time
 
-binary, home = sys.argv[1], sys.argv[2]
+binary, home, folder = sys.argv[1], sys.argv[2], sys.argv[3]
 
 class Child:
-    def __init__(self, *args):
+    def __init__(self, *args, cwd=None):
         self.p = subprocess.Popen([binary, "chat", "--no-recall", "--output-format", "stream-json",
                                    "--input-format", "stream-json", *args],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1)
+                                  stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd)
     def send(self, obj):
         self.p.stdin.write(json.dumps(obj) + "\n")
         self.p.stdin.flush()
@@ -503,6 +704,55 @@ if again[-1].get("text") != "echo: again" or again[-1].get("turn") != 2:
     fail(f"the turn after a cancelled question: {again}")
 child.close()
 
+# A cancel while a permission question waits (56a): the call it asks about
+# ends `failed` before the turn's cancelled result -- no call is left
+# `pending` -- and nothing is written.
+child = Child("-m", "writes", "--tools", cwd=folder)
+child.read()
+child.send({"type": "user", "text": "write it"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("tool_call_id") != "w-1":
+    fail(f"no permission question for the write: {asked}")
+child.send({"type": "cancel"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or ended[-1].get("finish_reason") != "cancelled":
+    fail(f"the turn asked about a write did not end cancelled: {ended}")
+states = [e["state"] for e in asked + ended if e["type"] == "tool_call" and e.get("id") == "w-1"]
+if states != ["pending", "failed"]:
+    fail(f"a call cancelled at its question did not end failed: {states}")
+if os.path.exists(os.path.join(folder, "never.txt")):
+    fail("a write cancelled at its question ran")
+child.close()
+
+# A gated call inside a `delegate` sub-session (56a's review): its question
+# names a call the stream reported -- every `tool_call_id` names an id with
+# `tool_call` events before it -- and that call ends, `failed` when denied.
+child = Child("-m", "delegates", "--tools", cwd=folder)
+child.read()
+child.send({"type": "user", "text": "delegate it"})
+asked = child.until({"question", "result", "error"})
+if asked[-1]["type"] != "question" or asked[-1].get("tool_call_id") != "s-1":
+    fail(f"no permission question for the delegated write: {asked}")
+child.send({"type": "answer", "text": "no"})
+ended = child.until({"result", "error"})
+if ended[-1]["type"] != "result" or not ended[-1]["text"].startswith("delegated: "):
+    fail(f"the delegating turn did not end in its answer: {ended}")
+stream = asked + ended
+for at, event in enumerate(stream):
+    named = event.get("tool_call_id") if event["type"] == "question" else None
+    if named and not any(e["type"] == "tool_call" and e.get("id") == named
+                         for e in stream[:at]):
+        fail(f"a question names a call the stream never reported: {event}")
+def moves(call):
+    return [e["state"] for e in stream if e["type"] == "tool_call" and e.get("id") == call]
+if moves("s-1") != ["pending", "failed"]:
+    fail(f"the delegated write denied did not end failed: {moves('s-1')}")
+if moves("d-1") != ["pending", "running", "done"]:
+    fail(f"the delegation's own call moved {moves('d-1')}")
+if os.path.exists(os.path.join(folder, "sub.txt")):
+    fail("a delegated write denied ran")
+child.close()
+
 # A turn that fails ends in error, numbered -- one terminal event per line.
 child = Child("-m", "down")
 child.read()
@@ -513,7 +763,7 @@ if failed[-1]["type"] != "error" or failed[-1].get("turn") != 1:
 if any(e["type"] == "result" for e in failed):
     fail(f"a failed turn emitted a result: {failed}")
 child.close()
-print("turns: ids on every turn event, cancel mid-stream and mid-question, a failure an error - OK")
+print("turns: ids on every turn event, cancel mid-stream, mid-question and at a permission question, a delegated call's question named, a failure an error - OK")
 PY
 
 # --- a default that could not start says why (M26) -----------------------------
@@ -549,6 +799,254 @@ for name in ("chat.jsonl", "complete.jsonl"):
     events = [json.loads(line) for line in open(os.path.join(root, name)) if line.strip()]
     assert [e["message"] for e in events if e["type"] == "error"] == [expected], (name, events)
     assert not [e for e in events if e["type"] == "result"], (name, events)
+PY
+
+# --- a vendor CLI's failure says why (57b) ------------------------------------
+# The second bug sweep's probes, on the real binary: fake vendor binaries on a
+# path of their own, each saying what the real CLI says when it fails.
+#  - Gemini 0.46.0 ends every fatal error in a result whose `error` object says
+#    why: the `error` event carries its message, never `reported an error:
+#    error`.
+#  - A warning before a successful result is a notice, and the answer stands.
+#  - A first turn that fails signed out leaves no session behind: signed in,
+#    the same chat answers, on a fresh session told the whole history, never
+#    `--resume` of one the CLI never recorded.
+#  - Claude Code's expired login (is_error under subtype "success") reads in
+#    its own words on the conversation's turn, and as a title is no title.
+# Its own home, so no other section's config moves.
+VF_HOME="$WORK_DIR/vendor-failures"
+VF_STATE="$VF_HOME/state"
+mkdir -p "$VF_HOME/bin" "$VF_STATE"
+cat >"$VF_HOME/bin/gemini" <<EOF
+#!/bin/sh
+{ for arg in "\$@"; do printf '%s\n' "\$arg"; done; printf -- '--\n'; } >>"$VF_STATE/gemini-argv.log"
+echo "[STARTUP] Phase 'cleanup_ops' was started but never ended." >&2
+init='{"type":"init","timestamp":"2026-10-31T20:16:45.000Z","session_id":"s","model":"auto"}'
+answer() {
+    printf '%s\n' "\$init" \\
+        "{\"type\":\"message\",\"timestamp\":\"2026-10-31T20:16:46.000Z\",\"role\":\"assistant\",\"content\":\"\$1\",\"delta\":true}" \\
+        '{"type":"result","timestamp":"2026-10-31T20:16:46.100Z","status":"success","stats":{"input_tokens":3,"output_tokens":4}}'
+}
+case "\$(cat "$VF_STATE/gemini-mode")" in
+quota)
+    printf '%s\n' "\$init" \\
+        '{"type":"result","timestamp":"2026-10-31T20:16:46.000Z","status":"error","error":{"type":"QuotaError","message":"You have exhausted your daily quota on this model."},"stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0}}'
+    exit 1 ;;
+warning)
+    printf '%s\n' '{"type":"error","timestamp":"2026-10-31T20:16:45.500Z","severity":"warning","message":"Loop detected, stopping execution"}'
+    answer "Here is the answer."
+    exit 0 ;;
+login)
+    resume=""; sid=""; prev=""
+    for arg in "\$@"; do
+        case "\$prev" in --resume) resume="\$arg" ;; --session-id) sid="\$arg" ;; esac
+        prev="\$arg"
+    done
+    if [ ! -e "$VF_STATE/signed-in" ]; then
+        printf '%s\n' "\$init" \\
+            '{"type":"result","timestamp":"2026-10-31T20:16:46.000Z","status":"error","error":{"type":"FatalAuthenticationError","message":"Please sign in to continue."},"stats":{}}'
+        exit 41
+    fi
+    if [ -n "\$resume" ] && ! grep -qx "\$resume" "$VF_STATE/gemini-sessions" 2>/dev/null; then
+        echo "Error resuming session: No session found" >&2
+        exit 1
+    fi
+    [ -n "\$sid" ] && printf '%s\n' "\$sid" >>"$VF_STATE/gemini-sessions"
+    answer "Welcome back."
+    exit 0 ;;
+esac
+EOF
+cat >"$VF_HOME/bin/claude" <<EOF
+#!/bin/sh
+expired='{"type":"result","subtype":"success","is_error":true,"session_id":"expired-sess","result":"Failed to authenticate: OAuth session expired and could not be refreshed","num_turns":1}'
+case " \$* " in
+*" --input-format "*)
+    # The conversation's child: hears the question, then answers as Claude
+    # Code 2.1.289 does with an expired login.
+    read -r question
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"expired-sess","model":"claude-sonnet-5"}' \\
+        '{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]},"error":"authentication_failed","session_id":"expired-sess"}' \\
+        "\$expired" ;;
+*)
+    # A one-shot -- the title: logged, so its absence proves nothing unasked.
+    for last in "\$@"; do :; done
+    printf '%s\n' "\$last" >>"$VF_STATE/claude-one-shots.log"
+    printf '%s\n' "\$expired" ;;
+esac
+EOF
+chmod +x "$VF_HOME/bin/gemini" "$VF_HOME/bin/claude"
+vf() { APOGEE_HOME="$VF_HOME" "$APOGEE_BIN" "$@"; }
+vf config init >/dev/null || fail "vendor-failures: config init"
+vf config add-backend mock --type mock --model mock-1 >/dev/null || fail "vendor-failures: add mock"
+vf config set-default mock >/dev/null || fail "vendor-failures: set-default"
+vf config add-backend gem --type gemini-cli >/dev/null || fail "vendor-failures: add gem"
+vf config set-backend gem --binary "$VF_HOME/bin/gemini" >/dev/null || fail "vendor-failures: point gem"
+vf config add-backend claude --type claude-cli >/dev/null || fail "vendor-failures: add claude"
+vf config set-backend claude --binary "$VF_HOME/bin/claude" >/dev/null || fail "vendor-failures: point claude"
+vf config set-default-utility claude >/dev/null || fail "vendor-failures: set-default-utility"
+python3 - "$APOGEE_BIN" "$VF_HOME" "$VF_STATE" <<'PY' || fail "a vendor CLI's failure does not say why"
+import json, os, subprocess, sys
+
+binary, home, state = sys.argv[1], sys.argv[2], sys.argv[3]
+env = {**os.environ, "APOGEE_HOME": home}
+
+def mode(name):
+    with open(os.path.join(state, "gemini-mode"), "w") as out:
+        out.write(name)
+
+def events(text):
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+def complete(model, prompt):
+    got = subprocess.run([binary, "complete", "-m", model, "--output-format", "stream-json", prompt],
+                         env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                         timeout=60)
+    return got.returncode, events(got.stdout)
+
+def errors(stream):
+    return [e["message"] for e in stream if e["type"] == "error"]
+
+# Gemini's result-shaped failure, in its own words.
+mode("quota")
+code, stream = complete("gem", "hi")
+assert code != 0, stream
+said = errors(stream)
+assert len(said) == 1, stream
+assert "the Gemini CLI reported an error: You have exhausted your daily quota on this model." \
+    in said[0], said
+assert "reported an error: error" not in said[0], said
+assert not [e for e in stream if e["type"] == "result"], stream
+
+# A warning is a notice, and the answer stands.
+mode("warning")
+code, stream = complete("gem", "hi")
+assert code == 0, stream
+notices = [e["text"] for e in stream if e["type"] == "notice"]
+assert "the Gemini CLI warned: Loop detected, stopping execution" in notices, stream
+results = [e for e in stream if e["type"] == "result"]
+assert len(results) == 1 and results[0]["text"] == "Here is the answer.", stream
+assert not errors(stream), stream
+
+# A first turn that fails signed out; signed in, the same chat answers.
+mode("login")
+open(os.path.join(state, "gemini-argv.log"), "w").close()
+child = subprocess.Popen([binary, "chat", "-m", "gem", "--no-recall", "--output-format",
+                          "stream-json", "--input-format", "stream-json"], env=env,
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True)
+
+def ask(text):
+    child.stdin.write(json.dumps({"type": "user", "text": text}) + "\n")
+    child.stdin.flush()
+    seen = []
+    while True:
+        line = child.stdout.readline()
+        assert line, f"the chat ended mid-turn: {seen}"
+        event = json.loads(line)
+        seen.append(event)
+        if event["type"] in ("result", "error"):
+            return seen
+
+first = ask("my name is Zed")
+assert first[-1]["type"] == "error", first
+assert "Please sign in to continue." in first[-1]["message"], first
+open(os.path.join(state, "signed-in"), "w").close()
+second = ask("what is my name?")
+assert second[-1]["type"] == "result" and second[-1]["text"] == "Welcome back.", second
+child.stdin.close()
+assert child.wait(timeout=60) == 0
+runs = open(os.path.join(state, "gemini-argv.log")).read().split("--\n")
+runs = [run.splitlines() for run in runs if run.strip()]
+assert len(runs) == 2, runs
+assert "--session-id" in runs[1] and "--resume" not in runs[1], runs[1]
+asked = runs[1][runs[1].index("--prompt") + 1:]
+assert any("my name is Zed" in line for line in asked), runs[1]
+
+# Claude Code's expired login on the conversation's turn: its own words.
+code, stream = complete("claude", "hi")
+assert code != 0, stream
+said = errors(stream)
+assert len(said) == 1, stream
+assert ("the Claude CLI reported an error: Failed to authenticate: OAuth session expired and "
+        "could not be refreshed -- run claude in a terminal and sign in again with /login") \
+    in said[0], said
+assert "reported success" not in said[0], said
+
+# ...and as a title: no title, and the sentence nowhere in the chats list.
+got = subprocess.run([binary, "chat", "--no-recall", "--output-format", "stream-json",
+                      "--input-format", "stream-json"], env=env, capture_output=True, text=True,
+                     input=json.dumps({"type": "user", "text": "an ordinary question"}) + "\n",
+                     timeout=60)
+assert got.returncode == 0, got.stderr
+assert [e for e in events(got.stdout) if e["type"] == "result"], got.stdout
+assert os.path.getsize(os.path.join(state, "claude-one-shots.log")) > 0, \
+    "the utility was never asked for a title -- the absence below proves nothing"
+for flags in ([], ["--output-format", "json"]):
+    listed = subprocess.run([binary, "chats", "list", *flags], env=env, capture_output=True,
+                            text=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert listed.returncode == 0, listed.stderr
+    assert "Failed to authenticate" not in listed.stdout, listed.stdout
+rows = json.loads(subprocess.run([binary, "chats", "list", "--output-format", "json"], env=env,
+                                 capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                 timeout=60).stdout)["data"]
+# Untitled, each keeps the name an untitled chat has: its id.
+assert len(rows) == 2 and all(row["name"] == row["id"] for row in rows), rows
+print("vendor failures: Gemini's quota and login in its own words, a warning a notice, a failed "
+      "first turn fresh again, Claude's expired login said and never a title - OK")
+PY
+
+# --- a direct-API failure fails its turn, never the session (57c) --------------
+# The second bug sweep's probe, on the real binary: an `anthropic` entry with
+# a fake key, every request sent through a proxy at a closed loopback port, so
+# nothing reaches a provider and the connection fails as a dropped network
+# does. The driven chat's turn ends in an `error` in curl's words, the session
+# lives -- a `set` moves it to a mock and the next line is served -- and the
+# child exits 0; a one-shot `complete` exits 2 on its `error` event. Before
+# 57c the transport's error reached `main`: exit 1, no `error`, the next line
+# never read. Its own home, so no other section's config moves.
+DA_HOME="$WORK_DIR/direct-api"
+mkdir -p "$DA_HOME"
+printf '{"turns":[{"text":"echo: {{last_user}}"}]}' >"$DA_HOME/echo.json"
+da() {
+    env APOGEE_HOME="$DA_HOME" ANTHROPIC_API_KEY=sk-ant-not-a-real-key \
+        https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 \
+        all_proxy=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 no_proxy= NO_PROXY= \
+        "$APOGEE_BIN" "$@"
+}
+da config init >/dev/null || fail "direct-api: config init"
+da config add-backend claude --type anthropic --model claude-sonnet-5 >/dev/null \
+    || fail "direct-api: add claude"
+da config add-backend echo --type mock --model-path "$DA_HOME/echo.json" >/dev/null \
+    || fail "direct-api: add echo"
+printf '%s\n' '{"type":"user","text":"one"}' '{"type":"set","model":"echo"}' \
+    '{"type":"user","text":"two"}' \
+    | da chat -m claude --no-recall --output-format stream-json --input-format stream-json \
+        >"$DA_HOME/chat.jsonl" 2>"$DA_HOME/chat-err.txt" \
+    || fail "direct-api: the driven chat did not exit 0 past a failed turn: $(cat "$DA_HOME/chat-err.txt")"
+da complete -m claude --output-format stream-json "hi" </dev/null \
+    >"$DA_HOME/complete.jsonl" 2>"$DA_HOME/complete-err.txt"
+DA_CODE=$?
+[ "$DA_CODE" -eq 2 ] || fail "direct-api: complete exited $DA_CODE, not 2: $(cat "$DA_HOME/complete-err.txt")"
+python3 - "$DA_HOME" <<'PY' || fail "direct-api: a failed turn is not one error and a served next line"
+import json, os, sys
+root = sys.argv[1]
+def events(name):
+    return [json.loads(line) for line in open(os.path.join(root, name)) if line.strip()]
+said = "claude: request failed: Couldn't connect to server"
+chat = events("chat.jsonl")
+ends = [e for e in chat if e["type"] in ("result", "error")]
+assert [e["type"] for e in ends] == ["error", "result"], chat
+assert ends[0]["message"] == said and ends[0].get("turn") == 1, ends[0]
+assert ends[1]["text"] == "echo: two" and ends[1].get("turn") == 2, ends[1]
+once = events("complete.jsonl")
+assert [e["message"] for e in once if e["type"] == "error"] == [said], once
+assert not [e for e in once if e["type"] == "result"], once
+for name in ("chat-err.txt", "complete-err.txt"):
+    text = open(os.path.join(root, name)).read()
+    assert "sk-ant-not-a-real-key" not in text, (name, text)
+for name in ("chat.jsonl", "complete.jsonl"):
+    assert "sk-ant-not-a-real-key" not in open(os.path.join(root, name)).read(), name
+print("direct-api: a connection that failed is one error, the next line served, complete exit 2 - OK")
 PY
 
 # --- a pull stops on Ctrl-C, its stream ending on the cancel (55c) -------------

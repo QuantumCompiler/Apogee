@@ -311,6 +311,7 @@ endif()
 file(WRITE "${CONFIG_FILE}" "${BEFORE_RENAME}")
 
 # --- MCP presets (47c): listed, registered byte for byte as typed, self refused
+# (56d: a third, xcode, listed with its note on every target)
 # The code-exec preset resolves by path: a planted script and a training
 # environment's interpreter are enough for it to list as runnable. The typed
 # twin spells exactly what the listing says it runs, so the pin holds on every
@@ -324,7 +325,13 @@ endif()
 file(WRITE "${FAKE_PYTHON}" "fake\n")
 apogee_run(0 mcp presets --output-format json)
 string(JSON PRESET_COUNT LENGTH "${APOGEE_OUT}" data)
-expect_equal("${PRESET_COUNT}" "2" "mcp presets lists two presets")
+expect_equal("${PRESET_COUNT}" "3" "mcp presets lists three presets")
+string(JSON XCODE_PRESET GET "${APOGEE_OUT}" data 2 name)
+expect_equal("${XCODE_PRESET}" "xcode" "the third preset is xcode")
+string(JSON XCODE_NOTE ERROR_VARIABLE XCODE_NOTE_ERROR GET "${APOGEE_OUT}" data 2 note)
+if(XCODE_NOTE_ERROR OR NOT XCODE_NOTE MATCHES "Allow External Agents to Use Xcode Tools")
+    message(FATAL_ERROR "the xcode preset carries no note naming Xcode's switch:\n${APOGEE_OUT}")
+endif()
 string(JSON PRESET_RUNNABLE GET "${APOGEE_OUT}" data 0 runnable)
 expect_equal("${PRESET_RUNNABLE}" "ON" "the code-exec preset is runnable here")
 string(JSON PRESET_COMMAND GET "${APOGEE_OUT}" data 0 command)
@@ -480,7 +487,65 @@ apogee_run(1 embed query vecs "zarquon widgets" --retriever vector)
 if(NOT APOGEE_ERR MATCHES "--retriever lexical")
     message(FATAL_ERROR "the hard error did not name lexical as the way out: ${APOGEE_ERR}")
 endif()
+if(NOT "${APOGEE_ERR}" MATCHES "over every source with 'mock-embed-b'")
+    message(FATAL_ERROR "the mismatch hint did not say every source: ${APOGEE_ERR}")
+endif()
+
+# 57s: re-ingesting PART of the collection under mock-embed-b never relabels
+# mock-embed-a's vectors as b's. The store is two spaces: the ingest warns
+# naming both models, info never claims one model over both, and a query runs
+# lexical with the every-source hint -- never a [vector] ranking of a's
+# vectors against b's question.
+set(EXTRA_DIR "${APOGEE_WORK_DIR}/extra")
+file(MAKE_DIRECTORY "${EXTRA_DIR}")
+file(WRITE "${EXTRA_DIR}/added.md" "the zarquon widgets are also logged weekly.\n")
+apogee_run(0 embed ingest vecs "${EXTRA_DIR}/added.md" --retriever vector)
+if(NOT APOGEE_OUT MATCHES "1 vector\\(s\\) \\[mock-embed-b\\]")
+    message(FATAL_ERROR "the partial re-ingest did not embed under mock-embed-b: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES
+        "warning: 1 source\\(s\\) keep vectors from 'mock-embed-a' -- [^\n]* with 'mock-embed-b'")
+    message(FATAL_ERROR "the partial re-ingest did not warn naming both models: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info vecs)
+if(APOGEE_OUT MATCHES "\\[mock-embed-b\\]" OR APOGEE_OUT MATCHES "\\[mock-embed-a\\]")
+    message(FATAL_ERROR "info claimed one model over vectors from two: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "mixed: 'mock-embed-a' and 'mock-embed-b'")
+    message(FATAL_ERROR "info did not name both models: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[lexical\\]" OR APOGEE_OUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "a two-space store was not demoted wholesale: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "over every source with 'mock-embed-b'")
+    message(FATAL_ERROR "the demotion did not say to re-ingest every source: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_OUT MATCHES "more than one model \\('mock-embed-a' and 'mock-embed-b'\\)")
+    message(FATAL_ERROR "the demotion did not name the store's two models: ${APOGEE_OUT}")
+endif()
+# Every source under mock-embed-b -- the rest in a second run -- and the
+# store is one space again, queried as a vector.
+apogee_run(0 embed ingest vecs "${CORPUS_DIR}" --retriever vector)
+if(APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting the last sources still warned: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed info vecs)
+if(NOT APOGEE_OUT MATCHES "\\[mock-embed-b\\]")
+    message(FATAL_ERROR "every source under one model did not bind it: ${APOGEE_OUT}")
+endif()
+apogee_run(0 embed query vecs "zarquon widgets")
+if(NOT APOGEE_OUT MATCHES "\\[vector\\]")
+    message(FATAL_ERROR "one space again did not query as a vector: ${APOGEE_OUT}")
+endif()
+# Back to mock-embed-a's space for what follows: the added source out, every
+# source under a.
+apogee_run(0 embed delete vecs --source added.md)
 apogee_run(0 config set-default-embedding embedder)
+apogee_run(0 embed ingest vecs "${CORPUS_DIR}")
+if(NOT APOGEE_OUT MATCHES "vector\\(s\\) \\[mock-embed-a\\]" OR APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting under mock-embed-a did not bind it again: ${APOGEE_OUT}")
+endif()
 
 # The same decision on a conversational surface, and the status line names it.
 apogee_run(0 complete -m mock -v --rag vecs --retriever vector "what does zarquon require?")
@@ -776,6 +841,166 @@ endif()
 apogee_run(0 config upgrade)
 if(NOT APOGEE_OUT MATCHES "is current")
     message(FATAL_ERROR "a second upgrade was not a no-op:\n${APOGEE_OUT}")
+endif()
+
+# A file that writes a commented option's key itself has it (57f): the
+# shipped template without its default_video block, the key set live -- the
+# file is current, check counts nothing, and the example never goes in under
+# the live key.
+set(VIDEO_ABOVE "\n\n    // The pipeline `apogee video generate` runs when --model names none")
+set(VIDEO_CLOSES "    // \"default_video\": \"Wan-AI--Wan2.2-TI2V-5B-Diffusers\"\n")
+string(FIND "${PRISTINE}" "${VIDEO_ABOVE}" video_begin)
+string(FIND "${PRISTINE}" "${VIDEO_CLOSES}" video_end)
+if(video_begin EQUAL -1 OR video_end EQUAL -1)
+    message(FATAL_ERROR "the shipped template has no default_video block to take out")
+endif()
+string(LENGTH "${VIDEO_CLOSES}" closes_length)
+math(EXPR video_begin "${video_begin} + 1")
+math(EXPR video_stop "${video_end} + ${closes_length}")
+string(SUBSTRING "${PRISTINE}" 0 ${video_begin} BEFORE_VIDEO)
+string(SUBSTRING "${PRISTINE}" ${video_stop} -1 AFTER_VIDEO)
+string(REPLACE "  \"models\": {\n" "  \"models\": {\n    \"default_video\": \"mypipe\"\n"
+       LIVE_VIDEO "${BEFORE_VIDEO}${AFTER_VIDEO}")
+file(WRITE "${CONFIG_FILE}" "${LIVE_VIDEO}")
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "not in the file")
+    message(FATAL_ERROR "check counts a live default_video as missing:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config upgrade)
+if(NOT APOGEE_OUT MATCHES "is current")
+    message(FATAL_ERROR "config upgrade added to a file that sets default_video:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_LIVE_VIDEO)
+if(NOT AFTER_LIVE_VIDEO STREQUAL LIVE_VIDEO)
+    message(FATAL_ERROR "config upgrade changed a file that sets default_video:\n${AFTER_LIVE_VIDEO}")
+endif()
+apogee_run(0 config get models.default_video)
+expect_equal("${APOGEE_OUT}" "mypipe" "a live default_video after upgrade")
+
+# A stray twin of a key the entry sets is removed, never renamed into it
+# (57f): the rename wrote `model` twice, which the JSONC loader refuses, so no
+# command loaded the config. Followed, the remedy leaves one that loads.
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "x", "Model": "y"},
+    "n": {"type": "mock", "Model": "y"}
+  }
+}
+]=])
+apogee_run(0 check --output-format json)
+if(NOT APOGEE_OUT MATCHES "\"detail\": *\"unknown key 'Model' -- no backend reads it, so it does nothing; the entry already sets 'model'\"" OR
+   NOT APOGEE_OUT MATCHES "\"remedy\": *\"remove 'Model' from config.json\"")
+    message(FATAL_ERROR "check does not say to remove a stray twin:\n${APOGEE_OUT}")
+endif()
+string(REGEX MATCHALL "rename it 'model'" renames "${APOGEE_OUT}")
+list(LENGTH renames rename_count)
+if(NOT rename_count EQUAL 1)
+    message(FATAL_ERROR "check renames into a key the entry has, or not the lone typo:\n${APOGEE_OUT}")
+endif()
+file(WRITE "${CONFIG_FILE}" [=[{
+  "backends": {
+    "m": {"type": "mock", "model": "x"},
+    "n": {"type": "mock", "model": "y"}
+  }
+}
+]=])
+apogee_run(0 config get backends.m.model)
+expect_equal("${APOGEE_OUT}" "x" "the entry once the stray twin is removed")
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "unknown key")
+    message(FATAL_ERROR "the followed remedies left an unknown key:\n${APOGEE_OUT}")
+endif()
+
+# --- 57e: the editor writes what it says, and keeps what it does not edit ---
+# A legacy YAML config whose sections sit on their headers' lines: every
+# editor refuses by name, prints no success, and leaves the bytes as they
+# were -- never a second block appended at the end that the loader ignores.
+set(FLOW_FILE "${APOGEE_WORK_DIR}/flow.yaml")
+set(FLOW_TEXT "backends:\n  a:\n    type: mock\n    model: m\nmodels: {default: a, default_utility: a}\nmemory: {recall: true}\ntools: {allowed_hosts: [a.com]}\n")
+file(WRITE "${FLOW_FILE}" "${FLOW_TEXT}")
+foreach(edit IN ITEMS "delete-backend|a" "set|memory.recall|false" "add-allowed-host|b.com"
+                      "set-default|a")
+    string(REPLACE "|" ";" edit "${edit}")
+    apogee_run_fails(--config "${FLOW_FILE}" config ${edit})
+    if(NOT APOGEE_ERR MATCHES "line holds more than its key" OR
+       NOT APOGEE_ERR MATCHES "apogee config migrate" OR APOGEE_OUT MATCHES "cleared|set to|=")
+        message(FATAL_ERROR "config ${edit} on a flow-mapping header was not refused by name:\n"
+                            "stdout: ${APOGEE_OUT}\nstderr: ${APOGEE_ERR}")
+    endif()
+    file(READ "${FLOW_FILE}" FLOW_AFTER)
+    if(NOT FLOW_AFTER STREQUAL FLOW_TEXT)
+        message(FATAL_ERROR "a refused config ${edit} changed the file:\n${FLOW_AFTER}")
+    endif()
+endforeach()
+# A header with a comment is the section's header: the add lands under it.
+set(TAILED_FILE "${APOGEE_WORK_DIR}/tailed.yaml")
+file(WRITE "${TAILED_FILE}" "backends:   # my models\n  a:\n    type: mock\n    model: m\nmodels:\n  default: a\n")
+apogee_run(0 --config "${TAILED_FILE}" config add-backend c --type mock --model m)
+apogee_run(0 --config "${TAILED_FILE}" config get backends)
+# Windows' text-mode stdout says each newline as CRLF; the list is the names.
+string(REPLACE "\r\n" "\n" TAILED_LISTED "${APOGEE_OUT}")
+expect_equal("${TAILED_LISTED}" "a\nc" "an add under a header with a comment")
+file(READ "${TAILED_FILE}" TAILED_AFTER)
+if(NOT TAILED_AFTER MATCHES "^backends:   # my models\n" OR TAILED_AFTER MATCHES "\nbackends:")
+    message(FATAL_ERROR "the add did not land under the commented header:\n${TAILED_AFTER}")
+endif()
+
+# On JSONC: a multi-line prompt reads back with its newlines, and a
+# number-looking name, default and model stay text -- check names no
+# unconfigured backend.
+file(WRITE "${CONFIG_FILE}" "${PRISTINE}")
+apogee_run(0 config add-backend 1e3 --type mock --model 1.50)
+apogee_run(0 config set-default 1e3)
+apogee_run(0 config get models.default)
+expect_equal("${APOGEE_OUT}" "1e3" "a number-looking default")
+apogee_run(0 config get backends.1e3.model)
+expect_equal("${APOGEE_OUT}" "1.50" "a number-looking model")
+file(READ "${CONFIG_FILE}" NUMBERED)
+if(NOT NUMBERED MATCHES "\"default\": \"1e3\"" OR NOT NUMBERED MATCHES "\"model\": \"1.50\"")
+    message(FATAL_ERROR "a number-looking name or model was retyped:\n${NUMBERED}")
+endif()
+apogee_run(0 check --output-format json)
+if(APOGEE_OUT MATCHES "names a backend that is not configured")
+    message(FATAL_ERROR "check names the number-looking default unconfigured:\n${APOGEE_OUT}")
+endif()
+apogee_run(0 config set-backend 1e3 --system-prompt "You are terse.\nAnswer in French.\n\nBe kind.")
+execute_process(COMMAND "${APOGEE_BIN}" config get backends.1e3.system_prompt
+    RESULT_VARIABLE prompt_code OUTPUT_VARIABLE prompt_out ERROR_VARIABLE prompt_err)
+string(REPLACE "\r\n" "\n" prompt_out "${prompt_out}")
+if(NOT prompt_code EQUAL 0 OR
+   NOT prompt_out STREQUAL "You are terse.\nAnswer in French.\n\nBe kind.\n")
+    message(FATAL_ERROR "a multi-line prompt did not read back exactly:\n[${prompt_out}]${prompt_err}")
+endif()
+
+# A config reached through a link -- a dotfiles repository's -- is edited
+# at its target and stays a link; one that leads nowhere is refused, both
+# ends named. (Windows makes a link only with a privilege the runners lack.)
+if(NOT WIN32)
+    set(DOT_FILE "${APOGEE_WORK_DIR}/dot/config.json")
+    file(MAKE_DIRECTORY "${APOGEE_WORK_DIR}/dot")
+    file(WRITE "${DOT_FILE}" "${PRISTINE}")
+    file(REMOVE "${CONFIG_FILE}")
+    file(CREATE_LINK "${DOT_FILE}" "${CONFIG_FILE}" SYMBOLIC)
+    apogee_run(0 config set memory.recall false)
+    if(NOT IS_SYMLINK "${CONFIG_FILE}")
+        message(FATAL_ERROR "an edit replaced the linked config with a file of its own")
+    endif()
+    file(READ "${DOT_FILE}" DOT_AFTER)
+    if(NOT DOT_AFTER MATCHES "\"recall\": false")
+        message(FATAL_ERROR "the edit did not land at the link's target:\n${DOT_AFTER}")
+    endif()
+    apogee_run(0 config get memory.recall)
+    expect_equal("${APOGEE_OUT}" "false" "memory.recall through the link")
+    file(REMOVE "${CONFIG_FILE}")
+    file(CREATE_LINK "${APOGEE_WORK_DIR}/nowhere/config.json" "${CONFIG_FILE}" SYMBOLIC)
+    apogee_run_fails(config set memory.recall true)
+    if(NOT APOGEE_ERR MATCHES "is a link to .*nowhere/config.json, which is not there")
+        message(FATAL_ERROR "a dangling config link was not refused by name:\n${APOGEE_ERR}")
+    endif()
+    if(EXISTS "${APOGEE_WORK_DIR}/nowhere")
+        message(FATAL_ERROR "a refused edit made the dangling link's target")
+    endif()
+    file(REMOVE "${CONFIG_FILE}")
 endif()
 
 # --- delete restores the original bytes ------------------------------------

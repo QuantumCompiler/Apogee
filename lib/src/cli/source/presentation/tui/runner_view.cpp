@@ -1,6 +1,8 @@
 #include "tui/runner_view.h"
 
 #include <algorithm>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include "tui/completion_menu.h"
@@ -135,8 +137,9 @@ bool exec_line_key(ExecLineState& line, const ftxui::Event& event) {
     if (event == ftxui::Event::CtrlC) {
         // The running command and nothing else; with none, the line closes.
         if (line.options.output && line.options.output->running()) {
-            if (line.options.output->cancel()) {
-                line.said = "asked the command to stop";
+            if (const std::optional<std::string> said = line.options.output->cancel();
+                said.has_value()) {
+                line.said = said->empty() ? std::string{"asked the command to stop"} : *said;
             }
         } else {
             line.open = false;

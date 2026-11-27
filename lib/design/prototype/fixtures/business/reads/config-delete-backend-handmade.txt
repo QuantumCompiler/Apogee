@@ -1,0 +1,14 @@
+removed backend 'Gemma4-12B-4bit' from /Users/someone/.apogee/config/config.json
+removed backend 'Gemma4-E4B-4bit' from /Users/someone/.apogee/config/config.json
+removed backend 'Qwen3-8B-4bit' from /Users/someone/.apogee/config/config.json
+removed backend 'claude' from /Users/someone/.apogee/config/config.json
+removed backend 'claude-app' from /Users/someone/.apogee/config/config.json
+removed backend 'fasthelper' from /Users/someone/.apogee/config/config.json
+removed backend 'fastroot' from /Users/someone/.apogee/config/config.json
+removed backend 'helper' from /Users/someone/.apogee/config/config.json
+removed backend 'llama3.2-1b-Q4KM' from /Users/someone/.apogee/config/config.json
+removed backend 'plain' from /Users/someone/.apogee/config/config.json
+models.default cleared: it named 'plain'
+removed backend 'root' from /Users/someone/.apogee/config/config.json
+removed backend 'scribe' from /Users/someone/.apogee/config/config.json
+removed backend 'vast' from /Users/someone/.apogee/config/config.json

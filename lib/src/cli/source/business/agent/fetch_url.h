@@ -75,8 +75,9 @@ struct HttpUrl {
 [[nodiscard]] std::optional<HttpUrl> parse_http_url(std::string_view url);
 
 /// Where a redirect from `base` to `location` goes: an absolute URL, a
-/// scheme-relative `//host/...`, an absolute path, a query, or a relative
-/// path. Nullopt when it points at anything but http or https.
+/// scheme-relative `//host/...`, an absolute path, a query, a fragment alone
+/// (the page itself, 57v), or a relative path. Nullopt when it points at
+/// anything but http or https.
 [[nodiscard]] std::optional<HttpUrl> resolve_redirect(const HttpUrl& base,
                                                       std::string_view location);
 

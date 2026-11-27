@@ -88,7 +88,8 @@ void step_done(sqlite3* handle, sqlite3_stmt* statement, const char* what) {
 }
 
 /// Repoints every edge of `merged` to `kept`: summed into an existing
-/// (source, target, relation) row when the repoint collides, dropped when it
+/// (source, target, relation) row when the repoint collides -- its stating
+/// chunks moved with it and counted once each (57t) -- dropped when it
 /// would become a self-loop, moved otherwise.
 void repoint_edges(sqlite3* handle, std::int64_t kept, std::int64_t merged) {
     std::vector<EdgeRow> edges;
@@ -155,6 +156,22 @@ void repoint_edges(sqlite3* handle, std::int64_t kept, std::int64_t merged) {
             sqlite3_bind_int64(move_sites.get(), 1, existing_id);
             sqlite3_bind_int64(move_sites.get(), 2, edge.id);
             step_done(handle, move_sites.get(), "could not move an edge's sites");
+            // The chunks that stated the folded edge state the survivor
+            // (57t): moved with it, one row per chunk, and its weight is then
+            // their count -- a chunk that stated both counts once. An edge
+            // no chunk was recorded for keeps the summed weight.
+            StatementPtr move_chunks = prepare(
+                handle, "UPDATE OR IGNORE kg_edge_chunks SET edge_id = ? WHERE edge_id = ?");
+            sqlite3_bind_int64(move_chunks.get(), 1, existing_id);
+            sqlite3_bind_int64(move_chunks.get(), 2, edge.id);
+            step_done(handle, move_chunks.get(), "could not move an edge's chunks");
+            StatementPtr weigh =
+                prepare(handle,
+                        "UPDATE kg_edges SET weight = (SELECT COUNT(*) FROM kg_edge_chunks"
+                        " WHERE edge_id = ?1) WHERE id = ?1 AND origin = 'inferred' AND"
+                        " EXISTS (SELECT 1 FROM kg_edge_chunks WHERE edge_id = ?1)");
+            sqlite3_bind_int64(weigh.get(), 1, existing_id);
+            step_done(handle, weigh.get(), "could not weigh a folded edge");
             StatementPtr drop = prepare(handle, "DELETE FROM kg_edges WHERE id = ?");
             sqlite3_bind_int64(drop.get(), 1, edge.id);
             step_done(handle, drop.get(), "could not drop a folded edge");

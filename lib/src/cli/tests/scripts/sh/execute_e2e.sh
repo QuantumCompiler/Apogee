@@ -292,9 +292,12 @@ python3 - "$WORK_DIR/events.jsonl" <<'PY' || fail "the model's play, machine mod
 import json, sys
 events = [json.loads(line) for line in open(sys.argv[1])]
 types = [e["type"] for e in events]
-known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "notice",
+# Since 56a every call is a tool_call as it moves -- a play as any.
+known = {"session", "thinking", "thinking_delta", "memory", "tool_status", "tool_call", "notice",
          "answer_start", "answer_delta", "answer_end", "result", "question", "error"}
 assert set(types) <= known, f"a type the protocol does not have: {set(types) - known}"
+calls = [(e["name"], e["state"]) for e in events if e["type"] == "tool_call"]
+assert calls == [("play_echo2", "pending"), ("play_echo2", "running"), ("play_echo2", "done")], calls
 statuses = [e["text"] for e in events if e["type"] == "tool_status"]
 assert statuses[0] == "[tool] play_echo2", statuses
 assert statuses[1] == "play — the model chose echo2: 2 member calls, utility → chat", statuses

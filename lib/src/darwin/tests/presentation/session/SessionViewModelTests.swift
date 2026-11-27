@@ -22,6 +22,20 @@ struct SessionViewModelTests {
         #expect(model.statusText == "Apogee not found")
     }
 
+    @Test("no apogee-dev on the dev channel: the screen names the dev install line, never the release installer (GUI M18)")
+    func missingDevBinary() async {
+        let place = SkippedCandidate(
+            candidate: BinaryCandidate(url: URL(fileURLWithPath: "/Users/someone/.local/bin/apogee-dev"), source: .dev),
+            reason: "not installed")
+        let model = SessionViewModel(
+            starter: ScriptedStarter(outcome: .notFound(skipped: [place], channel: .dev), sessions: []))
+        model.start()
+        #expect(await eventually { if case .missing = model.connection { true } else { false } })
+        #expect(model.connection == .missing(
+            hint: "Install the dev channel with: make -C lib/src/cli install MODE=dev",
+            places: ["/Users/someone/.local/bin/apogee-dev: not installed"]))
+    }
+
     @Test("a turn is sent as typed, the draft cleared, and the input held until the turn ends")
     func submit() async {
         let scripted = ScriptedSession()

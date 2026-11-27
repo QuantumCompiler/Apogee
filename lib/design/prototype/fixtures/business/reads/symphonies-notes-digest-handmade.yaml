@@ -1,0 +1,10 @@
+description: Summarize then check.
+input:
+  description: The text to summarize.
+stages:
+  - name: summarize
+    role: utility
+    prompt: "Summarize: {{input}}"
+  - name: verify
+    role: chat
+    prompt: "Check this summary against the text. Summary: {{summarize}} Text: {{input}}"

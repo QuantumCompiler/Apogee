@@ -31,7 +31,10 @@
 /// **One turn at a time.** Inference requests serialise behind one mutex; the
 /// read-only routes answer concurrently. A local model has one context, and
 /// the cloud clients were never audited for concurrent use -- a second request
-/// waiting beats a first one corrupted.
+/// waiting beats a first one corrupted. A turn on a session reads the session
+/// once it holds the lock (57n), so a request that waited builds on the turn
+/// it waited behind: one session's turns run in arrival order, each on the
+/// last one's history.
 namespace apogee::httpserver {
 
 /// Which tools a request may use: its `tool_mode` field.

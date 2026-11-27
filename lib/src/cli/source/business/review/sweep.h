@@ -28,6 +28,10 @@
 /// asks -- drafts are skipped unless the target counts them, and past the
 /// cap the rest wait for the next sweep, counted and said.
 ///
+/// A dry run is the same sweep and saves no watermark (57w): its marks move
+/// in a preview of the store, in memory alone, so what it previewed is still
+/// new to the posting sweep after it.
+///
 /// Posting is the target's declared grant or the run's `--allow-post`;
 /// without either a merge request is reviewed into the document and nothing
 /// is posted, said. This core only passes the grant on: the command's gate
@@ -45,7 +49,7 @@ struct SweepTarget {
 
 /// What a sweep keeps between runs: per repository, the update time of the
 /// newest merge request handled. One JSON object in a file, rewritten
-/// atomically at every change.
+/// atomically at every change -- except on a preview, which writes nothing.
 class WatermarkStore {
 public:
     /// Reads `path`; a missing file is an empty store. Throws
@@ -53,8 +57,13 @@ public:
     explicit WatermarkStore(std::filesystem::path path);
 
     [[nodiscard]] std::optional<std::string> get(const std::string& key) const;
-    /// Sets and saves at once.
+    /// Sets and saves at once; a preview sets in memory alone.
     void set(const std::string& key, std::string value);
+
+    /// A copy of these marks whose `set` keeps the mark and writes nothing
+    /// (57w): what a dry run sweeps on, so it changes nothing a later sweep
+    /// reads.
+    [[nodiscard]] WatermarkStore preview() const;
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept {
         return path_;
@@ -63,6 +72,7 @@ public:
 private:
     std::filesystem::path path_;
     std::map<std::string, std::string> marks_;
+    bool saves_ = true;
 };
 
 /// A repository's key in the store: `github.com/owner/repo`.
@@ -71,6 +81,10 @@ private:
 /// The seam project a target names (its owner, for an owner target).
 [[nodiscard]] forge::ForgeProject target_project(const harness::ReviewTargetConfig& target);
 
+/// What a repository's first sweep says after its name: where a posting
+/// sweep starts it, and on a dry run that none of it was saved (57w).
+[[nodiscard]] std::string_view first_sweep_note(bool dry_run) noexcept;
+
 struct SweepOptions {
     /// `--target`: only these, by name; empty for every target.
     std::vector<std::string> only{};
@@ -78,6 +92,8 @@ struct SweepOptions {
     std::optional<std::string> since{};
     /// `--allow-post`: the run grants posting everywhere it sweeps.
     bool allow_post = false;
+    /// `--dry-run`: the sweep runs on a preview of the store and saves no
+    /// watermark (57w); each review's own dry run is the command's to pass.
     bool dry_run = false;
     std::size_t cap = kMaxMergeRequestsPerSweep;
     /// Now, ISO 8601 in UTC: where a first sweep starts without `--since`.
@@ -94,7 +110,10 @@ using ReviewOne = std::function<nlohmann::json(const forge::MergeRequestRef& ref
                                                const SweepTarget& target, bool post)>;
 
 /// One sweep. Returns its `review.sweep` document. Throws
-/// `std::runtime_error` for a `--target` name the config does not hold.
+/// `std::runtime_error` for a `--target` name the config does not hold. On
+/// `options.dry_run` it sweeps `store.preview()` and leaves `store` as it
+/// found it: `watermark_after` says where a posting sweep would leave each
+/// mark, unsaved.
 [[nodiscard]] nlohmann::json run_sweep(const std::vector<SweepTarget>& targets,
                                        WatermarkStore& store, const SweepOptions& options,
                                        const ClientFor& client_for, const ReviewOne& review_one,

@@ -2,13 +2,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <random>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "agent/fetch_url.h"
 #include "agent/tool.h"
 #include "agent/web_search.h"
+#include "platform/child_process.h"
 #include "support/env_guard.h"
 #include "tools/toolsets.h"
 
@@ -97,6 +101,7 @@ TEST_CASE("the native toolsets set the note on the registry they fill, whatever 
     options.working_directory = temp.path();
     options.notes_dir = temp.path() / "notes";
     options.disabled = {"rag"};
+    options.child_processes = true;  // a shell to name, on any host (57k)
 
     apogee::agent::ToolRegistry all;
     apogee::tools::register_native_toolsets(all, options);
@@ -118,6 +123,80 @@ TEST_CASE("the native toolsets set the note on the registry they fill, whatever 
 
     // A registry nobody set a note on renders nothing.
     CHECK(apogee::agent::ToolRegistry{}.environment().empty());
+}
+
+TEST_CASE("where no program can be started, no shell or git tool is offered and none is claimed",
+          "[tools][environment][57k]") {
+    // A model is never offered a tool that can only fail (25e): on a build
+    // that cannot start a program -- Windows, today -- run_command and the
+    // git tools were registered, advertised ("Commands run there, through
+    // cmd") and then refused every call with advice meant for a vendor CLI.
+    const apogee::testing::TempDir temp{"tools-env-procs-" +
+                                        std::to_string(std::random_device{}())};
+    apogee::tools::ToolsetOptions options;
+    options.fs_root = temp.path();
+    options.working_directory = temp.path();
+    options.notes_dir = temp.path() / "notes";
+    options.disabled = {"rag"};
+    const auto git_tools = [](const apogee::agent::ToolRegistry& registry) {
+        std::vector<std::string> found;
+        for (const std::string& name : registry.names()) {
+            if (name.starts_with("git_")) {
+                found.push_back(name);
+            }
+        }
+        return found;
+    };
+
+    options.child_processes = false;
+    apogee::agent::ToolRegistry without;
+    apogee::tools::register_native_toolsets(without, options);
+    CHECK(without.find("run_command") == nullptr);
+    CHECK(git_tools(without).empty());
+    CHECK(without.environment().find("Commands run there") == std::string::npos);
+    // Everything else is there, and the names stay toolsets a pin or
+    // `tools.disabled` may name.
+    CHECK(without.find("read_file") != nullptr);
+    CHECK(without.find("write_note") != nullptr);
+    CHECK(apogee::tools::toolset_of("run_command") == "shell");
+    CHECK(apogee::tools::toolset_of("git_status") == "git");
+    const std::vector<std::string> names = apogee::tools::native_tool_names(options);
+    CHECK(std::ranges::find(names, "run_command") == names.end());
+
+    options.child_processes = true;
+    apogee::agent::ToolRegistry with;
+    apogee::tools::register_native_toolsets(with, options);
+    CHECK(with.find("run_command") != nullptr);
+    CHECK_FALSE(git_tools(with).empty());
+    CHECK(with.environment().find("Commands run there, through ") != std::string::npos);
+
+    // The default is the platform's own answer.
+    CHECK(apogee::tools::ToolsetOptions{}.child_processes ==
+          apogee::platform::supports_child_processes());
+}
+
+TEST_CASE("a shell or git tool this build never offers is named as such, and nothing else is",
+          "[tools][environment][57k]") {
+    // What `--allow run_command`, `/deny git_log` or a task's grant is told on
+    // a build that cannot start a program: why the tool is not here -- not
+    // that the name is no tool, which reads as a typo.
+    const std::string shell = apogee::tools::why_not_offered("run_command", false);
+    CHECK(shell.find("'run_command' is a shell tool") != std::string::npos);
+    CHECK(shell.find("cannot start other programs") != std::string::npos);
+    CHECK(apogee::tools::why_not_offered("git_status", false).find("'git_status' is a git tool") !=
+          std::string::npos);
+    // Every other name, and every name where programs start, is no concern
+    // of it: a typo, a file tool, a website.
+    for (const std::string_view other :
+         {"read_file", "write_file", "fetch_url", "mcp__srv__x", "wrte_file", "example.org"}) {
+        INFO(other);
+        CHECK(apogee::tools::why_not_offered(other, false).empty());
+    }
+    CHECK(apogee::tools::why_not_offered("run_command", true).empty());
+    CHECK(apogee::tools::why_not_offered("git_log", true).empty());
+    // By default, the platform's answer.
+    CHECK(apogee::tools::why_not_offered("run_command").empty() ==
+          apogee::platform::supports_child_processes());
 }
 
 TEST_CASE("the tool-use policy says only what the tools can reach, and nothing without them",

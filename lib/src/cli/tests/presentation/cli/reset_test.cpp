@@ -24,9 +24,11 @@
 #include "contracts/layout.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
+#include "platform/platform.h"
 #include "secrets/store.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
+#include "support/file_link.h"
 #include "support/gguf_builder.h"
 
 /// `apogee reset` (M9): the plan, the keep set, the skeleton it leaves, the
@@ -391,6 +393,49 @@ TEST_CASE("reset --keep models keeps the store byte-identical and leaves the res
     CHECK(home.run({"models", "list"}, &listing) == 0);
     INFO(listing);
     CHECK(contains(listing, "kept-model"));
+}
+
+TEST_CASE("a row linked to another drive is removed as the link, and what it points at survives",
+          "[commands][reset][run][links][57k]") {
+    // `models` moved to another drive and linked back -- `mklink /J` on
+    // Windows, whose x64 build emptied the target through the junction; a
+    // symlink elsewhere. `reset --keep sessions` removes the link and seeds a
+    // fresh row; the store on the other drive is left whole. So is the target
+    // of a link outside the layout, which a reset removes too.
+    const UserHome user_home;
+    const apogee::testing::CliHome home{"backends:\n  local:\n    type: mock\n"};
+    populate(home.home());
+    const apogee::testing::TempDir drive{"reset-other-drive-" +
+                                         std::to_string(std::random_device{}())};
+    const std::filesystem::path store = drive.path() / "models";
+    std::filesystem::rename(home.home() / "models", store);
+    const apogee::testing::LinkMade row =
+        apogee::testing::make_directory_link(store, home.models());
+    INFO(row.why);
+    REQUIRE(row.made);
+    const std::filesystem::path elsewhere = drive.path() / "elsewhere";
+    write(elsewhere / "theirs.txt", "not apogee's");
+    REQUIRE(apogee::testing::make_directory_link(elsewhere, home.home() / "linked-folder").made);
+    const std::map<std::string, std::string> store_before = tree_of(store);
+    REQUIRE_FALSE(store_before.empty());
+
+    std::string out;
+    const int code = home.run({"reset", "--keep", "sessions", "--yes"}, &out);
+
+    INFO(out);
+    CHECK(code == 0);
+    CHECK(contains(out, "removed " + home.models().string()));
+    CHECK(contains(out, "removed " + (home.home() / "linked-folder").string()));
+    // What the links pointed at, byte for byte.
+    CHECK(tree_of(store) == store_before);
+    CHECK(read(store / kModelFile.substr(std::string_view{"models/"}.size())) ==
+          apogee::testing::minimal_gguf("llama"));
+    CHECK(read(elsewhere / "theirs.txt") == "not apogee's");
+    // The row is a fresh install's again: a folder of its own, no link.
+    std::error_code link_code;
+    CHECK_FALSE(apogee::platform::is_link(home.models(), link_code));
+    CHECK(std::filesystem::is_directory(home.models()));
+    CHECK_FALSE(std::filesystem::exists(home.home() / "linked-folder"));
 }
 
 TEST_CASE("a bare reset leaves exactly the first-run skeleton", "[commands][reset][run]") {

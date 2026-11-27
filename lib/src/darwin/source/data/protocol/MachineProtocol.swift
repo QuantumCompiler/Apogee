@@ -1,5 +1,5 @@
 /// The machine-mode protocol this client is built against
-/// (lib/documentation/cli/reference/machine-mode.md).
+/// (lib/documentation/reference/cli/machine-mode.md).
 ///
 /// The vocabulary itself -- the events, the driver's lines -- arrives with the
 /// client core; this is the floor it stands on: which protocol, and the format

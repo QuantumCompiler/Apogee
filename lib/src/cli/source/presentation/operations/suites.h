@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include "backends/factory.h"
 #include "contracts/config.h"
 #include "symphony/definition.h"
 
@@ -88,6 +89,20 @@ using MeteredProbe =
 /// -- rather than let the router fall back to `models.default` and answer
 /// from a model nobody chose (27d). Empty with no suite active.
 [[nodiscard]] std::string validate_active_suite(const harness::Config& config);
+
+/// The same check once the providers are built (57d): a member the config
+/// defines but the factory did not start (`built`) is refused too, in
+/// `named_backend_refusal`'s words -- its own reason and the backends that
+/// did start -- then the same `-- suite <name>'s <role> member; fix it with`
+/// line. Every role, not the chat member alone: each role's request reaches
+/// the router by its member's name, and the router answers a name it does not
+/// run from `models.default`, under that name (M29). Asked by every surface
+/// that opens on the suite after building -- `chat`, `execute` and `/suite`,
+/// `task run` and `task resume`, `complete`, `symphonies play`, a served
+/// `complete` -- while `serve` and `analyze`, which check before building,
+/// keep the config-only check above. Empty with no suite active.
+[[nodiscard]] std::string validate_active_suite(const harness::Config& config,
+                                                const backends::BuildResult& built);
 
 /// Why the suite `name` cannot be deleted from `config`, or empty: it is the
 /// default suite, which the loader would then refuse to find.

@@ -56,6 +56,22 @@ apogee_add_module(machine
 )
 target_link_libraries(apogee_presentation_machine PUBLIC nlohmann_json::nlohmann_json)
 
+# `apogee acp` (56a): the Agent Client Protocol on stdio, each session a
+# captured child of the binary's own execute in machine mode.
+apogee_add_module(acp
+    acp/jsonrpc.h
+    acp/jsonrpc.cpp
+    acp/translate.h
+    acp/translate.cpp
+    acp/session.h
+    acp/session.cpp
+    acp/server.h
+    acp/server.cpp
+    acp/host_servers.h
+    acp/host_servers.cpp
+)
+target_link_libraries(apogee_presentation_acp PUBLIC nlohmann_json::nlohmann_json)
+
 apogee_add_module(operations
     operations/backend_fields.h
     operations/backend_fields.cpp
@@ -75,6 +91,8 @@ apogee_add_module(operations
     operations/graph_sources.cpp
     operations/knowledge_core.h
     operations/knowledge_core.cpp
+    operations/acp_registration.h
+    operations/acp_registration.cpp
     operations/code_exec_server.h
     operations/code_exec_server.cpp
     operations/mcp_presets.h
@@ -237,12 +255,18 @@ apogee_add_module(cli
     cli/serve_cmd.cpp
     cli/mcp_cmd.h
     cli/mcp_cmd.cpp
+    cli/mcp_serve.h
+    cli/mcp_serve.cpp
+    cli/acp_cmd.h
+    cli/acp_cmd.cpp
     cli/permissions.h
     cli/permissions.cpp
     cli/auth_cmd.h
     cli/auth_cmd.cpp
     cli/machine_schema_cmd.h
     cli/machine_schema_cmd.cpp
+    cli/quantize_child_cmd.h
+    cli/quantize_child_cmd.cpp
     cli/provider_offer.h
     cli/provider_offer.cpp
     cli/providers_cmd.h

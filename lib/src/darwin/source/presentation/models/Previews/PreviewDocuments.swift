@@ -712,5 +712,15 @@ added backend 'Gemma4-E4B-4bit'
 added backend 'Qwen3-8B-4bit'
 registered 3 backend(s) in /Users/someone/.apogee/config/config.json
 """#
+    // The described sandbox (GUI 6d), recorded from apogee-dev: mock backends
+    // m1-m4, `duo` (chat m1, utility m2, described "two") the default.
+    /// tests/business/reads/Fixtures/suites-models-list-described.json
+    static let describedList = #"""
+{"data":[{"architecture":"-","backend":"m1","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"chat, embedding, extraction","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m2","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m3","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"},{"architecture":"-","backend":"m4","backend_type":"mock","group":"other","model":"","profile":"unprofiled","roles":"","section":"local","source":"-","state":"-","type":"model","verified":"-"}],"folded":0,"object":"list"}
+"""#
+    /// tests/business/reads/Fixtures/suites-models-status-described-typed.json
+    static let describedStatus = #"""
+{"fields":[{"field":"suite","value":"duo   (two)"},{"field":"chat","value":"m1   (via suite duo)"},{"field":"embedding","value":"m1   (via models.default)"},{"field":"extraction","value":"m1   (via models.default)"},{"field":"vision","value":"(unset -- the chat's own backend)"},{"field":"transcription","value":"(unset -- the chat's own backend)"},{"field":"utility","value":"m2   (via suite duo)"},{"field":"footprint","value":"suite duo\nm1 (chat): nothing held here\nm2 (utility): nothing held here\ntotal: suite duo: no member holds memory on this machine"}],"footprint":{"budget_bytes":null,"margin_bytes":0,"members":[{"backend":"m1","bytes":0,"known":true,"local":false,"note":"","roles":["chat"],"shares":""},{"backend":"m2","bytes":0,"known":true,"local":false,"note":"","roles":["utility"],"shares":""}],"suite":"duo","total_bytes":0,"verdict":"no member holds memory"}}
+"""#
 }
 #endif

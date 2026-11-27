@@ -27,21 +27,33 @@ add_library(apogee_tests_infrastructure OBJECT
     infrastructure/platform/ffmpeg_test.cpp
     infrastructure/platform/ffmpeg_assembly_test.cpp
     infrastructure/platform/system_info_test.cpp
+    infrastructure/platform/termination_test.cpp
+    infrastructure/platform/xcode_test.cpp
     infrastructure/ansi/ansi_test.cpp
+    infrastructure/ansi/inert_test.cpp
     infrastructure/events/bus_test.cpp
+    support/git_http_server.h
+    support/git_http_server.cpp
     support/env_guard.h
     support/env_guard.cpp
     support/file_time.h
     support/file_time.cpp
+    support/file_link.h
+    support/file_link.cpp
+    support/temp_mode_watch.h
+    support/temp_mode_watch.cpp
     support/fake_child.h
     support/fake_mlx_driver.h
     support/fake_ffmpeg.h
+    support/fake_xcode.h
     support/gguf_builder.h
     support/mlx_model.h
     support/pipeline_model.h
     support/voice_model.h
     support/terminal_model.h
     support/terminal_model.cpp
+    support/terminal_output.h
+    support/terminal_output.cpp
     support/embedding_fixtures.h
     support/towered_configs.h
     support/draft_head_configs.h
@@ -61,6 +73,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/server_tools_test.cpp
+    data/contracts/mcp_serve_test.cpp
     data/contracts/config_adapters_test.cpp
     data/contracts/review_skill_test.cpp
     data/contracts/review_targets_test.cpp
@@ -284,6 +297,14 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/providers_cmd_test.cpp
     presentation/cli/read_documents_test.cpp
     presentation/cli/mcp_presets_cmd_test.cpp
+    presentation/cli/mcp_serve_test.cpp
+    presentation/cli/acp_cmd_test.cpp
+    presentation/cli/serve_cmd_test.cpp
+    presentation/cli/host_mcp_servers_test.cpp
+    presentation/acp/jsonrpc_test.cpp
+    presentation/acp/server_test.cpp
+    presentation/acp/host_servers_test.cpp
+    presentation/acp/translate_test.cpp
     presentation/cli/review_cmd_test.cpp
     presentation/cli/review_mr_test.cpp
     presentation/cli/system_cmd_test.cpp
@@ -331,7 +352,9 @@ add_library(apogee_tests_presentation OBJECT
     presentation/tui/progress_test.cpp
     presentation/tui/monitor_bar_test.cpp
     presentation/cli/helpers_test.cpp
+    presentation/cli/interrupt_test.cpp
     presentation/cli/tool_vectors_test.cpp
+    presentation/views/ask_prompt_test.cpp
     presentation/views/thinking_view_test.cpp
     presentation/views/status_line_test.cpp
     presentation/views/download_progress_test.cpp
@@ -354,6 +377,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/operations/store_references_test.cpp
     presentation/operations/backend_fields_test.cpp
     presentation/operations/mcp_presets_test.cpp
+    presentation/operations/training_reads_test.cpp
     presentation/cli/chat_completer_test.cpp
     presentation/cli/chat_roster_test.cpp
     presentation/cli/chat_session_test.cpp
@@ -365,6 +389,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/httpserver/sse_test.cpp
     presentation/httpserver/session_test.cpp
     presentation/httpserver/serve_test.cpp
+    presentation/httpserver/mux_test.cpp
     presentation/httpserver/admin_auth_test.cpp
     presentation/httpserver/admin_config_test.cpp
     presentation/httpserver/admin_events_test.cpp
@@ -453,6 +478,9 @@ endforeach()
 target_link_libraries(apogee_tests PRIVATE
     apogee_tests_infrastructure apogee_tests_data apogee_tests_business apogee_tests_presentation
     apogee_core Catch2::Catch2WithMain)
+# The executable's Windows manifest (57j): the test runs read text in the
+# UTF-8 code page users get, and `platform_test` checks they do.
+apogee_windows_manifest(apogee_tests)
 
 # The shell runs a command as a child of its own binary (37f): a test of
 # that runs the built `apogee`, found here -- and skips where this build made
@@ -511,7 +539,7 @@ add_test(NAME harness.layering
 add_test(NAME harness.layer_context
     COMMAND "${CMAKE_COMMAND}"
         -DAPOGEE_CLI_DIR=${CMAKE_SOURCE_DIR}
-        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/cli/adrs
+        -DAPOGEE_ADR_DIR=${CMAKE_SOURCE_DIR}/../../documentation/adrs/cli
         -DAPOGEE_MODULE_MAP=${CMAKE_SOURCE_DIR}/cmake/modules.cmake
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/layer_context.cmake"
 )
@@ -523,6 +551,17 @@ add_test(NAME cli.complete_lifecycle
         -DAPOGEE_BIN=$<TARGET_FILE:apogee>
         -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/complete-e2e-home
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/complete_e2e.cmake"
+)
+
+# Non-ASCII homes, prompts and paths on the real binary (57j): a root under an
+# accented folder, an accented --system prompt saved byte for byte, an
+# attachment named with accents. cmake -P like the case above, so it runs on
+# Windows too -- where the executable's UTF-8 manifest is what makes it pass.
+add_test(NAME cli.non_ascii
+    COMMAND "${CMAKE_COMMAND}"
+        -DAPOGEE_BIN=$<TARGET_FILE:apogee>
+        -DAPOGEE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/non-ascii-e2e-home
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/non_ascii_e2e.cmake"
 )
 
 # The interactive-never-listens invariant (SPEC.md -> Principles), test-locked
@@ -630,7 +669,7 @@ set_tests_properties(cli.serve_help PROPERTIES PASS_REGULAR_EXPRESSION "allow-re
 add_test(NAME cli.http_api_conformance
     COMMAND "${CMAKE_COMMAND}"
         -DMUX_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/httpserver/mux.cpp
-        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/http-api.md
+        -DAPI_DOC=${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/cli/http-api.md
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/http_api_conformance.cmake"
 )
 
@@ -706,6 +745,28 @@ if(UNIX)
     )
     set_tests_properties(cli.install_parity PROPERTIES
         TIMEOUT 60 FIXTURES_REQUIRED channel_probe)
+
+    # install.sh run end to end in a sandbox, and its installs uninstalled
+    # (57l): stub curl, zsh and fish on a PATH of the test's own, so the
+    # shells "on the machine" are the case's call. The Makefile's
+    # install-completions runs under the same stubs; install.ps1 is read.
+    add_test(NAME cli.install_script
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/install_script_check.sh"
+            $<TARGET_FILE:apogee>
+            ${CMAKE_CURRENT_BINARY_DIR}/install-script
+    )
+    set_tests_properties(cli.install_script PROPERTIES TIMEOUT 180)
+
+    # CI's `version bump` check run (57m): the real lib/scripts/version-check.sh
+    # in a throwaway repository with a bare origin of its own, a stand-in gh on
+    # a PATH of the test's own -- the macOS app counted, a release lookup that
+    # fails never read as "not released", the tag-on-origin path's 0/2/other.
+    # Needs no binary.
+    add_test(NAME cli.version_check
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/version_check.sh"
+            ${CMAKE_CURRENT_BINARY_DIR}/version-check
+    )
+    set_tests_properties(cli.version_check PROPERTIES TIMEOUT 120)
 
     # The completion stubs in the real shells (bash always; zsh and fish when
     # present) against the real binary -- what a stub SENDS `__complete`, which
@@ -892,7 +953,10 @@ if(UNIX)
     # The MCP client on the real binary: a scaffolded server created, tested
     # through the production client, connected by a tool-using run, a dying
     # one skipped with its stderr tail, and the in-binary server as one more
-    # server. Needs python3 for the scaffold (skips itself without one).
+    # server -- since 54a `mcp serve` beside its `__mcp-tools` alias, an
+    # external client (`mcp_serve_client.py`) holding both spellings to one
+    # tool list and each status read to its command's JSON byte for byte.
+    # Needs python3 for the scaffold (skips itself without one).
     add_test(NAME cli.mcp_lifecycle
         COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/sh/mcp_e2e.sh"
             $<TARGET_FILE:apogee>
@@ -1194,6 +1258,20 @@ if(UNIX)
         )
         set_tests_properties(cli.reference_driver PROPERTIES TIMEOUT 120)
 
+        # `apogee acp` (56a) driven as an ACP host drives it -- Xcode's Add an
+        # Agent -- over pipes: the protocol, a session in a project folder,
+        # prompts, cancel, every permission answer, repeated call ids, a mode
+        # chosen mid-sheet, switching, bad input, a dying child, notices, and
+        # the protocol's own examples replayed.
+        add_test(NAME cli.acp_conformance
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/acp_host_check.py"
+                $<TARGET_FILE:apogee>
+                ${CMAKE_CURRENT_BINARY_DIR}/acp-conformance-home
+                "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/acp"
+        )
+        set_tests_properties(cli.acp_conformance PROPERTIES TIMEOUT 300)
+
         # The protocol document, pinned to the code that implements it. A GUI
         # author trusts that document and debugs Apogee for faults that are
         # actually in the prose, so it is not allowed to drift.
@@ -1201,11 +1279,24 @@ if(UNIX)
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/schema_conformance.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/../source/presentation/machine/json_reporter.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/cli/reference/machine-mode.md"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../documentation/reference/cli/machine-mode.md"
                 # The schema this build prints (28g), held to both.
                 $<TARGET_FILE:apogee>
         )
         set_tests_properties(cli.machine_schema_conformance PROPERTIES TIMEOUT 60)
+
+        # lib/scripts/required-checks.py against a fake GitHub (57m): --verify
+        # failing on a missing, disabled, bypassable, not-up-to-date or
+        # mismatched "Stable: CI must pass" ruleset and passing on a match, and
+        # the dry run's and --apply's 2026-10-03 cases, over documents recorded
+        # from the real repository. Reads and writes nothing outside its own
+        # directory; needs no binary.
+        add_test(NAME cli.required_checks
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/scripts/py/required_checks_check.py"
+                ${CMAKE_CURRENT_BINARY_DIR}/required-checks
+        )
+        set_tests_properties(cli.required_checks PROPERTIES TIMEOUT 120)
     endif()
 endif()
 

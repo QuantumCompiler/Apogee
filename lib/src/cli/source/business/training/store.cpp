@@ -132,6 +132,8 @@ std::optional<VersionLedger> load_ledger(const std::filesystem::path& versions_d
         error = path.string() + " is not JSON";
         return std::nullopt;
     }
+    // A mistyped field throws the library's own error (57h), named here as
+    // a malformed one is, so `all_versions` skips it.
     try {
         VersionLedger ledger = ledger_from_json(json);
         if (ledger.backend.empty()) {
@@ -139,6 +141,9 @@ std::optional<VersionLedger> load_ledger(const std::filesystem::path& versions_d
         }
         return ledger;
     } catch (const std::runtime_error& e) {
+        error = path.string() + ": " + e.what();
+        return std::nullopt;
+    } catch (const nlohmann::json::exception& e) {
         error = path.string() + ": " + e.what();
         return std::nullopt;
     }
@@ -157,6 +162,87 @@ std::string save_ledger(const std::filesystem::path& versions_dir, const Version
         return e.what();
     }
     return {};
+}
+
+namespace {
+
+/// A wait as a person reads it: whole minutes, else seconds, else
+/// milliseconds.
+std::string spoken_wait(std::chrono::milliseconds wait) {
+    using std::chrono::milliseconds;
+    if (wait >= std::chrono::minutes{1} && wait % std::chrono::minutes{1} == milliseconds{0}) {
+        return std::to_string(std::chrono::duration_cast<std::chrono::minutes>(wait).count()) +
+               " minute(s)";
+    }
+    if (wait >= std::chrono::seconds{1} && wait % std::chrono::seconds{1} == milliseconds{0}) {
+        return std::to_string(std::chrono::duration_cast<std::chrono::seconds>(wait).count()) +
+               " s";
+    }
+    return std::to_string(wait.count()) + " ms";
+}
+
+}  // namespace
+
+std::filesystem::path promotion_lock_path(const std::filesystem::path& versions_dir,
+                                          std::string_view backend) {
+    return versions_dir / (std::string{backend} + ".promote.lock");
+}
+
+PromotionLock lock_promotion(const std::filesystem::path& versions_dir, std::string_view backend,
+                             const std::function<void()>& on_wait,
+                             const harness::CancellationToken& cancellation,
+                             std::chrono::milliseconds wait) {
+    PromotionLock taken;
+    std::error_code code;
+    std::filesystem::create_directories(versions_dir, code);
+    if (code) {
+        taken.error = "could not create " + versions_dir.string() + ": " + code.message();
+        return taken;
+    }
+    const std::filesystem::path path = promotion_lock_path(versions_dir, backend);
+    platform::FileLock::Refusal refusal;
+    taken.lock = platform::FileLock::acquire(path, std::chrono::milliseconds{0}, refusal);
+    if (taken.held()) {
+        return taken;
+    }
+    if (!refusal.timed_out) {
+        taken.error =
+            "cannot take the promotion lock for '" + std::string{backend} + "': " + refusal.error;
+        return taken;
+    }
+    // Another promotion into this backend is running: said once, then waited
+    // for in short slices, so a cancel is heard between them.
+    if (on_wait) {
+        on_wait();
+    }
+    taken.waited = true;
+    const auto deadline = std::chrono::steady_clock::now() + wait;
+    constexpr std::chrono::milliseconds kSlice{250};
+    while (true) {
+        if (cancellation.stop_requested()) {
+            taken.cancelled = true;
+            taken.error = "cancelled";
+            return taken;
+        }
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        taken.lock = platform::FileLock::acquire(
+            path, std::clamp(left, std::chrono::milliseconds{0}, kSlice), refusal);
+        if (taken.held()) {
+            return taken;
+        }
+        if (!refusal.timed_out) {
+            taken.error = "cannot take the promotion lock for '" + std::string{backend} +
+                          "': " + refusal.error;
+            return taken;
+        }
+        if (left <= std::chrono::milliseconds{0}) {
+            taken.error = "another promotion into '" + std::string{backend} + "' still holds " +
+                          path.string() + " after " + spoken_wait(wait) +
+                          " -- nothing was changed; run this again once it ends";
+            return taken;
+        }
+    }
 }
 
 RunSummary summarize(const RunManifest& manifest) {
@@ -297,16 +383,29 @@ std::vector<PipelineSummary> TrainingStore::list_pipelines() const {
 }
 
 std::optional<PipelineRunManifest> TrainingStore::get_pipeline(std::string_view id) const {
+    std::string error;
+    return get_pipeline(id, error);
+}
+
+std::optional<PipelineRunManifest> TrainingStore::get_pipeline(std::string_view id,
+                                                               std::string& error) const {
+    error.clear();
     if (!valid_run_id(id)) {
         return std::nullopt;
     }
-    std::string error;
+    // No manifest at all is no run; one that is there and cannot be read is
+    // said (57h).
+    std::error_code code;
+    if (!std::filesystem::exists(pipeline_manifest_path(pipeline_dir(id)), code)) {
+        return std::nullopt;
+    }
     return read_pipeline_manifest(pipeline_dir(id), error);
 }
 
 std::optional<PipelineSummary> TrainingStore::active_pipeline() const {
     for (const PipelineSummary& pipeline : list_pipelines()) {
-        if (pipeline.status == kPipelineRunning) {
+        if (pipeline.status == kPipelineRunning &&
+            pipeline_holder(pipeline_dir(pipeline.id)).has_value()) {
             return pipeline;
         }
     }

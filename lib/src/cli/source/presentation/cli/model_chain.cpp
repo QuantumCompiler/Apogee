@@ -1,8 +1,13 @@
 #include "cli/model_chain.h"
 
+#include <CLI/CLI.hpp>
+
 #include <algorithm>
+#include <iostream>
 #include <utility>
 
+#include "cli/helpers.h"
+#include "cli/interrupt.h"
 #include "cli/job_stream.h"
 
 namespace apogee::commands {
@@ -32,6 +37,10 @@ ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ost
     // A job's stream says each stage as an event, where the terminal has its
     // `[i/n]` line (52b): the one producer, framed for a machine.
     JobStream* const job = JobStream::current();
+    // One scope over every stage and the gaps between them (57i): each
+    // stage's own joins it, so a Ctrl-C after one stage ends is the next
+    // one's stop, never lost to a token armed afresh.
+    const InterruptScope interrupt;
     for (std::size_t index = 0; index < count; ++index) {
         const ChainStage& stage = stages[index];
         const std::string where =
@@ -44,6 +53,14 @@ ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ost
         }
         const std::string resume = log.resume;
         try {
+            if (InterruptScope::token().stop_requested()) {
+                // Stopped between two stages: nothing of this one began.
+                std::cerr << "apogee models: cancelled -- nothing was written\n";
+                if (job != nullptr) {
+                    job->failed("cancelled -- nothing was written");
+                }
+                throw CLI::RuntimeError(kCancelled);
+            }
             stage.run(log);
         } catch (...) {
             if (job != nullptr) {

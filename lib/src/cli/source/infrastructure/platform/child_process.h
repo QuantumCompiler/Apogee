@@ -1,9 +1,13 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 /// Spawning and talking to a long-lived child process.
@@ -38,6 +42,22 @@ struct ChildCommand {
     /// injects credentials of its own can silently redirect a user's
     /// subscription plan to per-token billing.
     std::vector<std::pair<std::string, std::string>> extra_environment;
+
+    /// Variables the child does not inherit (57x), each matched by its whole
+    /// name and dropped before `extra_environment` is added. The caller's
+    /// explicit choice, like an added one: the git tools drop `GIT_CONFIG`
+    /// from their own `git config` reads -- `git config` is the one git
+    /// command that honours it -- so those reads list what every other git
+    /// command reads; and they drop the person's `GIT_NO_LAZY_FETCH` before
+    /// adding their own, since a child reading a variable takes the first of
+    /// two entries for one name, and an added one comes after the inherited.
+    std::vector<std::string> unset_environment{};
+
+    /// The folder the child starts in (56a), applied in the spawn; empty
+    /// starts it where this process stands, as every child started before.
+    /// Everything the child starts in turn inherits it. A folder that does not
+    /// exist fails the start, naming it.
+    std::string working_directory{};
 };
 
 /// Why a read stopped.
@@ -135,5 +155,40 @@ public:
 /// Used to fail early with a message naming what was not found, rather than
 /// letting a spawn fail with a numeric errno the user cannot act on.
 [[nodiscard]] std::string find_on_path(std::string_view program);
+
+/// Bounds on one captured run (`run_captured`).
+struct CapturedLimits {
+    std::chrono::milliseconds timeout{std::chrono::minutes{10}};
+    /// The most stdout a run may produce; past it the child is stopped and the
+    /// run fails, rather than holding an unbounded answer in memory.
+    std::uint64_t max_output = std::uint64_t{256} * 1024 * 1024;
+    /// Polled while it runs; true stops the child.
+    std::function<bool()> stopped{};
+};
+
+/// What one captured run produced.
+struct CapturedRun {
+    /// Everything it wrote to stdout.
+    std::string out{};
+    /// The last bytes of its stderr (8 KiB), kept for an error message and
+    /// never written anywhere.
+    std::string tail{};
+    /// Its exit status, when it exited by itself; nullopt when it could not
+    /// start, ran past the bound, wrote too much, was stopped, or never exited.
+    std::optional<int> status{};
+    /// Why the run did not finish cleanly -- it could not start, was stopped,
+    /// or exited non-zero (its stderr's last line said) -- or empty.
+    std::string error{};
+};
+
+/// Runs `command` to completion under `limits`, as a captured child: stdin
+/// closed at once, stdout read whole, stderr drained into a bounded tail,
+/// a deadline and a cap on stdout. Each line of stderr goes to `on_line` as
+/// it arrives, when given. The one bounded run the seam's probes share --
+/// ffmpeg's (26e, 52e) and Xcode's command-line tools' (56d) -- so a child
+/// a probe asks can neither reach the terminal nor hold its caller past the
+/// bound ([⚠ A child's stderr is captured, never inherited]).
+[[nodiscard]] CapturedRun run_captured(const ChildCommand& command, const CapturedLimits& limits,
+                                       const std::function<void(std::string_view)>& on_line = {});
 
 }  // namespace apogee::platform

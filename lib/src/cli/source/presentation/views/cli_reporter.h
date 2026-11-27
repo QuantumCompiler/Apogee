@@ -46,6 +46,11 @@ public:
         bool markdown = false;
         /// Links in a rendered answer as OSC 8 hyperlinks.
         bool hyperlinks = false;
+        /// Whether `answer_stream` is a terminal (57p). An answer not
+        /// rendered -- `--raw`, `ui.markdown: false`, `complete -q` -- is
+        /// then drawn as text, shown never obeyed, as the renderer draws it;
+        /// a pipe receives it as the model wrote it.
+        bool answer_is_terminal = false;
     };
 
     /// `status_writer` is the progress channel (stderr); `options.answer_stream`
@@ -144,6 +149,9 @@ private:
     /// dropped at the end, so an answer neither starts nor ends with blank
     /// lines.
     std::string held_;
+    /// Where the unrendered answer's row stands on a terminal, in cells: its
+    /// next chunk's tab stops start there (57p).
+    std::size_t answer_column_ = 0;
     /// What the spinner said before a load took its label (27e), while one
     /// has; guarded, since a load is heard on whatever thread made it.
     std::mutex load_mutex_;

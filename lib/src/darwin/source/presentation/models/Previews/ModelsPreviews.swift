@@ -240,6 +240,15 @@ enum ModelsPreview {
         (["models", "status"], ModelsDocuments.chatOnEmbeddingStatus),
     ])
 
+    /// Four mock backends with `duo` -- chat m1, utility m2, described "two"
+    /// -- the default suite, as `models list` and `models status` read them
+    /// from `apogee-dev` over a sandbox (GUI 6d): the status opens with the
+    /// suite and ends with its footprint, neither of them a role.
+    static let describedSuiteRunner = PreviewRunner(reads: [
+        (["models", "list"], ModelsDocuments.describedList),
+        (["models", "status"], ModelsDocuments.describedStatus),
+    ])
+
     // MARK: - A drafter and its base (the CLI's 53i)
 
     static let drafter = "Gemma4-E4B-Assistant/mlx/4d5e6f708192"
@@ -478,6 +487,24 @@ enum ModelsPreview {
         return jobs
     }
 
+    /// A quantization started over a store slow to answer its first read
+    /// (GUI 6d): the card shows Stop while `models list --all` runs, before
+    /// any child exists.
+    static func readingFirst() -> DownloadsViewModel {
+        let jobs = DownloadsViewModel(starter: PreviewJobQueue([]))
+        jobs.connect(binary: previewBinary)
+        jobs.reader = PreviewSlowStore(store: quantizeStore(), delay: .seconds(3))
+        jobs.quantize(QuantizeForm(handle: quantizeF16, base: "Llama3.2-1B-Instruct", bytes: nil))
+        return jobs
+    }
+
+    /// Stop on that card while the read runs: it ends stopped, nothing ran,
+    /// and the read's answer starts nothing.
+    static func stopBeforeItRuns(_ jobs: DownloadsViewModel) async {
+        guard let download = jobs.downloads.first else { return }
+        await jobs.stop(download)
+    }
+
     /// Run again on the failed quantization, once it has failed: the store
     /// then as the binary read it after the second run.
     static func runAgain(_ jobs: DownloadsViewModel, _ store: PreviewStore) async {
@@ -540,7 +567,7 @@ enum ModelsPreview {
             (["models", "list"], ModelsDocuments.removeListAfter),
             (["models", "status"], ModelsDocuments.removeStatusAfter),
         ])
-        await models.confirmRemove()
+        if let answer = models.removing { await models.confirmRemove(answer) }
     }
 
     /// The same bases, Qwen3 the default and the utility role; its weights
@@ -567,7 +594,7 @@ enum ModelsPreview {
             (["models", "list"], ModelsDocuments.deleteRolesListAfter),
             (["models", "status"], ModelsDocuments.deleteRolesStatusAfter),
         ])
-        await models.confirmDelete(andBackends: true)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: true) }
     }
 
     static let addChat = "Qwen3-8B/mlx/1a2b3c4d5e6f"
@@ -661,7 +688,7 @@ enum ModelsPreview {
             (["models", "info", "Gemma3-1B-Instruct-Q4KM"], ModelsDocuments.deleteInfoBackendGemmaAfterKept),
             (["models", "info", deleteGemmaPath], nil),
         ])
-        await store.confirm()
+        if let answer = store.pending { await store.confirm(answer) }
     }
 
     // MARK: - The Backends tab's Delete with its weights (GUI 4e)
@@ -697,7 +724,7 @@ enum ModelsPreview {
     static func deleteBackendKept(_ models: ModelsViewModel, _ runner: PreviewStore) async {
         await askToDeleteBackend(models, "Gemma3-1B-Instruct-Q4KM")
         runner.change([(["models", "list"], ModelsDocuments.deleteListAfterKept)])
-        await models.confirmDelete(andBackends: false)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: false) }
     }
 
     /// Then Llama's, with the backend that uses its files.
@@ -705,19 +732,18 @@ enum ModelsPreview {
         await deleteBackendKept(models, runner)
         if let row = models.rows.first(where: { $0.backend == "Llama3.2-1B-Instruct-Q4KM" }) { await models.askToDelete(row) }
         runner.change([(["models", "list"], ModelsDocuments.deleteListAfterRemoved)])
-        await models.confirmDelete(andBackends: true)
+        if let answer = models.pendingDelete { await models.confirmDelete(answer, andBackends: true) }
     }
 
     /// Then Llama's, with the backend that runs from it.
     static func deleteWithBackends(_ store: StoreViewModel, _ runner: PreviewStore) async {
         await deleteKept(store, runner)
         if let set = store.sets.first(where: { $0.handle == deleteLlamaQ4 }) { await store.askToDelete(set) }
-        store.andBackends = true
         runner.change([
             (["models", "list"], ModelsDocuments.deleteListAfterRemoved),
             (["models", "list", "--all"], ModelsDocuments.deleteListAllAfterRemoved),
         ])
-        await store.confirm()
+        if let answer = store.pending { await store.confirm(answer, andBackends: true) }
     }
 }
 #endif

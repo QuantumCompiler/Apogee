@@ -11,8 +11,24 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
     private let reads = Mutex<[([String], ReadOutcome)]>([])
     private let commands = Mutex<[([String], CommandOutcome)]>([])
     private let log = Mutex<[String]>([])
+    /// Reads held open until the test releases them: the next read each
+    /// prefix starts waits on its gate.
+    private let gates = Mutex<[([String], AsyncStream<Void>)]>([])
+    private let released = Mutex(0)
 
     var calls: [String] { log.withLock { $0 } }
+
+    /// How many held reads have answered since their release.
+    var heldAnswered: Int { released.withLock { $0 } }
+
+    /// Holds the next read `prefix` starts -- recorded in `calls` as it
+    /// starts -- until the returned closure is called, then answers it by the
+    /// rules, as a slow store read would (GUI 6d).
+    func holding(_ prefix: [String]) -> @Sendable () -> Void {
+        let (gate, open) = AsyncStream.makeStream(of: Void.self)
+        gates.withLock { $0.append((prefix, gate)) }
+        return { open.finish() }
+    }
 
     func reading(_ prefix: [String], _ json: String) {
         reads.withLock { $0.insert((prefix, .document(ReadDocument(text: json)!)), at: 0) }
@@ -29,8 +45,17 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
         log.withLock { $0.append("read " + arguments.joined(separator: " ")) }
-        return reads.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 }
+        let gate = gates.withLock { held -> AsyncStream<Void>? in
+            guard let index = held.firstIndex(where: { arguments.starts(with: $0.0) }) else { return nil }
+            return held.remove(at: index).1
+        }
+        if let gate {
+            for await _ in gate {}
+        }
+        let outcome = reads.withLock { rules in rules.first { arguments.starts(with: $0.0) }?.1 }
             ?? .couldNotStart("no scripted read for \(arguments)")
+        if gate != nil { released.withLock { $0 += 1 } }
+        return outcome
     }
 
     func command(binary: URL, _ arguments: [String]) async -> CommandOutcome {

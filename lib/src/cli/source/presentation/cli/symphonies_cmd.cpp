@@ -33,6 +33,7 @@
 #include "machine/json_reporter.h"
 #include "operations/suites.h"
 #include "platform/child_process.h"
+#include "platform/platform.h"
 #include "scaffold/symphony.h"
 #include "symphony/definition.h"
 #include "symphony/runner.h"
@@ -609,8 +610,9 @@ void build_members(harness::Harness& harness, const harness::Config& config,
                                                    : " -- " + built.skipped_summary();
         fail_user(message);
     }
-    // A suite member naming nothing is refused, never routed around (27d).
-    if (const std::string refused = validate_active_suite(config); !refused.empty()) {
+    // A suite member naming nothing, or one that did not start (57d), is
+    // refused, never routed around (27d).
+    if (const std::string refused = validate_active_suite(config, built); !refused.empty()) {
         fail_user(refused);
     }
 }
@@ -643,8 +645,9 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
     // nothing (the document carries every stage).
     const bool json = format == ReadFormat::Json;
     BusyLine busy{std::cerr, "playing " + definition.spec.name, busy_options(flags.quiet || json)};
-    const ansi::Style style{ansi::resolve_color(ansi::ColorMode::Auto, busy.active(),
-                                                std::getenv("NO_COLOR") != nullptr)};
+    const ansi::Style style{ansi::resolve_color(
+        ansi::ColorMode::Auto, busy.active(), std::getenv("NO_COLOR") != nullptr,
+        platform::renders_escape_sequences(platform::StandardStream::Err))};
     const bool say = !flags.quiet && !json;
     agentloop::SideCallSink narrate = [&busy, &style, say](const agentloop::SideCall& call) {
         const std::string label = call.role + " — " + call.detail;
@@ -690,8 +693,12 @@ void play(const RootContext& context, const PlayFlags& flags, ReadFormat format)
                            suite == nullptr ? std::string{} : config.models.default_suite, result));
         return;
     }
-    std::cout << result.output;
-    if (result.output.empty() || result.output.back() != '\n') {
+    // The last stage's answer: at a terminal drawn as text, never obeyed;
+    // to a pipe, as written (57p).
+    const std::string shown =
+        answer_for_stdout(result.output, platform::is_terminal(platform::StandardStream::Out));
+    std::cout << shown;
+    if (shown.empty() || shown.back() != '\n') {
         std::cout << "\n";
     }
 }

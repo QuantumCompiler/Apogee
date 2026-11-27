@@ -75,14 +75,19 @@ struct RunManifest {
 [[nodiscard]] std::optional<RunManifest> read_manifest(const std::filesystem::path& run_dir,
                                                        std::string& error);
 
-/// `[<prefix>]YYYYMMDD-HHMMSS` in UTC, with `-2`, `-3`, … appended while a
-/// run of that id already exists under `runs_dir` -- two runs started in one
-/// second must not share a directory. The prefix (`pipe-`, `regime-`,
-/// `cycle-`) is what tells a pipeline run from a plain one at a glance.
-[[nodiscard]] std::string new_run_id(
-    const std::filesystem::path& runs_dir,
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now(),
-    std::string_view prefix = {});
+/// A run id, reserved: `[<prefix>]YYYYMMDD-HHMMSS` in UTC, with `-2`, `-3`,
+/// … appended while a run of that id already exists under `runs_dir`. The
+/// id's directory is created here, exclusively (57g) -- one `mkdir`, which
+/// two processes cannot both win -- so two runs started in one second, in
+/// one process or two, get two ids and two directories, never one shared
+/// manifest. The prefix (`pipe-`, `regime-`, `cycle-`) is what tells a
+/// pipeline run from a plain one at a glance. Empty with `error` set when no
+/// directory could be made: the command fails before anything is trained. A
+/// command that fails after this and before its first manifest leaves the
+/// directory empty, and the listings skip it.
+[[nodiscard]] std::string new_run_id(const std::filesystem::path& runs_dir,
+                                     std::chrono::system_clock::time_point now,
+                                     std::string_view prefix, std::string& error);
 
 /// Letters, digits, `-` and `_` only: a run id is a directory name and
 /// must never reach outside `runs/`.

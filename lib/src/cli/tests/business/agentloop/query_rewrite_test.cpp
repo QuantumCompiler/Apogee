@@ -4,10 +4,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "backends/mock.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 #include "harness/harness.h"
 
 /// A follow-up searched as a standalone question (26b).
@@ -138,4 +141,53 @@ TEST_CASE("a rewrite that fails, says nothing, or answers instead keeps the ques
         CHECK(kept.query == "How big is the second one?");
         CHECK(kept.note.find("could not be rewritten") != std::string::npos);
     }
+}
+
+TEST_CASE("a rewrite that opens with a lead-in is read past it, to the query",
+          "[agentloop][rewrite][57r]") {
+    // The second sweep's probe (57r): the preamble line was taken as the
+    // query, the floor rejected every match, and the follow-up lost its
+    // excerpt.
+    const std::vector<std::pair<std::string, std::string>> replies{
+        {"Sure! Here is the standalone search query:\n\nwhere do pelicans nest in Peru",
+         "where do pelicans nest in Peru"},
+        // A bare label on its own line leads in too.
+        {"Query:\nwhere do pelicans nest in Peru\nThat should find it.",
+         "where do pelicans nest in Peru"},
+        // Emphasis around the lead-in, and a label in another case.
+        {"**Here is the rewritten query:**\nSEARCH QUERY: where do pelicans nest in Peru",
+         "where do pelicans nest in Peru"},
+        {"Okay:\n  search query: \"where do pelicans nest in Peru\"",
+         "where do pelicans nest in Peru"},
+        {"**Query:** `where do pelicans nest in Peru`", "where do pelicans nest in Peru"},
+    };
+    for (const auto& [reply, query] : replies) {
+        INFO(reply);
+        Helper helper{reply};
+        const QueryRewrite rewrite =
+            rewrite_query(helper.harness, "helper", kFollowUp, "How big is the second one?", {});
+        CHECK(rewrite.rewritten);
+        CHECK(rewrite.query == query);
+        CHECK(rewrite.note.empty());
+    }
+}
+
+TEST_CASE("a rewrite of lead-ins alone keeps the question, and says so",
+          "[agentloop][rewrite][57r]") {
+    Helper helper{"Sure! Here is the standalone search query:\n\n  Query:  \n"};
+    const QueryRewrite kept =
+        rewrite_query(helper.harness, "helper", kFollowUp, "How big is the second one?", {});
+    CHECK_FALSE(kept.rewritten);
+    CHECK(kept.query == "How big is the second one?");
+    CHECK(kept.note == "the rewrite was not a query -- searching with the question as asked");
+}
+
+TEST_CASE("a cancelled rewrite is the turn's cancel, never the question kept",
+          "[agentloop][rewrite][cancel][57r]") {
+    Helper helper{"where do pelicans nest in Peru"};
+    const apogee::harness::CancellationToken stop = apogee::harness::CancellationToken::create();
+    stop.cancel();
+    CHECK_THROWS_AS(
+        rewrite_query(helper.harness, "helper", kFollowUp, "How big is the second one?", stop),
+        apogee::harness::CancelledError);
 }

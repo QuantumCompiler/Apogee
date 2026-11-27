@@ -61,7 +61,7 @@ struct RoleLinesNarratedTests {
         runner.commanding(["config", "delete-backend"], .done(stdout: recorded("delete-backend-clears", "txt")))
         runner.reading(["models", "list"], recorded("remove-list-after"))
         runner.reading(["models", "status"], recorded("remove-status-after"))
-        await model.confirmRemove()
+        try await model.confirmRemove(#require(model.removing))
         #expect(runner.calls.contains("run config delete-backend Gemma4-12B-4bit"))
         let narration = try #require(model.narration, "the cleared role, shown")
         #expect(narration.title == "Removed the backend Gemma4-12B-4bit")
@@ -80,7 +80,7 @@ struct RoleLinesNarratedTests {
         model.say = { said.append($0) }
         model.askToRemove(try #require(model.rows.first { $0.backend == "Gemma4-12B-4bit" }))
         runner.commanding(["config", "delete-backend"], .done(stdout: recorded("delete-backend-older", "txt")))
-        await model.confirmRemove()
+        try await model.confirmRemove(#require(model.removing))
         #expect(model.narration == nil)
         #expect(said == ["Removed the backend Gemma4-12B-4bit"])
     }
@@ -92,7 +92,7 @@ struct RoleLinesNarratedTests {
         runner.commanding(["models", "delete", "Qwen3-8B-4bit", "--yes"], .done(stdout: recorded("delete-roles-and-backends", "txt")))
         await model.askToDelete(try #require(model.rows.first { $0.backend == "Qwen3-8B-4bit" }))
         #expect(model.offersAndBackends, "the plan names the backend")
-        await model.confirmDelete(andBackends: true)
+        try await model.confirmDelete(#require(model.pendingDelete), andBackends: true)
         #expect(runner.calls.contains("run models delete Qwen3-8B-4bit --yes --and-backends"))
         let narration = try #require(model.narration)
         #expect(narration.lines == lines(recorded("delete-roles-and-backends", "txt")))
@@ -183,7 +183,7 @@ struct RoleLinesNarratedTests {
         store.say = { said.append($0) }
         await store.askToRegisterAll()
         runner.commanding(["config", "scan", "--register"], .done(stdout: recorded("register-all-default", "txt")))
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         let narration = try #require(store.narration, "the default it set, shown")
         #expect(narration.lines == [
             "added backend 'Gemma4-12B-4bit'",
@@ -200,7 +200,7 @@ struct RoleLinesNarratedTests {
         let (store, runner) = await store()
         store.askToRemoveBackend("Gemma4-12B-4bit")
         runner.commanding(["config", "delete-backend"], .done(stdout: recorded("delete-backend-clears", "txt")))
-        await store.confirm()
+        try await store.confirm(#require(store.pending))
         #expect(runner.calls.contains("run config delete-backend Gemma4-12B-4bit"))
         #expect(store.narration?.lines.last == "models.default cleared: it named 'Gemma4-12B-4bit'")
     }

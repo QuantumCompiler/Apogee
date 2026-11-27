@@ -445,6 +445,10 @@ Merged into Compressor (component): compressor unit
 1 group(s), 1 entity(ies) merged at threshold 0.92.
 Note: community memberships changed -- re-run `apogee graph communities notes` to refresh the summaries.
 """#
+    /// tests/business/reads/Fixtures/graph-explain-gone.err
+    static let explainGone = #"""
+apogee graph: no node named 'ingest.runner.helper' in graph 'demo' -- near matches: function:ingest.runner.helper_renamed (ingest/runner.py:9), class:ingest.runner.Runner (ingest/runner.py:4), file:ingest/runner.py (ingest/runner.py:1), function:ingest.runner.Runner.run (ingest/runner.py:5), file:ingest/__init__.py (ingest/__init__.py:1)
+"""#
     /// tests/business/reads/Fixtures/graph-export-deleted.err
     static let exportRefused = #"""
 apogee graph: graph 'spare' has not been built yet -- run: apogee graph build spare

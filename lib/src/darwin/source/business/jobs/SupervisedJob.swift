@@ -162,6 +162,14 @@ public struct JobEnd: Sendable, Equatable {
     public static func notStarted(_ detail: String) -> JobEnd {
         JobEnd(exit: nil, stderrTail: BoundedTail(), interrupted: false, detail: detail)
     }
+
+    /// A run stopped before its child was started, `detail` saying so: Stop
+    /// pressed while a supervisor's own step before the child -- a read the
+    /// run waits on -- still ran, so nothing ran and nothing will (GUI 6d).
+    /// Folded, it is a stop, as any stopped run is.
+    public static func stoppedBeforeStart(_ detail: String) -> JobEnd {
+        JobEnd(exit: nil, stderrTail: BoundedTail(), interrupted: true, detail: detail)
+    }
 }
 
 /// Where jobs come from: the app's starts real children; a test's is

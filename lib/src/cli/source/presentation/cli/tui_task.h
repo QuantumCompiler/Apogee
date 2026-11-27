@@ -3,6 +3,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -25,9 +26,49 @@
 ///
 /// A run's narration is its events, worded by `task_event_lines` in their
 /// own vocabulary (27j), drawn through `tui/progress`; Ctrl-C there cancels
-/// it as `task cancel` does. The ledger stays the one record: the table is
-/// read on show, on a slow tick while a run is live, and once it ends.
+/// it as `task cancel` does (`TaskRunStop`). The ledger stays the one record:
+/// the table is read on show, on a slow tick while a run is live, and once
+/// it ends.
 namespace apogee::commands {
+
+/// Ctrl-C on the Task view's run (57u), through `task cancel`'s core
+/// (`request_task_stop`) on the task the run is for, and only once the run
+/// holds the task lock: from its first event naming the task, or before that
+/// while this process's lock names it, the run still starting. A resume
+/// knows its task from the start, a new run learns it from the lock or that
+/// event; either way, a stop pressed before the run took the lock is kept
+/// and asked the moment the first event names the task, which the run
+/// writes before its first turn and so reads before any model call. Asked
+/// any earlier, a resume's stop would find no process running its task and
+/// cancel it under the lock itself -- which the resume would then resume.
+/// Any thread.
+class TaskRunStop {
+public:
+    /// `id`: the task a resume runs; empty for a new run.
+    explicit TaskRunStop(std::string id = {});
+
+    TaskRunStop(const TaskRunStop&) = delete;
+    TaskRunStop& operator=(const TaskRunStop&) = delete;
+    TaskRunStop(TaskRunStop&&) = delete;
+    TaskRunStop& operator=(TaskRunStop&&) = delete;
+    ~TaskRunStop() = default;
+
+    /// An event of the run named its task: a stop kept until now is asked.
+    void named(const std::string& id);
+
+    /// Ctrl-C: the line for the notice row -- the core's own, or why there
+    /// was nothing to stop (the run already over), never silence.
+    [[nodiscard]] std::string stop();
+
+private:
+    std::mutex mutex_;
+    /// The task: a resume's from the start, a new run's once named.
+    std::string id_;
+    /// An event of the run has named its task: the run holds its lock.
+    bool named_ = false;
+    /// Pressed before the run took its lock: asked once it is named.
+    bool pending_ = false;
+};
 
 /// A machine-mode event of a task run as the progress widget says it: the
 /// task events in their own words -- the transition's event and status, a

@@ -6,6 +6,8 @@
 #include <system_error>
 #include <utility>
 
+#include "platform/platform.h"
+
 namespace apogee::training {
 
 namespace {
@@ -667,7 +669,10 @@ PruneResult record_promotion(VersionLedger& ledger, VersionEntry entry, int reta
                     std::error_code code;
                     const bool existed = std::filesystem::exists(old.weights(), code);
                     if (old.mlx()) {
-                        std::filesystem::remove_all(old.weights(), code);
+                        // A stored folder, as `models::remove_weights` takes
+                        // one: a link the user placed goes, never its target
+                        // (57k).
+                        platform::remove_tree(old.weights(), code);
                     } else {
                         std::filesystem::remove(old.weights(), code);
                     }

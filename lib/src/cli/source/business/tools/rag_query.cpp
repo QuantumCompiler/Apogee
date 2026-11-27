@@ -26,6 +26,19 @@ std::string two_decimals(double value) {
     return out.str();
 }
 
+/// The model a collection's vectors are from, as the info tool says it --
+/// never one model over vectors from several (57s).
+std::string embedding_model_line(const embedstore::Store::EmbeddingBinding& binding) {
+    if (!binding.mixed.empty()) {
+        return "mixed (" + agentloop::spoken_models(binding.mixed) +
+               ") -- searched lexically until every source is re-ingested with one model";
+    }
+    if (binding.recorded()) {
+        return binding.model + " (" + std::to_string(binding.dimension) + "d)";
+    }
+    return "none (lexical only)";
+}
+
 std::vector<std::string> collection_names() {
     std::vector<std::string> names;
     std::error_code code;
@@ -130,7 +143,9 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
             facts.dimension = stats.dimension;
             facts.lexical_only = stats.lexical_only;
             facts.vector_dims = stats.vector_dims;
-            facts.recorded_model = store->embedding_model().model;
+            const embedstore::Store::EmbeddingBinding binding = store->embedding_model();
+            facts.recorded_model = binding.model;
+            facts.mixed_models = binding.mixed;
         } catch (const std::exception& e) {
             return error(std::string{"could not open the collection: "} + e.what());
         }
@@ -236,11 +251,7 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
             const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
             std::string out = "collection: " + collection +
                               "\nchunks: " + std::to_string(stats.chunk_count) +
-                              "\nembedding model: " +
-                              (binding.recorded()
-                                   ? binding.model + " (" + std::to_string(binding.dimension) + "d)"
-                                   : "none (lexical only)") +
-                              "\n";
+                              "\nembedding model: " + embedding_model_line(binding) + "\n";
             if (stats.lexical_only > 0 && stats.chunk_count > 0) {
                 out += "chunks without vectors: " + std::to_string(stats.lexical_only) + "\n";
             }

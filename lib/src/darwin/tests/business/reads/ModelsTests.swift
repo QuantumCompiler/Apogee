@@ -105,4 +105,21 @@ struct ModelsTests {
         let before = ModelInfo(document: Self.store("store-info-mlx")).data
         #expect(before != nil && before?.kind == nil && before?.vectorWidth == nil && before?.mlxConversion == nil)
     }
+
+    @Test("Roles under a described default suite: exactly the six roles the CLI resolves, never its suite or footprint field; the suite by its name, typed or from the field (GUI 6d)")
+    func rolesUnderADescribedSuite() throws {
+        // Recorded from apogee-dev over a sandbox: `duo`, described "two", the default.
+        for name in ["suites-models-status-described-typed", "suites-models-status-described"] {
+            let document = Self.store(name)
+            #expect(RoleAssignment.list(from: document).map(\.role) == ["chat", "embedding", "extraction", "vision", "transcription", "utility"], "\(name)")
+            #expect(RoleAssignment.suite(from: document) == "duo", "\(name): never \"duo   (two)\"")
+        }
+        #expect(RoleAssignment.list(from: Self.store("roles-status-duo")).map(\.role) == RoleAssignment.resolved, "an undescribed suite's too")
+        #expect(RoleAssignment.suite(from: Self.store("roles-status-duo")) == "duo")
+        let none = Self.store("roles-status-off")
+        #expect(RoleAssignment.list(from: none).map(\.role) == RoleAssignment.resolved && RoleAssignment.suite(from: none) == nil)
+        // A field a later CLI adds is tolerated, never a role (the CLI's ADR 0006).
+        let later = try #require(ReadDocument(text: #"{"fields":[{"field":"chat","value":"m1"},{"field":"sparkle","value":"on"}]}"#))
+        #expect(RoleAssignment.list(from: later).map(\.role) == ["chat"] && RoleAssignment.suite(from: later) == nil)
+    }
 }

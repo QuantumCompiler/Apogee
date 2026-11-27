@@ -38,6 +38,13 @@
 /// socket, so the interactive-never-listens invariant stays satisfied by
 /// construction.
 ///
+/// **An id is kept only once the CLI has answered on it** (57b). A first turn
+/// that fails -- a result error, a spawn failure, the deadline, a cancel --
+/// forgets the id it minted, since the CLI may never have recorded that
+/// session and would refuse every later `--resume`; the next turn starts
+/// fresh with the whole history. A side request leaves the conversation's id
+/// as it found it, on every exit.
+///
 /// ## ⚠ This CLI is an agent, and its safety pin was verified
 ///
 /// `gemini` runs tools while answering. Its `--approval-mode` takes `default`,

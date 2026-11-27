@@ -1,0 +1,22 @@
+{
+ "chunks": 4,
+ "collection": "mixed",
+ "index": "ok",
+ "path": "/Users/someone/.apogee/embeddings/mixed.db",
+ "schema": 8,
+ "sources": [
+  "heat-pumps.md",
+  "insulation.md",
+  "solar.md",
+  "windows.md"
+ ],
+ "vectors": {
+  "chunks": 4,
+  "dimension": 8,
+  "mixed": [
+   "mock-embed",
+   "mock-embed-b"
+  ],
+  "widths": 1
+ }
+}

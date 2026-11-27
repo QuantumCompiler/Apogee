@@ -67,6 +67,12 @@ public:
     /// out: a `cancel` now no longer reaches it.
     void end_turn(std::uint64_t sequence);
 
+    /// Ends the input as if the driver had closed it, now (57a: the session
+    /// asked to end by a signal): the open turn cancelled, a line still
+    /// queued dropped, and every wait -- the session's, a question's --
+    /// answered with nothing. Safe from any thread.
+    void end();
+
 private:
     struct State;
     std::shared_ptr<State> state_;

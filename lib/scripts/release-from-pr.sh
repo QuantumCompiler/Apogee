@@ -13,7 +13,8 @@
 # `stable` is merged (user decision, 2026-09-25). Nothing is rebuilt: each
 # deliverable is either the pull request's OWN CI build, or -- when its source
 # is unchanged since the latest release -- copied from that release (user
-# decision, 2026-09-25). Today the one deliverable is the CLI. Without
+# decision, 2026-09-25). There are two deliverables: the CLI's five archives,
+# and the macOS application, apogee-gui-darwin.zip (GUI M17, 2026-10-31). Without
 # --publish it is a rehearsal: the same lookups and checks, then what it would
 # have published. CI runs one on request (Actions -> CI -> Run workflow, with
 # the PR number), and so can anyone with `gh` signed in, from a checkout.
@@ -58,6 +59,14 @@
 #      reporting that version, as in 4a. In a re-cut a version already
 #      released at another commit is REFUSED rather than declined: a re-cut is
 #      asked for by name, so publishing nothing is a failure to report.
+#   4d. The macOS app -- changed since the latest release (lib/scripts/
+#      changed.sh gui-darwin), or not? Changed: the newest successful Darwin
+#      run (darwin.yml) of the pull request's head -- in a re-cut, of the
+#      commit -- holding the artifact apogee-gui-darwin, its .source naming
+#      the released tree, the Apogee.app inside it saying this version.
+#      Unchanged: the latest release's apogee-gui-darwin.zip, copied; a latest
+#      release carrying none gives this one none, said. The CLI's copy (4b)
+#      leaves the app's zip to this step.
 #   5. The tag at the commit released and the release in ONE `gh release
 #      create`, so no tag is ever left behind without its release. In a
 #      re-cut, a release its tag already marks is finished only while it
@@ -71,6 +80,8 @@ set -euo pipefail
 
 RELEASE_BRANCH="${RELEASE_BRANCH:-stable}"
 CI_WORKFLOW="${CI_WORKFLOW:-ci.yml}"
+DARWIN_WORKFLOW="${DARWIN_WORKFLOW:-darwin.yml}"
+APP_ASSET="apogee-gui-darwin"
 scripts="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
@@ -391,6 +402,8 @@ else
         die "could not download the CLI archives of $latest"
     for archive in "$work/copied"/apogee-*.tar.gz "$work/copied"/apogee-*.zip; do
         [ -f "$archive" ] || continue
+        # The macOS app's zip is no CLI archive: 4d decides it.
+        case "$(basename "$archive")" in "$APP_ASSET".*) continue ;; esac
         target="$(basename "$archive")"
         target="${target#apogee-}"
         target="${target%.tar.gz}"
@@ -401,6 +414,81 @@ else
     [ "${#assets[@]}" -gt 0 ] || die "$latest carries no CLI archives to copy"
     run_host_binary "$work/copied"
     note "- the CLI is unchanged since $latest: its ${#assets[@]} archives are copied from it (the executable reports \`$reported\`)"
+fi
+
+# --- 4d. The macOS app: built, or copied? -----------------------------------
+
+app_changed="$("$scripts/changed.sh" gui-darwin "$latest_sha" "$release_sha" | tail -1)"
+app_changed="${app_changed#gui-darwin=}"
+
+# check_app <zip>: it holds Apogee-<version>/Apogee.app, and sets
+# `app_version` to what that app's Info.plist says. Not called in a $(...),
+# for the same reason as run_host_binary.
+check_app() {
+    local listing plist
+    listing="$(unzip -Z1 "$1")" || die "$(basename "$1") is not a zip"
+    plist="$(printf '%s\n' "$listing" | grep -E '^Apogee-[^/]+/Apogee\.app/Contents/Info\.plist$' | head -1)" || true
+    [ -n "$plist" ] || die "$(basename "$1") holds no Apogee-<version>/Apogee.app"
+    app_version="$(unzip -p "$1" "$plist" | python3 -I -c '
+import plistlib, sys
+print(plistlib.loads(sys.stdin.buffer.read()).get("CFBundleShortVersionString", ""))')" ||
+        die "could not read the version of the Apogee.app in $(basename "$1")"
+}
+
+if [ "$app_changed" = true ]; then
+    # The newest successful Darwin run of this commit still holding the app.
+    if [ -n "$recut_dir" ]; then
+        app_sha="$release_sha" app_event=""
+        app_retry="dispatch the app's pipeline at this commit -- gh workflow run $DARWIN_WORKFLOW --ref $RELEASE_BRANCH -- and re-cut once it passes"
+    else
+        app_sha="$head_sha" app_event="&event=pull_request"
+        app_retry="the re-cut rebuilds: gh workflow run $DARWIN_WORKFLOW --ref $RELEASE_BRANCH, then make -C lib/src/cli release VERSION=$version"
+    fi
+    app_runs="$(api "repos/{owner}/{repo}/actions/workflows/$DARWIN_WORKFLOW/runs?head_sha=$app_sha&status=success&per_page=20$app_event" \
+        --jq '.workflow_runs[].id')" ||
+        die "could not list the $DARWIN_WORKFLOW runs of ${app_sha:0:7}"
+    app_run=""
+    for id in $app_runs; do
+        have="$(api "repos/{owner}/{repo}/actions/runs/$id/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | .name')" ||
+            die "could not list the artifacts of run $id"
+        if printf '%s\n' "$have" | grep -Fqx "$APP_ASSET"; then
+            app_run="$id"
+            break
+        fi
+    done
+    [ -n "$app_run" ] ||
+        die "the macOS app changed since ${latest:-the start}, but no successful $DARWIN_WORKFLOW run of ${app_sha:0:7} holds $APP_ASSET (none ran, or it expired); nothing was published -- $app_retry"
+
+    gh run download "$app_run" --name "$APP_ASSET" --dir "$work/app" >/dev/null
+    app_zip="$(found_file "$APP_ASSET.zip" "$work/app")"
+    app_source="$(found_file "$APP_ASSET.source" "$work/app")"
+    [ -n "$app_zip" ] || die "run $app_run's artifact $APP_ASSET holds no $APP_ASSET.zip"
+    [ -n "$app_source" ] ||
+        die "run $app_run's artifact $APP_ASSET has no $APP_ASSET.source, so what the app was built from is unknown; nothing was published -- $app_retry"
+    app_tree="$(git rev-parse "$release_sha^{tree}")"
+    built_tree="$(awk '$1 == "tree" { print $2 }' "$app_source")"
+    [ "$built_tree" = "$app_tree" ] ||
+        die "the macOS app was not built from the released source (its record: $(tr '\n' ' ' <"$app_source")-- ${release_sha:0:7} is tree ${app_tree:0:12}); nothing was published -- $app_retry"
+    check_app "$app_zip"
+    [ "$app_version" = "$version" ] ||
+        die "the macOS app changed, so it ships in $tag and must say $version -- but its Info.plist says '$app_version'; nothing was published"
+    assets+=("$app_zip")
+    note "- the macOS app changed since ${latest:-the start}: $DARWIN_WORKFLOW run $app_run built it from \`${app_tree:0:12}\`, and Apogee.app says $app_version"
+else
+    # Unchanged means a latest release exists: with none, changed.sh says true.
+    latest_assets="$(gh release view "$latest" --json assets --jq '.assets[].name')" ||
+        die "could not list the assets of $latest"
+    if printf '%s\n' "$latest_assets" | grep -Fqx "$APP_ASSET.zip"; then
+        gh release download "$latest" --pattern "$APP_ASSET.zip" --dir "$work/app-copied" ||
+            die "could not download the macOS app of $latest"
+        app_zip="$work/app-copied/$APP_ASSET.zip"
+        check_app "$app_zip"
+        assets+=("$app_zip")
+        note "- the macOS app is unchanged since $latest: its $APP_ASSET.zip is copied from it (Apogee.app says $app_version)"
+    else
+        note "- the macOS app is unchanged since $latest, which carries none: this release carries none either"
+    fi
 fi
 
 # --- 5. Publish ---------------------------------------------------------------

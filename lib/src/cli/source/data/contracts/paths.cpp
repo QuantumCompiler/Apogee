@@ -1,7 +1,6 @@
 #include "contracts/paths.h"
 
 #include <atomic>
-#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
 #include <system_error>
@@ -140,7 +139,7 @@ RootResolution resolve_root(const RootInputs& inputs) {
                             " <root>/config/config.json instead";
                 return out;
             }
-            out.root = std::filesystem::path{*inputs.home_directory} /
+            out.root = platform::path_from_utf8(*inputs.home_directory) /
                        std::string{channel_directory(*flag.channel)};
             out.config = config_file_in(out.root / "config");
         } else {
@@ -152,7 +151,8 @@ RootResolution resolve_root(const RootInputs& inputs) {
             out.root = std::move(custom.root);
             out.config = std::move(custom.config);
         }
-        if (!inputs.environment.empty() && !same_path(out.root, inputs.environment)) {
+        if (!inputs.environment.empty() &&
+            !same_path(out.root, platform::path_from_utf8(inputs.environment))) {
             out.error = flag.spelling() + " roots Apogee at " + out.root.string() + ", but " +
                         kHomeEnvVar + " is " + inputs.environment +
                         " -- a run has one root; unset " + kHomeEnvVar + " or drop the flag";
@@ -164,7 +164,7 @@ RootResolution resolve_root(const RootInputs& inputs) {
 
     if (!inputs.environment.empty()) {
         out.rung = RootRung::Environment;
-        out.root = std::filesystem::path{inputs.environment};
+        out.root = platform::path_from_utf8(inputs.environment);
         out.config = config_file_in(out.root / "config");
         return out;
     }
@@ -176,8 +176,8 @@ RootResolution resolve_root(const RootInputs& inputs) {
         return out;
     }
     out.rung = RootRung::Baked;
-    out.root =
-        std::filesystem::path{*inputs.home_directory} / std::string{channel_directory(out.channel)};
+    out.root = platform::path_from_utf8(*inputs.home_directory) /
+               std::string{channel_directory(out.channel)};
     out.config = config_file_in(out.root / "config");
     return out;
 }
@@ -185,9 +185,10 @@ RootResolution resolve_root(const RootInputs& inputs) {
 RootInputs current_root_inputs() {
     RootInputs inputs;
     inputs.flag = root_flag();
-    if (const char* environment = std::getenv(kHomeEnvVar); environment != nullptr) {
-        inputs.environment = environment;
-    }
+    // UTF-8 on every platform, as the home directory is (57j): Windows reads
+    // it wide, where `getenv` gave the ANSI code page's bytes and the path
+    // built from them threw "Cannot convert character sequence".
+    inputs.environment = platform::utf8_environment(kHomeEnvVar).value_or(std::string{});
     inputs.channel = baked_channel();
     inputs.home_directory = platform::home_directory();
     return inputs;

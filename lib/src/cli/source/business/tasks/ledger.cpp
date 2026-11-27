@@ -54,6 +54,22 @@ IdOrder id_order(const std::string& id) {
     return {.time = std::move(time), .suffix = std::stoull(rest.substr(1)), .text = id};
 }
 
+/// Whether `dir` holds a `request` and nothing else: a stop sent to a new
+/// run still starting, which ended before it wrote its ledger -- killed
+/// during its setup, before its signal handlers were up (57u).
+[[nodiscard]] bool holds_only_a_request(const std::filesystem::path& dir) {
+    std::error_code code;
+    bool request = false;
+    for (std::filesystem::directory_iterator it{dir, code}, end; !code && it != end;
+         it.increment(code)) {
+        if (it->path().filename().string() != kRequestFileName) {
+            return false;
+        }
+        request = true;
+    }
+    return request && !code;
+}
+
 }  // namespace
 
 std::string new_task_id(const std::filesystem::path& root,
@@ -142,6 +158,15 @@ std::vector<Task> list_tasks(const std::filesystem::path& root,
         if (!id.starts_with(kTaskIdPrefix)) {
             continue;
         }
+        // No ledger yet, and a stop sent while the run started made the
+        // directory (57u): the run is still starting -- the lock's live holder
+        // names it -- or it ended before it read the stop, which is then all
+        // the directory holds. Neither is a task yet, nor a problem; any other
+        // directory without a ledger is still named.
+        if (!ledger_written(root, id) &&
+            (running_task(root) == id || holds_only_a_request(it->path()))) {
+            continue;
+        }
         std::string error;
         std::optional<Task> task = load_task(root, id, error);
         if (task.has_value()) {
@@ -205,8 +230,27 @@ Request read_request(const std::filesystem::path& root, std::string_view id) {
 }
 
 void clear_request(const std::filesystem::path& root, std::string_view id) {
+    if (!valid_task_id(id)) {
+        return;  // a directory name, never a path out of `tasks/`
+    }
     std::error_code code;
     std::filesystem::remove(task_dir(root, id) / kRequestFileName, code);
+}
+
+bool ledger_written(const std::filesystem::path& root, std::string_view id) {
+    std::error_code code;
+    return valid_task_id(id) && std::filesystem::exists(ledger_path(root, id), code);
+}
+
+void discard_unread_request(const std::filesystem::path& root, std::string_view id) {
+    if (!valid_task_id(id)) {
+        return;
+    }
+    clear_request(root, id);
+    // `remove` takes a directory only when it is empty: a ledger, or anything
+    // else in it, keeps it.
+    std::error_code code;
+    std::filesystem::remove(task_dir(root, id), code);
 }
 
 std::optional<LockHolder> lock_holder(const std::filesystem::path& root) {
@@ -235,6 +279,10 @@ std::optional<TaskLock> TaskLock::acquire(const std::filesystem::path& root,
     std::optional<platform::PidLock> lock =
         platform::PidLock::acquire(root / kLockFileName, task_id, /*take_stale=*/true, refusal);
     if (lock.has_value()) {
+        // The lock is this process's now: a request standing was left for a
+        // process that ended before reading it. One written from here on is
+        // for this run, which reads it before any model call (57u).
+        clear_request(root, task_id);
         return TaskLock{std::move(*lock)};
     }
     if (!refusal.holder.has_value()) {

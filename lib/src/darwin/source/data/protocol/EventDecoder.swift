@@ -52,6 +52,9 @@ public enum EventDecoder {
                 })
         case "tool_status":
             return string("text").map { .toolStatus($0) }
+        case "tool_call":
+            guard let id = string("id"), let name = string("name"), let state = string("state") else { return nil }
+            return .toolCall(ToolCall(id: id, name: name, state: state, target: string("target")))
         case "notice":
             return string("text").map { .notice($0) }
         case "todo":

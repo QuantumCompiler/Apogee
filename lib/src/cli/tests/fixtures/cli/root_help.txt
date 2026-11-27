@@ -20,6 +20,7 @@ Options:
                               Use the install a config file sits in, for this run only: <root>/config/<file> roots the whole layout at <root> and reads that file (uninstall ignores it)
 
 Subcommands:
+  acp                         Be the agent of an ACP host such as Xcode: the Agent Client Protocol on stdio
   agents                      Create and manage agent workflows (apogee analyze --agent)
   analyze                     Run a named agent workflow against an input
   auth                        Store, list, and clear provider API keys

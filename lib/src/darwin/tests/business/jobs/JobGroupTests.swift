@@ -92,9 +92,12 @@ struct JobGroupTests {
         let binary = try fake.binary(Self.holdsStdout)
         var job: (any JobRunning)? = JobStarter().startJob(binary: binary, arguments: ["video", "generate"], streaming: true)
         weak let released = job
+        let stopped = await stoppedOnce(job!, grace: .seconds(1), within: .seconds(8))
+        // Stop was asked at its first event, which it says only after starting
+        // the grandchild and writing its pid -- however late a loaded machine
+        // started the script.
         let grandchild = try #require(await writtenPID(fake.directory.appendingPathComponent("grandchild.pid")))
         defer { kill(grandchild, SIGKILL) }
-        let stopped = await stoppedOnce(job!, grace: .seconds(1), within: .seconds(8))
         let run = try #require(stopped, "the job never ended after Stop: its grandchild held stdout")
         #expect(run.took < .seconds(6), "ended \(run.took) after Stop")
         guard case .ended(let end) = run.updates.last else { return }

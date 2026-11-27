@@ -102,10 +102,11 @@ public:
     [[nodiscard]] virtual std::unique_ptr<LineReader> line_reader(
         EditingLineReader::Options options) = 0;
 
-    /// A turn begins: the token that stops it. The terminal's never does --
-    /// Ctrl-C there ends the process, as it always has; the shell's is
-    /// stopped by Ctrl-C and the session goes on, as a driver's `cancel` ends
-    /// a machine-mode turn (28f).
+    /// A turn begins: the token that stops it. Ctrl-C never stops the
+    /// terminal's -- it ends the process there, as it always has; only a
+    /// signal asking the session to end does (57a), which then closes. The
+    /// shell's is stopped by Ctrl-C and the session goes on, as a driver's
+    /// `cancel` ends a machine-mode turn (28f).
     [[nodiscard]] virtual harness::CancellationToken begin_turn() = 0;
     virtual void end_turn() = 0;
 };
@@ -162,7 +163,7 @@ public:
         EditingLineReader::Options options) override;
 
     [[nodiscard]] harness::CancellationToken begin_turn() override {
-        return {};
+        return harness::CancellationToken::create();
     }
 
     void end_turn() override {}

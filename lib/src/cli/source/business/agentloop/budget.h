@@ -22,14 +22,18 @@
 ///   the call, its size, and that it can be called again. The answer that used
 ///   a result already carries what mattered. Only what is SENT changes; the
 ///   saved transcript keeps every result whole.
+/// - **Every tool call is sent with its results** (57q): a call with none
+///   after it is sent without the call, and a result answering nothing is
+///   left out, so a history an older compaction broke can be sent again.
 /// - **Retrieval asks for its share** (`share(Retrieval)`) and injects only
 ///   the chunks that fit it.
 /// - **Everything else is trimmed only on overflow** -- when the whole request
 ///   would not fit the window after the answer's reserve -- in reverse
 ///   priority, each source first down to its share and then below it:
 ///   earlier exchanges, oldest first, to none; this turn's tool results,
-///   oldest first, to their share; then, still over, those results to the
-///   newest alone and the injected context to none. Every trim is said.
+///   oldest first, to their share -- never an `ask_user` answer (57q); then,
+///   still over, those results to the newest alone and the injected context
+///   to none. Every trim is said, the injected context's by source.
 ///
 /// **An unknown window never reads as room to spare**: with no window,
 /// nothing is sized by it, the sources keep their fixed caps, and nothing is
@@ -111,6 +115,57 @@ struct TurnBudget {
 /// before it belongs to finished turns. `messages.size()` when there is none.
 [[nodiscard]] std::size_t current_turn_start(const std::vector<harness::ChatMessage>& messages);
 
+/// Where an injected message comes from (57q): what a trim names when the
+/// budget cannot send it.
+enum class InjectedSource : std::uint8_t {
+    /// Excerpts retrieved for the question: a collection's, the attachments'.
+    Retrieval,
+    /// What earlier chats established (26l).
+    Recall,
+    /// Plan mode's note (39b).
+    Plan,
+    /// The `/branch` review note.
+    Review,
+    /// The session's standing context (41b).
+    Standing,
+    /// The notes a delegate's sub-session runs under (41e).
+    Delegate,
+};
+
+/// A message a turn injects into its requests, never into its history, and
+/// what it is.
+struct Injected {
+    harness::ChatMessage message;
+    InjectedSource source = InjectedSource::Retrieval;
+};
+
+/// `messages`, each injected as `source`.
+[[nodiscard]] std::vector<Injected> injected_as(const std::vector<harness::ChatMessage>& messages,
+                                                InjectedSource source);
+
+/// Messages whose tool calls each travel with their results (57q).
+struct Paired {
+    std::vector<harness::ChatMessage> messages;
+    /// Where each message of the input went: `position[i]` is how many of
+    /// `messages` come from before input `i` -- its index when it was kept,
+    /// and where anything placed before it now goes. One longer than the
+    /// input, its last the size of `messages`.
+    std::vector<std::size_t> position;
+    /// The messages repaired: sent without a call, or left out.
+    int repaired = 0;
+};
+
+/// `messages` as every provider takes them (57q): an assistant message's
+/// tool calls with no result straight after it are sent without those calls
+/// -- its text kept, an empty one left out -- and a tool result answering no
+/// call straight before it is left out. Anthropic refuses a `tool_use` with
+/// no `tool_result`, and OpenAI the same; a history that holds one -- an
+/// older compaction kept a call and folded its result -- would fail every
+/// later request. Each repair is logged once, as a Warn line. Pure
+/// otherwise: `messages` is not touched, and a history already whole comes
+/// back as it is.
+[[nodiscard]] Paired pair_tool_calls(const std::vector<harness::ChatMessage>& messages);
+
 /// The one line sent in place of a tool result: the call, with its arguments
 /// clipped, how much it returned, and `why` it is not here.
 [[nodiscard]] std::string tool_result_stub(const std::string& call, std::size_t bytes,
@@ -172,9 +227,11 @@ struct Assembly {
 
 /// Assembles `history` with `pinned` then `injected` spliced in at `at` --
 /// `pinned` is never trimmed (the tools' environment note), `injected` is
-/// (retrieval, a review note) -- for a request shaped like `shape` (its model
-/// and tools; its messages are ignored). `turn_start` is where the turn in
-/// progress starts in `history`. See the file comment for the order.
+/// (retrieval, a review note), from its end, each trim naming the sources it
+/// cut (57q) -- for a request shaped like `shape` (its model and tools; its
+/// messages are ignored). `turn_start` is where the turn in progress starts
+/// in `history`. See the file comment for the order. `history` is sent with
+/// its tool calls paired (`pair_tool_calls`) and is never changed.
 ///
 /// `inlined` attachments are prepended to the user messages they ride. They
 /// are the highest priority the budget trims, so the last: an exchange
@@ -184,8 +241,8 @@ struct Assembly {
 [[nodiscard]] Assembly assemble_request(const TurnBudget& budget, const harness::ChatRequest& shape,
                                         const std::vector<harness::ChatMessage>& history,
                                         const std::vector<harness::ChatMessage>& pinned,
-                                        const std::vector<harness::ChatMessage>& injected,
-                                        std::size_t at, std::size_t turn_start,
+                                        const std::vector<Injected>& injected, std::size_t at,
+                                        std::size_t turn_start,
                                         const std::vector<InlineAttachment>& inlined = {});
 
 /// How many of `items` -- each a leading prefix, `render(k)` the text of the

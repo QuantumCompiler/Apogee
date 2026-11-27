@@ -137,4 +137,16 @@ bool is_valid_utf8(std::string_view text) noexcept {
     return true;
 }
 
+std::size_t ill_formed_bytes(std::string_view text) noexcept {
+    std::size_t out = 0;
+    for (std::size_t at = 0; at < text.size();) {
+        const Sequence sequence = sequence_at(text, at);
+        if (sequence.kind != Sequence::Kind::Whole) {
+            out += sequence.length;
+        }
+        at += sequence.length;
+    }
+    return out;
+}
+
 }  // namespace apogee::harness

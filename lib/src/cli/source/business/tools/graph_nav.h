@@ -16,9 +16,9 @@
 /// byte for byte.
 ///
 /// **Read-only, so ungated.** None of them `writes` or is `outbound`: the
-/// permission gate never asks about one, on any surface, and `apogee
-/// __mcp-tools` -- which serves exactly the tools that do not write --
-/// serves all four to any MCP client with no code of its own.
+/// permission gate never asks about one, on any surface, and `apogee mcp
+/// serve` -- which serves exactly the tools that do not write -- serves all
+/// four to any MCP client with no code of its own.
 ///
 /// **Bounded.** Every cap is an argument with the core's default and its
 /// ceiling; a tool can never return an unbounded subgraph.

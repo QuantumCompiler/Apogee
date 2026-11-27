@@ -3,27 +3,43 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "agent/tool.h"
 #include "agent/web_search.h"
 #include "agentloop/loop.h"
+#include "ansi/inert.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
+#include "contracts/host.h"
 #include "machine/driver_input.h"
 #include "machine/json_reporter.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/env_guard.h"
 #include "support/fake_mcp_server.h"
 #include "support/fake_transport.h"
+#include "support/git_http_server.h"
 #include "tools/environment.h"
+#include "tools/fs.h"
+#include "tools/git.h"
+#include "tools/process.h"
+#include "tools/shell.h"
+#include "tools/toolsets.h"
 #include "views/status_line.h"
 #include "views/terminal.h"
 
@@ -414,15 +430,18 @@ TEST_CASE("the built-in registry honours tools.disabled and tools.fs_root",
     config.tools.fs_root = "/srv/sandbox";
     const apogee::agent::ToolRegistry registry = apogee::commands::make_built_in_tools(
         apogee::commands::BuiltInToolOptions{.config = &config});
+    // Where no program can be started (Windows, today) the git and shell
+    // tools are never registered at all (57k).
+    const bool programs = apogee::tools::ToolsetOptions{}.child_processes;
     CHECK(registry.find("fetch_url") != nullptr);
     CHECK(registry.find("read_file") != nullptr);
-    CHECK(registry.find("git_diff") != nullptr);
+    CHECK((registry.find("git_diff") != nullptr) == programs);
     CHECK(registry.find("write_note") != nullptr);
     CHECK(registry.find("run_command") == nullptr);
     CHECK(registry.find("search_documents") == nullptr);
     CHECK(registry.find("read_file")->description.find("/srv/sandbox") != std::string::npos);
     // Every toolset on, with nothing configured.
-    CHECK(apogee::commands::make_built_in_tools({}).find("run_command") != nullptr);
+    CHECK((apogee::commands::make_built_in_tools({}).find("run_command") != nullptr) == programs);
 }
 
 TEST_CASE("the built-in registry connects the configured MCP servers and registers their tools",
@@ -485,7 +504,8 @@ TEST_CASE("a read-only policy keeps only tools that never write, MCP included; n
     REQUIRE(read_only.find("fetch_url") != nullptr);
     CHECK(read_only.find("fetch_url")->outbound);
     CHECK(read_only.find("read_file") != nullptr);
-    CHECK(read_only.find("git_diff") != nullptr);
+    CHECK((read_only.find("git_diff") != nullptr) ==
+          apogee::tools::ToolsetOptions{}.child_processes);  // 57k
     CHECK(read_only.find("write_file") == nullptr);
     CHECK(read_only.find("edit_file") == nullptr);
     CHECK(read_only.find("run_command") == nullptr);
@@ -683,6 +703,448 @@ TEST_CASE("a name that is neither a gated tool nor a website is refused, naming 
     CHECK_FALSE(apogee::commands::name_gated("example.org", gated(), false).error.empty());
 }
 
+TEST_CASE("the launch flag and the slash verbs deny every host --allow-host takes",
+          "[commands][permissions][presets][57o]") {
+    // 26o's "--deny takes either kind", regressed by a dot test (57o): each
+    // name `canonical_host` accepts is a website unless it is shaped like a
+    // tool -- dotless with a `_`.
+    for (const auto& [given, key] : std::vector<std::pair<std::string, std::string>>{
+             {"localhost", "localhost"},
+             {"LocalHost", "localhost"},
+             {"intranet", "intranet"},
+             {"[::1]", "::1"},
+             {"::1", "::1"},
+             {"[::ffff:127.0.0.1]", "::ffff:127.0.0.1"},
+             {"docs.python.org", "docs.python.org"},
+             {"a_b.example", "a_b.example"}}) {
+        INFO(given);
+        const GatedName name = apogee::commands::name_gated(given, gated());
+        CHECK(name.error.empty());
+        CHECK(name.host);
+        CHECK(name.key == key);
+        // The same canonical form `--allow-host` stores.
+        CHECK(apogee::harness::canonical_host(given) == key);
+    }
+    // Tool-shaped names are still typos, and a gated tool is still a tool.
+    for (const char* typo : {"write_flie", "mcp__srv__echo", "run_comand"}) {
+        INFO(typo);
+        const GatedName name = apogee::commands::name_gated(typo, gated());
+        CHECK_FALSE(name.host);
+        CHECK(name.error.find("is not a tool this chat asks about") != std::string::npos);
+    }
+    CHECK_FALSE(apogee::commands::name_gated("write_file", gated()).host);
+    // Not a host at all: refused as before.
+    CHECK_FALSE(apogee::commands::name_gated("not a host", gated()).error.empty());
+    CHECK_FALSE(apogee::commands::name_gated("[::1", gated()).error.empty());
+    // `--allow` stays tools only.
+    CHECK_FALSE(apogee::commands::name_gated("localhost", gated(), false).error.empty());
+
+    // The launch flag, and what the checker then does in each mode: a
+    // session's no comes before bypass.
+    for (const char* host : {"localhost", "[::1]", "::1", "intranet"}) {
+        INFO(host);
+        const auto approvals = std::make_shared<SessionApprovals>();
+        REQUIRE(
+            apogee::commands::seed_approvals(*approvals, PermissionPresets{.deny = {host}}, gated())
+                .empty());
+        approvals->mode = apogee::commands::PermissionMode::Bypass;
+        const apogee::agent::PermissionChecker check = make_permission_checker({}, approvals);
+        CHECK(check(website(*apogee::harness::canonical_host(host))) == Permission::Deny);
+        CHECK(check(website(host)) == Permission::Deny);
+        CHECK(check(website("example.org")) == Permission::Allow);
+    }
+    SessionApprovals approvals;
+    CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"write_flie"}},
+                                           gated())
+              .starts_with("--deny: 'write_flie' is not a tool this chat asks about"));
+
+    // A session's yes for localhost -- the prompt's `s` -- is taken back.
+    const auto answered = std::make_shared<SessionApprovals>();
+    std::string note;
+    GateRequest asked{"fetch_url", "localhost"};
+    asked.outbound = true;
+    REQUIRE(apogee::commands::answer_permission("s", asked, {}, answered, note));
+    CHECK(answered->hosts.contains("localhost"));
+    const GatedName localhost = apogee::commands::name_gated("localhost", gated());
+    apogee::commands::deny_for_session(*answered, localhost);
+    CHECK(make_permission_checker({}, answered)(website("localhost")) == Permission::Deny);
+    CHECK(apogee::commands::revoke_for_session(*answered, localhost));
+    CHECK(make_permission_checker({}, answered)(website("localhost")) == Permission::Ask);
+}
+
+TEST_CASE("the write prompt names the file written, on the terminal and in machine mode",
+          "[commands][permissions][machine][57o]") {
+    // The sweep's PTY probe (57o): the model's path repainted the prompt line
+    // and `..` dropped a component that does not exist, so the person saw
+    // `write_file -> notes.txt` and victim.txt was overwritten.
+    const apogee::testing::TempDir temp{"permissions-target-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path root = temp.path() / "work2";
+    std::filesystem::create_directories(root);
+    std::ofstream{root / "victim.txt"} << "original";
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_fs_tools(registry, root);
+    const std::string probe =
+        "x\r\x1b[2K\x1b[35m[perm]\x1b[0m write_file -> notes.txt\x1b[8m/../victim.txt";
+
+    std::vector<std::string> printed;
+    std::ostringstream machine;
+    apogee::commands::JsonReporter reporter{machine};
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker({}, nullptr);
+    context.confirm = [&](const GateRequest& request) {
+        // What the terminal prints first, and what machine mode sends.
+        printed.push_back(apogee::commands::permission_prompt_line(request, apogee::ansi::Style{}));
+        reporter.emit_permission_question(request);
+        return true;
+    };
+    const apogee::agent::ToolOutcome wrote = apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            "w", "write_file", nlohmann::json{{"path", probe}, {"content", "overwritten"}}.dump()},
+        context);
+    REQUIRE_FALSE(wrote.is_error);
+    REQUIRE(printed.size() == 1);
+    CHECK(printed.front().ends_with(" write_file -> victim.txt"));
+    CHECK(printed.front().find("notes.txt") == std::string::npos);
+    CHECK(printed.front().find('\x1b') == std::string::npos);
+    CHECK(printed.front().find('\r') == std::string::npos);
+    const nlohmann::json event = nlohmann::json::parse(machine.str());
+    CHECK(event["kind"] == "permission");
+    CHECK(event["target"] == "victim.txt");
+    std::ifstream victim{root / "victim.txt"};
+    CHECK(std::string{std::istreambuf_iterator<char>{victim}, {}} == "overwritten");
+}
+
+namespace {
+
+/// `text` with every SGR sequence of the prompt's own styling taken out.
+std::string without_sgr(std::string text) {
+    for (std::size_t at = text.find('\x1b'); at != std::string::npos; at = text.find('\x1b', at)) {
+        std::size_t end = at + 1;
+        if (end < text.size() && text[end] == '[') {
+            ++end;
+            while (end < text.size() &&
+                   (std::isdigit(static_cast<unsigned char>(text[end])) != 0 || text[end] == ';')) {
+                ++end;
+            }
+            if (end < text.size() && text[end] == 'm') {
+                text.erase(at, end + 1 - at);
+                continue;
+            }
+        }
+        ++at;
+    }
+    return text;
+}
+
+const std::string kFffd{apogee::ansi::kReplacementCharacter};
+
+}  // namespace
+
+TEST_CASE("a forged command is drawn as it is: the person cannot be shown ls -la for touch PWNED",
+          "[commands][permissions][57p]") {
+    // The sweep's entry 1 (rated high), its PTY probe's very command: the CR
+    // and the erase drew `[permission] run_command -> ls -la` over the real
+    // prompt line, the person typed y, and touch PWNED ran.
+    const std::string probe =
+        "touch PWNED #\r\x1b[2K\x1b[1;35m[permission]\x1b[0m run_command -> ls -la";
+    REQUIRE(probe.size() < 80);  // not cut: the target is the whole command
+    const std::string detail = probe + "\ncwd: /work";
+    const GateRequest request{"run_command", probe, detail};
+
+    const std::vector<std::string> plain =
+        apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{});
+    const std::string drawn = "touch PWNED #" + kFffd + kFffd + "[2K" + kFffd +
+                              "[1;35m[permission]" + kFffd + "[0m run_command -> ls -la";
+    REQUIRE(plain.size() == 3);
+    CHECK(plain[0] == "[perm] run_command -> " + drawn);
+    // The detail as text: the CR dropped, the escapes shown, every line under
+    // the prompt.
+    CHECK(plain[1] == "  touch PWNED #" + kFffd + "[2K" + kFffd + "[1;35m[permission]" + kFffd +
+                          "[0m run_command -> ls -la");
+    CHECK(plain[2] == "  cwd: /work");
+    for (const std::string& line : plain) {
+        INFO(line);
+        CHECK(line.find('\x1b') == std::string::npos);
+        CHECK(line.find('\r') == std::string::npos);
+    }
+
+    // In colour, the prompt's own styling and nothing of the command's.
+    const std::vector<std::string> coloured =
+        apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{true});
+    REQUIRE(coloured.size() == plain.size());
+    for (std::size_t i = 0; i < coloured.size(); ++i) {
+        CHECK(without_sgr(coloured[i]) == plain[i]);
+        CHECK(coloured[i].find('\r') == std::string::npos);
+    }
+    CHECK(coloured[0].find("\x1b[2K") == std::string::npos);
+    CHECK(coloured[0].find("\x1b[1;35m[permission]") == std::string::npos);
+}
+
+TEST_CASE(
+    "a search query's lines stay under the prompt, and a target already whole is not repeated",
+    "[commands][permissions][57p]") {
+    // web_search's detail, `search: <query>`, through the same lines: a
+    // newline in the query cannot start a forged prompt line at column 0.
+    GateRequest search{"web_search", "search.example",
+                       "search: cats\n[permission] fetch_url -> evil.example\x1b[8m"};
+    search.outbound = true;
+    const std::vector<std::string> lines =
+        apogee::commands::permission_prompt_lines(search, apogee::ansi::Style{});
+    REQUIRE(lines.size() == 3);
+    CHECK(lines[0] == "[perm] web_search -> search.example");
+    CHECK(lines[1] == "  search: cats");
+    CHECK(lines[2] == "  [permission] fetch_url -> evil.example" + kFffd + "[8m");
+
+    // An MCP tool whose arguments fit: the target is them, said once.
+    const GateRequest whole{"mcp__srv__write", R"({"path":"a"})", R"({"path":"a"})"};
+    CHECK(apogee::commands::permission_prompt_lines(whole, apogee::ansi::Style{}).size() == 1);
+    // A file writer's change, still by its counts (52a).
+    GateRequest edit{"edit_file", "x", "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"};
+    edit.edits = true;
+    const std::vector<std::string> counted =
+        apogee::commands::permission_prompt_lines(edit, apogee::ansi::Style{});
+    REQUIRE(counted.size() == 2);
+    CHECK(counted[1].starts_with("  +1"));
+}
+
+TEST_CASE(
+    "run_command is asked about with its whole command and cwd, on the terminal and in "
+    "machine mode",
+    "[commands][permissions][machine][57p]") {
+    // The sweep's entry 2: a command past 80 characters was asked about by
+    // its first 77, no detail, and nothing earlier in the stream said more.
+    const apogee::testing::TempDir temp{"permissions-detail-" +
+                                        std::to_string(std::random_device{}())};
+    apogee::agent::ToolRegistry registry;
+    apogee::tools::register_shell_tool(registry, temp.path(), std::chrono::seconds{10});
+    const std::string command =
+        "echo checking the build status of the project before continuing with tests;  "
+        "touch PWNED-by-the-hidden-tail-of-the-command";
+    REQUIRE(command.size() > 120);
+
+    std::vector<std::string> printed;
+    std::ostringstream machine;
+    apogee::commands::JsonReporter reporter{machine};
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker({}, nullptr);
+    context.confirm = [&](const GateRequest& request) {
+        printed = apogee::commands::permission_prompt_lines(request, apogee::ansi::Style{});
+        reporter.emit_permission_question(request);
+        return false;  // denied: nothing runs
+    };
+    const apogee::agent::ToolOutcome denied = apogee::agent::dispatch(
+        registry,
+        apogee::harness::ToolCall{
+            "c", "run_command",
+            nlohmann::json{{"command", command}, {"cwd", temp.path().string()}}.dump()},
+        context);
+    CHECK(denied.is_error);
+    const std::string cut = command.substr(0, 77) + "...";
+    REQUIRE(printed.size() == 3);
+    CHECK(printed[0] == "[perm] run_command -> " + cut);
+    CHECK(printed[1] == "  " + command);
+    CHECK(printed[2] == "  cwd: " + temp.path().string());
+    const nlohmann::json event = nlohmann::json::parse(machine.str());
+    CHECK(event["kind"] == "permission");
+    CHECK(event["target"] == cut);  // the short form, unchanged
+    CHECK(event["detail"] == command + "\ncwd: " + temp.path().string());
+    CHECK_FALSE(std::filesystem::exists(temp.path() / "PWNED-by-the-hidden-tail-of-the-command"));
+}
+
+namespace {
+
+/// A registry built as a `--tools` session builds it, over one fake server
+/// whose `echo` says readOnlyHint and whose `write` says nothing -- with the
+/// config's level for `mcp__srv__echo`, when given. Built in place: the tools
+/// keep pointers to the config and the server registry.
+struct McpWorld {
+    Config config;
+    std::vector<std::shared_ptr<apogee::testing::FakeMcpTransport>> made;
+    std::shared_ptr<apogee::mcp::Registry> mcp = std::make_shared<apogee::mcp::Registry>();
+    apogee::agent::ToolRegistry registry;
+
+    explicit McpWorld(
+        std::optional<PermissionLevel> level,
+        apogee::harness::AgentToolPolicy policy = apogee::harness::AgentToolPolicy::All) {
+        apogee::harness::McpServerConfig well;
+        well.command = "well";
+        config.mcp_servers.emplace("srv", well);
+        if (level.has_value()) {
+            config.permissions.levels["mcp__srv__echo"] = *level;
+        }
+        registry = apogee::commands::make_built_in_tools(
+            apogee::commands::BuiltInToolOptions{.config = &config,
+                                                 .policy = policy,
+                                                 .mcp = mcp,
+                                                 .mcp_spawn = apogee::testing::fake_fleet(&made)});
+    }
+
+    /// How many `tools/call` frames reached the server.
+    [[nodiscard]] int calls() const {
+        int calls = 0;
+        for (const auto& transport : made) {
+            for (const nlohmann::json& frame : transport->sent()) {
+                if (frame.value("method", "") == "tools/call") {
+                    ++calls;
+                }
+            }
+        }
+        return calls;
+    }
+
+    [[nodiscard]] apogee::agent::ToolOutcome call(
+        const apogee::agent::DispatchContext& context) const {
+        return apogee::agent::dispatch(
+            registry, apogee::harness::ToolCall{"e", "mcp__srv__echo", R"({"text":"hi"})"},
+            context);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a config level on an MCP tool binds even when its server calls it read-only",
+          "[commands][permissions][mcp][57o]") {
+    // The sweep (57o): `deny` on a tool whose server sends readOnlyHint was
+    // accepted, shown by `check` as `ok ... deny`, and the tool still ran. A
+    // level the person set now gates it; with none, the hint still decides.
+    SECTION("deny: refused unrun, with or without someone to ask") {
+        const McpWorld world{PermissionLevel::Deny};
+        REQUIRE(world.registry.find("mcp__srv__echo") != nullptr);
+        CHECK(world.registry.find("mcp__srv__echo")->writes);
+        int asked = 0;
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(world.config, nullptr);
+        context.confirm = [&asked](const GateRequest&) {
+            ++asked;
+            return true;
+        };
+        const apogee::agent::ToolOutcome refused = world.call(context);
+        CHECK(refused.is_error);
+        CHECK(refused.content.find("denied permission") != std::string::npos);
+        CHECK(asked == 0);
+        // Bypass does not loosen a config deny either.
+        const auto bypass = std::make_shared<SessionApprovals>();
+        bypass->mode = apogee::commands::PermissionMode::Bypass;
+        context.permission = make_permission_checker(world.config, bypass);
+        CHECK(world.call(context).is_error);
+        CHECK(world.calls() == 0);
+        // And the session's gated set names it, so /allow and /deny can.
+        const std::vector<std::string> named = apogee::commands::gated_tools(world.registry);
+        CHECK(std::ranges::find(named, "mcp__srv__echo") != named.end());
+    }
+    SECTION("ask: asked where someone can answer, denied where nobody can") {
+        const McpWorld world{PermissionLevel::Ask};
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK(world.call(pipe).is_error);
+        CHECK(world.calls() == 0);
+        int asked = 0;
+        apogee::agent::DispatchContext terminal = pipe;
+        terminal.confirm = [&asked](const GateRequest& request) {
+            CHECK(request.tool == "mcp__srv__echo");
+            ++asked;
+            return true;
+        };
+        CHECK_FALSE(world.call(terminal).is_error);
+        CHECK(asked == 1);
+        CHECK(world.calls() == 1);
+    }
+    SECTION("allow: runs unasked -- the hint's default, so in plan mode too") {
+        // `allow` gates nothing the hint left ungated (the review): plan
+        // mode refuses every writer over any allow, so a read tool made a
+        // writer by its `allow` was refused there for a false reason.
+        const McpWorld world{PermissionLevel::Allow};
+        CHECK_FALSE(world.registry.find("mcp__srv__echo")->writes);
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK_FALSE(world.call(pipe).is_error);
+        CHECK(world.calls() == 1);
+        const auto plan = std::make_shared<SessionApprovals>();
+        plan->mode = apogee::commands::PermissionMode::Plan;
+        apogee::agent::DispatchContext planning;
+        planning.permission = make_permission_checker(world.config, plan);
+        const apogee::agent::ToolOutcome ran = world.call(planning);
+        CHECK_FALSE(ran.is_error);
+        CHECK(ran.content.find("plan mode") == std::string::npos);
+        CHECK(world.calls() == 2);
+        // A tool with no hint is a writer as ever: `allow` runs it, and plan
+        // mode still refuses it over that allow.
+        McpWorld writer{std::nullopt};
+        writer.config.permissions.levels["mcp__srv__write"] = PermissionLevel::Allow;
+        CHECK(writer.registry.find("mcp__srv__write")->writes);
+        planning.permission = make_permission_checker(writer.config, plan);
+        CHECK(apogee::agent::dispatch(
+                  writer.registry,
+                  apogee::harness::ToolCall{"w", "mcp__srv__write", R"({"text":"hi"})"}, planning)
+                  .is_error);
+        // And a deny stays a deny in plan mode.
+        const McpWorld denied{PermissionLevel::Deny};
+        planning.permission = make_permission_checker(denied.config, plan);
+        CHECK(denied.call(planning).is_error);
+        CHECK(denied.calls() == 0);
+    }
+    SECTION("no level: the hint's default -- ungated, runs unprompted") {
+        const McpWorld world{std::nullopt};
+        CHECK_FALSE(world.registry.find("mcp__srv__echo")->writes);
+        CHECK(world.registry.find("mcp__srv__write")->writes);  // no hint: gated as ever
+        apogee::agent::DispatchContext pipe;
+        pipe.permission = make_permission_checker(world.config, nullptr);
+        CHECK_FALSE(world.call(pipe).is_error);
+        CHECK(world.calls() == 1);
+    }
+    SECTION("a read-only agent drops a denied or asked tool and keeps an allowed one") {
+        // `deny` and `ask` make the tool gated, so a read-only agent treats
+        // it as one with no hint; `allow`, like no level, keeps the hint.
+        for (const PermissionLevel level : {PermissionLevel::Deny, PermissionLevel::Ask}) {
+            const McpWorld gated{level, apogee::harness::AgentToolPolicy::ReadOnly};
+            CHECK(gated.registry.find("mcp__srv__echo") == nullptr);
+        }
+        const McpWorld allowed{PermissionLevel::Allow, apogee::harness::AgentToolPolicy::ReadOnly};
+        CHECK(allowed.registry.find("mcp__srv__echo") != nullptr);
+        const McpWorld unnamed{std::nullopt, apogee::harness::AgentToolPolicy::ReadOnly};
+        CHECK(unnamed.registry.find("mcp__srv__echo") != nullptr);
+    }
+}
+
+TEST_CASE("a shell or git tool this build never offers is refused saying why, not as a typo",
+          "[commands][permissions][presets][57k]") {
+    // On a build that cannot start a program (Windows, today) run_command and
+    // the git tools are never registered, so `--allow run_command`, `--deny
+    // git_log` and `/allow run_command` name a tool the chat lacks: the
+    // refusal says why it is not here, and never sends the user to
+    // --allow-host.
+    const std::vector<std::string> without = {"delete_file", "write_file"};
+    const GatedName shell = apogee::commands::name_gated("run_command", without, true, false);
+    CHECK(shell.unoffered);
+    CHECK(shell.key.empty());
+    CHECK(shell.error.find("'run_command' is a shell tool") != std::string::npos);
+    CHECK(shell.error.find("cannot start other programs") != std::string::npos);
+    CHECK(apogee::commands::name_gated("git_log", without, false, false).unoffered);
+    // A typo is still a typo there, and run_command where programs start is
+    // the plain refusal naming the set.
+    const GatedName typo = apogee::commands::name_gated("wrte_file", without, true, false);
+    CHECK_FALSE(typo.unoffered);
+    CHECK(typo.error.find("is not a tool this chat asks about") != std::string::npos);
+    const GatedName elsewhere = apogee::commands::name_gated("run_command", without, true, true);
+    CHECK_FALSE(elsewhere.unoffered);
+    CHECK(elsewhere.error.find("delete_file, write_file") != std::string::npos);
+
+    // The launch flags, on this build: where run_command is not offered for
+    // the reason above, the refusal says it, with no website hint.
+    if (!apogee::tools::ToolsetOptions{}.child_processes) {
+        SessionApprovals approvals;
+        const std::string allowed = apogee::commands::seed_approvals(
+            approvals, PermissionPresets{.allow = {"run_command"}}, without);
+        CHECK(allowed.starts_with("--allow: 'run_command' is a shell tool"));
+        CHECK(allowed.find("--allow-host") == std::string::npos);
+        CHECK(apogee::commands::seed_approvals(approvals, PermissionPresets{.deny = {"git_log"}},
+                                               without)
+                  .starts_with("--deny: 'git_log' is a git tool"));
+    }
+}
+
 TEST_CASE("revoke forgets the session's own answer, never the config's",
           "[commands][permissions][presets]") {
     SessionApprovals approvals;
@@ -851,4 +1313,225 @@ TEST_CASE("/permissions leads with the mode and says what it does to each answer
     approvals.mode = PermissionMode::DontAsk;
     CHECK(apogee::commands::describe_permissions(config, approvals, gated(), edits).at(2) ==
           "run_command  deny   (dont-ask mode)");
+}
+
+// ---------------------------------------------------------------------------
+// The git review fetch through the gate (57x): a network remote is a website,
+// asked about by its canonical host through the same checker and prompt
+// `fetch_url` has.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Git in `dir` for a fixture, its own config only; fails the test on error.
+void fixture_git(const std::filesystem::path& dir, std::vector<std::string> arguments) {
+    apogee::platform::ChildCommand command;
+    command.program = "git";
+    command.arguments = {"-C", dir.string()};
+    command.arguments.insert(command.arguments.end(), arguments.begin(), arguments.end());
+    command.extra_environment = {
+        {"GIT_CONFIG_GLOBAL", "/dev/null"}, {"GIT_CONFIG_SYSTEM", "/dev/null"},
+        {"GIT_AUTHOR_NAME", "t"},           {"GIT_AUTHOR_EMAIL", "t@example.com"},
+        {"GIT_COMMITTER_NAME", "t"},        {"GIT_COMMITTER_EMAIL", "t@example.com"}};
+    const apogee::tools::ProcessOutcome outcome =
+        apogee::tools::run_to_completion(command, std::chrono::seconds{30});
+    INFO("git " << arguments.front() << ": " << outcome.err.text());
+    REQUIRE(outcome.exit_code.value_or(1) == 0);
+}
+
+/// A launch repository whose `origin` is served over http from 127.0.0.1,
+/// holding a branch the repository has never seen; the git tools over it.
+struct ServedReview {
+    apogee::testing::EnvGuard no_global{"GIT_CONFIG_GLOBAL", "/dev/null"};
+    apogee::testing::EnvGuard no_system{"GIT_CONFIG_SYSTEM", "/dev/null"};
+    apogee::testing::EnvGuard no_prompt{"GIT_TERMINAL_PROMPT", "0"};
+    apogee::testing::TempDir temp{"permissions-git-" + std::to_string(std::random_device{}())};
+    std::filesystem::path root = temp.path() / "proj";
+    std::filesystem::path served = temp.path() / "served";
+    std::unique_ptr<apogee::testing::GitHttpServer> server;
+    apogee::agent::ToolRegistry registry;
+
+    ServedReview() {
+        std::filesystem::create_directories(root);
+        std::filesystem::create_directories(served);
+        fixture_git(root, {"init", "-q", "-b", "main"});
+        std::ofstream{root / "README.md", std::ios::binary} << "launch\n";
+        fixture_git(root, {"add", "."});
+        fixture_git(root, {"commit", "-q", "-m", "launch"});
+        fixture_git(root, {"checkout", "-q", "-b", "remote-only"});
+        std::ofstream{root / "r.txt", std::ios::binary} << "REMOTE ONLY TEXT\n";
+        fixture_git(root, {"add", "r.txt"});
+        fixture_git(root, {"commit", "-q", "-m", "remote only"});
+        fixture_git(root, {"checkout", "-q", "main"});
+        fixture_git(temp.path(),
+                    {"clone", "-q", "--bare", root.string(), (served / "r.git").string()});
+        fixture_git(root, {"branch", "-D", "remote-only"});
+        fixture_git(served / "r.git", {"update-server-info"});
+        server = std::make_unique<apogee::testing::GitHttpServer>(served, temp.path() / "log");
+        if (server->running()) {
+            fixture_git(root, {"remote", "add", "origin", server->url("r.git")});
+        }
+        apogee::tools::GitOptions options;
+        options.working_directory = root;
+        options.fs_root = root;
+        apogee::tools::register_git_tools(registry, options);
+    }
+
+    [[nodiscard]] apogee::agent::ToolOutcome review(const apogee::agent::DispatchContext& context,
+                                                    std::string_view fetch = "auto") const {
+        return apogee::agent::dispatch(
+            registry,
+            apogee::harness::ToolCall{
+                "r", "git_diff",
+                nlohmann::json{{"head", "remote-only"}, {"base", "main"}, {"fetch", fetch}}.dump()},
+            context);
+    }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "a review fetch's host is a website to the gate: listed, answered, denied, or refused "
+    "with nobody to ask",
+    "[commands][permissions][outbound][git][57x]") {
+    if (!apogee::platform::supports_child_processes() ||
+        apogee::platform::find_on_path("git").empty()) {
+        SKIP("git is not available");
+    }
+    const ServedReview world;
+    if (!world.server->running()) {
+        SKIP("python3 cannot serve here");
+    }
+    std::vector<std::pair<std::string, std::string>> asked;  // tool, target
+    std::vector<std::string> details;
+    const auto counting_confirm = [&](bool answer) {
+        return [&asked, &details, answer](const GateRequest& request) {
+            asked.emplace_back(std::string{request.tool}, std::string{request.target});
+            details.emplace_back(request.detail);
+            CHECK(request.outbound);
+            return answer;
+        };
+    };
+
+    SECTION("a pipe and serve, with nobody to ask and no listed host, refuse: nothing is sent") {
+        apogee::agent::DispatchContext context;
+        context.permission =
+            make_permission_checker(Config{}, std::make_shared<SessionApprovals>());
+        const apogee::agent::ToolOutcome refused = world.review(context);
+        INFO(refused.content);
+        CHECK(refused.is_error);
+        CHECK(refused.content.find("permission to reach 127.0.0.1 was not given") !=
+              std::string::npos);
+        CHECK(refused.content.find("config add-allowed-host 127.0.0.1") != std::string::npos);
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("the prompt names the URL's host, never the remote's name, and a no sends nothing") {
+        apogee::agent::DispatchContext context;
+        context.permission =
+            make_permission_checker(Config{}, std::make_shared<SessionApprovals>());
+        context.confirm = counting_confirm(false);
+        CHECK(world.review(context).is_error);
+        CHECK(asked == std::vector<std::pair<std::string, std::string>>{{"git_diff", "127.0.0.1"}});
+        CHECK(details == std::vector<std::string>{world.server->url("r.git")});
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("a listed host runs unasked, and the review diffs what it fetched") {
+        Config config;
+        config.tools.allowed_hosts = {"127.0.0.1"};
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(config, std::make_shared<SessionApprovals>());
+        context.confirm = counting_confirm(true);
+        const apogee::agent::ToolOutcome fetched = world.review(context);
+        INFO(fetched.content);
+        CHECK_FALSE(fetched.is_error);
+        CHECK(fetched.content.find("Review: main...origin/remote-only") != std::string::npos);
+        CHECK(fetched.content.find("REMOTE ONLY TEXT") != std::string::npos);
+        CHECK(asked.empty());
+        CHECK_FALSE(world.server->requests().empty());
+    }
+    SECTION("the prompt's always lists the host, and the next review asks nothing") {
+        const std::filesystem::path config_path = world.temp.path() / "config.json";
+        std::ofstream{config_path} << apogee::harness::config_template();
+        const auto approvals = std::make_shared<SessionApprovals>();
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(Config{}, approvals);
+        context.confirm = [&](const GateRequest& request) {
+            asked.emplace_back(std::string{request.tool}, std::string{request.target});
+            std::string note;
+            return apogee::commands::answer_permission("always", request, config_path, approvals,
+                                                       note);
+        };
+        CHECK_FALSE(world.review(context).is_error);
+        CHECK(asked.size() == 1);
+        CHECK(apogee::harness::load_config(config_path).tools.allowed_hosts ==
+              std::vector<std::string>{"127.0.0.1"});
+        CHECK_FALSE(world.review(context, "always").is_error);
+        CHECK(asked.size() == 1);
+    }
+    SECTION("--deny refuses the host, over the config's own list") {
+        Config config;
+        config.tools.allowed_hosts = {"127.0.0.1"};
+        const auto approvals = std::make_shared<SessionApprovals>();
+        REQUIRE(apogee::commands::seed_approvals(*approvals,
+                                                 PermissionPresets{.deny = {"127.0.0.1"}}, gated())
+                    .empty());
+        apogee::agent::DispatchContext context;
+        context.permission = make_permission_checker(config, approvals);
+        context.confirm = counting_confirm(true);
+        CHECK(world.review(context).is_error);
+        CHECK(asked.empty());
+        CHECK(world.server->requests().empty());
+    }
+    SECTION("a review that fetches nothing asks nothing") {
+        int checked = 0;
+        apogee::agent::DispatchContext context;
+        context.permission = [&checked](const GateRequest&) {
+            ++checked;
+            return Permission::Deny;
+        };
+        context.confirm = counting_confirm(true);
+        const apogee::agent::ToolOutcome never = world.review(context, "never");
+        CHECK(never.is_error);
+        CHECK(never.content.find("fetching is disabled") != std::string::npos);
+        CHECK(apogee::agent::dispatch(world.registry,
+                                      apogee::harness::ToolCall{"s", "git_status", "{}"}, context)
+                  .content.find("Branch:") != std::string::npos);
+        CHECK(checked == 0);
+        CHECK(asked.empty());
+    }
+}
+
+TEST_CASE("machine mode's question for a review fetch is a website's, its URL shown",
+          "[commands][permissions][machine][git][57x]") {
+    if (!apogee::platform::supports_child_processes() ||
+        apogee::platform::find_on_path("git").empty()) {
+        SKIP("git is not available");
+    }
+    const ServedReview world;
+    if (!world.server->running()) {
+        SKIP("python3 cannot serve here");
+    }
+    const std::filesystem::path config_path = world.temp.path() / "config.json";
+    std::ofstream{config_path} << apogee::harness::config_template();
+    std::ostringstream out;
+    apogee::commands::JsonReporter reporter{out};
+    std::istringstream in{R"({"type":"answer","text":"session"})"
+                          "\n"};
+    apogee::commands::DriverInput driver{in};
+    const auto approvals = std::make_shared<SessionApprovals>();
+    apogee::agent::DispatchContext context;
+    context.permission = make_permission_checker(Config{}, approvals);
+    context.confirm = make_driver_confirm_fn(reporter, driver, config_path, approvals);
+    const apogee::agent::ToolOutcome fetched = world.review(context);
+    INFO(fetched.content);
+    CHECK_FALSE(fetched.is_error);
+    const nlohmann::json event = nlohmann::json::parse(out.str());
+    CHECK(event["type"] == "question");
+    CHECK(event["kind"] == "permission");
+    CHECK(event["tool"] == "git_diff");
+    CHECK(event["target"] == "127.0.0.1");
+    CHECK(event["outbound"] == true);
+    CHECK(event["detail"] == world.server->url("r.git"));
+    CHECK(event["tool_call_id"] == "r");
+    CHECK(approvals->hosts.contains("127.0.0.1"));
 }

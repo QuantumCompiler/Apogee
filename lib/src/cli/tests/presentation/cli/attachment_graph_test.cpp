@@ -200,6 +200,58 @@ TEST_CASE(
     CHECK(Store{chat}.graph_dump() == both);
 }
 
+TEST_CASE("a folder holding a file that is not UTF-8 builds, the file named",
+          "[commands][attachments][graph][utf8][57t]") {
+    const Scratch scratch;
+    const std::filesystem::path root = scratch.tree("python", "latin");
+    {
+        std::ofstream out{root / "m.py", std::ios::binary};
+        out << "def caf\xe9_atlas():\n    return 1\n";
+    }
+    const AttachmentGraphOutcome outcome =
+        build_attachment_graph(scratch.store("chat"), job_for(root), {});
+    REQUIRE(outcome.state == AttachmentGraphOutcome::State::Built);
+    CHECK(outcome.record.absent.empty());
+    CHECK(outcome.nodes > 0);
+    REQUIRE(outcome.mended.size() == 1);
+    CHECK(outcome.mended.front() == "m.py: not UTF-8 -- 1 byte(s) shown as U+FFFD");
+    CHECK(attachment_graph_line(outcome.record, outcome.nodes, outcome.edges)
+              .find("json.exception") == std::string::npos);
+}
+
+TEST_CASE("an attach names the first files that are not UTF-8 and counts the rest",
+          "[commands][attachments][graph][utf8][57t]") {
+    // The attach's one line stays one line however many Latin-1 files a
+    // tree holds: the first few named, the rest a count, as its kinds fold.
+    using apogee::commands::kGraphLineMended;
+    const Scratch scratch;
+    const auto latin_tree = [&scratch](const std::string& as, std::size_t files) {
+        const std::filesystem::path root = scratch.tree("python", as);
+        for (std::size_t at = 0; at < files; ++at) {
+            std::ofstream out{root / ("m" + std::to_string(at) + ".py"), std::ios::binary};
+            out << "# caf\xe9\nx = 1\n";
+        }
+        return root;
+    };
+    const std::filesystem::path many = latin_tree("many", kGraphLineMended + 2);
+    const AttachmentGraphOutcome folded =
+        build_attachment_graph(scratch.store("many"), job_for(many), {});
+    REQUIRE(folded.state == AttachmentGraphOutcome::State::Built);
+    REQUIRE(folded.mended.size() == kGraphLineMended + 1);
+    CHECK(folded.mended.front() == "m0.py: not UTF-8 -- 1 byte(s) shown as U+FFFD");
+    CHECK(folded.mended[kGraphLineMended - 1] == "m" + std::to_string(kGraphLineMended - 1) +
+                                                     ".py: not UTF-8 -- 1 byte(s) shown as U+FFFD");
+    CHECK(folded.mended.back() == "and 2 more file(s) not UTF-8");
+
+    const std::filesystem::path few = latin_tree("few", kGraphLineMended);
+    const AttachmentGraphOutcome named =
+        build_attachment_graph(scratch.store("few"), job_for(few), {});
+    REQUIRE(named.state == AttachmentGraphOutcome::State::Built);
+    REQUIRE(named.mended.size() == kGraphLineMended);
+    CHECK(named.mended.back() == "m" + std::to_string(kGraphLineMended - 1) +
+                                     ".py: not UTF-8 -- 1 byte(s) shown as U+FFFD");
+}
+
 TEST_CASE("a member no attachment owns is forgotten before a pass, the rest re-linked",
           "[commands][attachments][graph]") {
     const Scratch scratch;

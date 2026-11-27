@@ -705,7 +705,7 @@ TEST_CASE("config get reads back every key a backend entry holds, unset as empty
     },
     "api": {"type": "anthropic", "api_key": "k-123",
             "server_tools": ["web_search", "code_execution"]},
-    "loc": {"type": "llamacpp", "model_path": "/m.gguf",
+    "loc": {"type": "llamacpp", "model_path": "/m.gguf", "mcp_serve": ["complete"],
             "adapters": [{"path": "/a.gguf", "scale": 0.8}, {"path": "/b.gguf"}]},
     "bare": {"type": "mock"}
   }
@@ -743,6 +743,7 @@ TEST_CASE("config get reads back every key a backend entry holds, unset as empty
         {"host", {"m", "127.0.0.1:1"}},
         {"idle_unload_seconds", {"m", "30"}},
         {"server_tools", {"api", "web_search\ncode_execution"}},
+        {"mcp_serve", {"loc", "complete"}},
         // One per line as --adapters takes each, the scale left out at 1.
         {"adapters", {"loc", "/a.gguf:0.8\n/b.gguf"}},
         {"draft", {"m", "/models/drafter"}},

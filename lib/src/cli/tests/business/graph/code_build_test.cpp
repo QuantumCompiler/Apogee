@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <optional>
 #include <random>
@@ -13,7 +14,9 @@
 
 #include "contracts/cancellation.h"
 #include "embedstore/store.h"
+#include "graph/code_extract.h"
 #include "graph/code_languages.h"
+#include "graph/code_parser.h"
 #include "support/env_guard.h"
 
 /// The code build over an injected file list (27k): incremental by content
@@ -219,6 +222,57 @@ TEST_CASE("a file parsed around a syntax error is used, and named partial",
     CHECK_FALSE(scratch.store.find_nodes("pkg.broken.fine").empty());
 }
 
+TEST_CASE("a file that is not UTF-8 is mended where it enters, used, and named",
+          "[graph][code][build][utf8][57t]") {
+    Scratch scratch;
+    Tree tree = python_tree();
+    // The sweep's probe: a Latin-1 byte in a name, as a file saved in that
+    // encoding holds it. It failed the whole build at the facts' dump.
+    tree.files["pkg/m.py"] = "def caf\xe9_atlas():\n    return helper()\n";
+    // The common case: Latin-1 in a comment and a string.
+    tree.files["pkg/c.py"] =
+        "# r\xe9sum\xe9 of the readings\ndef atlas():\n    return \"cr\xe8me\"\n";
+    const SourceBuildResult result = build(scratch.store, tree);
+    CHECK(result.skipped.empty());
+    CHECK(result.files_used == 5);
+    REQUIRE(result.mended.size() == 2);
+    CHECK(result.mended[0].member == "src");
+    CHECK(result.mended[0].file == "pkg/c.py");
+    CHECK(result.mended[0].bytes == 3);
+    CHECK(result.mended[1].file == "pkg/m.py");
+    CHECK(result.mended[1].bytes == 1);
+    CHECK(apogee::graph::mended_reason(result.mended[1]) ==
+          "not UTF-8 -- 1 byte(s) shown as U+FFFD");
+    // Mended text in a comment or a string costs the file nothing of its
+    // structure. A name the grammar cannot read past U+FFFD is parsed around
+    // it, and the file is named partial too -- what parsed is kept.
+    CHECK_FALSE(scratch.store.find_nodes("pkg.c.atlas").empty());
+    CHECK(result.partial == std::vector<std::string>{"src/pkg/m.py"});
+    CHECK_FALSE(scratch.store.find_nodes("pkg/m.py").empty());
+    CHECK_FALSE(scratch.store.find_nodes("pkg.lib.helper").empty());
+    // What was stored reads back, and dumps again without a throw.
+    const auto states = scratch.store.code_file_states("src");
+    for (const char* file : {"pkg/m.py", "pkg/c.py"}) {
+        INFO(file);
+        REQUIRE(states.contains(file));
+        const apogee::graph::FileFacts facts =
+            apogee::graph::facts_from_json(states.at(file).facts);
+        CHECK_NOTHROW((void)apogee::graph::facts_to_json(facts));
+    }
+
+    // The fingerprint is the bytes as read: an unchanged file is not parsed
+    // again, and is named again.
+    const SourceBuildResult again = build(scratch.store, tree);
+    CHECK(again.files_parsed == 0);
+    CHECK(again.files_unchanged == 5);
+    REQUIRE(again.mended.size() == 2);
+    CHECK(again.mended[1].file == "pkg/m.py");
+    // Valid files are never named.
+    tree.files.erase("pkg/m.py");
+    tree.files.erase("pkg/c.py");
+    CHECK(build(scratch.store, tree).mended.empty());
+}
+
 TEST_CASE("vendored and build directories are left out whole, counted per directory",
           "[graph][code][build][vendored]") {
     using apogee::graph::vendored_directory;
@@ -355,4 +409,54 @@ TEST_CASE("the same files, built or only linked, make the same graph", "[graph][
     CHECK(static_cast<int>(linked.nodes.size()) == built.nodes);
     CHECK(static_cast<int>(linked.edges.size()) == built.edges);
     CHECK(linked.counts.resolved() == built.counts.resolved());
+}
+
+TEST_CASE("the sweep's deep files build whole and in bounded time",
+          "[graph][code][build][deep][57t]") {
+    // Built through every stage -- parse, extract, link, store -- since the
+    // 500 KB Rust use tree, once its expansion was linear, still spent 42 s
+    // linking its 100000-segment path. Each bound sits far above what it
+    // takes (well under a second on the dev Mac) and far below what it took.
+    Scratch scratch;
+    Tree tree;
+    const std::size_t parens = 200000;
+    tree.files["d.py"] =
+        "x = " + std::string(parens, '(') + "1 +" + std::string(parens, ')') + "\n";
+    std::string rust = "use a::";
+    for (int level = 0; level < 100000; ++level) {
+        rust += "{b::";
+    }
+    rust += "c" + std::string(100000, '}') + ";\n";
+    tree.files["lib.rs"] = rust;
+    const auto started = std::chrono::steady_clock::now();
+    const SourceBuildResult result = build(scratch.store, tree);
+    const auto took = std::chrono::steady_clock::now() - started;
+    CHECK(result.skipped.empty());
+    CHECK(result.files_used == 2);
+    CHECK(result.partial == std::vector<std::string>{"src/d.py"});
+    CHECK(took < std::chrono::seconds{15});
+}
+
+TEST_CASE("nested definitions are named in time linear in their depth, each",
+          "[graph][code][extract][deep][57t]") {
+    // The definitions pass prepended each enclosing name, so every scope
+    // cost the square of its depth: 5000 nested functions took 16 s to
+    // build, 10000 two minutes. What a definition stores is still its whole
+    // path, so the facts grow with the square (Not done, 57t's record).
+    const std::size_t depth = 5000;
+    std::string nested;
+    for (std::size_t level = 0; level < depth; ++level) {
+        nested += "function f() { ";
+    }
+    nested += "g();" + std::string(depth, '}') + "\n";
+    const apogee::graph::CodeLanguage& js =
+        apogee::graph::code_language(apogee::graph::CodeLanguageId::JavaScript);
+    apogee::graph::CodeParser parser{js.id};
+    const auto started = std::chrono::steady_clock::now();
+    const apogee::graph::FileFacts facts =
+        apogee::graph::extract_code_facts(js, "n.js", nested, parser.parse(nested));
+    const auto took = std::chrono::steady_clock::now() - started;
+    REQUIRE(facts.definitions.size() == depth);
+    CHECK(facts.definitions.back().segments.size() == depth);  // f, depth times
+    CHECK(took < std::chrono::seconds{5});
 }

@@ -103,7 +103,11 @@ public struct TrainingScreen: View {
             isPresented: Binding(get: { model.pending != nil }, set: { if !$0 { model.pending = nil } }),
             titleVisibility: .visible
         ) {
-            Button(model.pendingAction, role: model.pending?.isDestructive == true ? .destructive : nil) { Task { await model.confirm() } }
+            // The answer is captured where the button is built: the dialog's
+            // closing clears the question before the Task runs (GUI M20).
+            if let answer = model.pending {
+                Button(model.pendingAction, role: answer.isDestructive ? .destructive : nil) { Task { await model.confirm(answer) } }
+            }
             Button("Cancel", role: .cancel) { model.pending = nil }
         } message: {
             Text(
@@ -150,8 +154,7 @@ struct RunsView: View {
                                     Spacer()
                                     Text(run.status).font(.apogeeMeta).foregroundStyle(Palette.textSecondary)
                                 }
-                                Text([run.method, run.trainer, run.finalLoss.map { String(format: "loss %.4f", $0) } ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                                    + " · " + TrainingViewModel.gate(run))
+                                Text(TrainingViewModel.summary(run))
                                     .font(.apogeeMeta)
                                     .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textTertiary)
                                     .lineLimit(1)
@@ -237,9 +240,10 @@ struct RunPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.m) {
                 Text(run.id).font(.apogeeHeading.monospacedDigit())
-                Text(TrainingViewModel.gate(run))
+                Text(run.listedByID ? TrainingViewModel.sentence(TrainingViewModel.listedByIDWords) : TrainingViewModel.gate(run))
                     .font(.apogeeSmall)
                     .foregroundStyle(run.evalPassed == false ? Palette.error : Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 fact("Trained", run.baseModel)
                 fact("On", run.dataset)
                 fact("How", [run.method, run.trainer, run.iterations.map { "\($0) iterations" } ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
@@ -747,6 +751,22 @@ struct SheetFrame<Fields: View>: View {
     RunsView(model: training)
         .frame(width: 900, height: 520)
         .task { await TrainingPreview.read(training) }
+}
+
+#Preview("Runs: one still training, older than the newest five, listed first and open") {
+    let training = TrainingPreview.training(runner: TrainingPreview.runningOlder)
+    RunsView(model: training)
+        .frame(width: 900, height: 520)
+        .task {
+            await training.connect(binary: previewBinary)
+            training.selectedRun = TrainingPreview.olderRunningID
+        }
+}
+
+#Preview("A run known by its id alone") {
+    RunPage(model: TrainingPreview.training(), run: TrainingRun(runningID: TrainingPreview.olderRunningID))
+        .frame(width: 380, height: 520)
+        .background(Palette.inspector)
 }
 
 #Preview("Runs: none read") {

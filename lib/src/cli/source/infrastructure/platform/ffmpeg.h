@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "platform/child_process.h"
+
 /// Running `ffmpeg` and `ffprobe` for media attachments (26e).
 ///
 /// Audio and video reach a model as samples and frames, and `ffmpeg` -- found
@@ -41,15 +43,10 @@ struct MediaInfo {
     int channels = 0;
 };
 
-/// Bounds on one run.
-struct FfmpegLimits {
-    std::chrono::milliseconds timeout{std::chrono::minutes{10}};
-    /// The most stdout a run may produce; past it the child is stopped and the
-    /// run fails, rather than holding an unbounded decode in memory.
-    std::uint64_t max_output = std::uint64_t{256} * 1024 * 1024;
-    /// Polled while it runs; true stops the child.
-    std::function<bool()> stopped;
-};
+/// Bounds on one run: a deadline, a cap on stdout and a stop callback -- the
+/// seam's captured run's own (`platform/child_process`, 56d), which every
+/// ffmpeg and ffprobe run goes through.
+using FfmpegLimits = CapturedLimits;
 
 /// The `ffmpeg` and `ffprobe` on `PATH`, or empty.
 [[nodiscard]] std::string ffmpeg_path();

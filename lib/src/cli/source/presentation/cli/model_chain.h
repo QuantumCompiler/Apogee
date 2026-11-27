@@ -52,6 +52,12 @@ struct ChainStage {
 /// throws, says where the chain stopped and how to resume -- unless the stage
 /// emptied `resume`, having found nothing after it could run (55d) -- and
 /// rethrows.
+///
+/// Every stage, and every gap between two, runs under one `InterruptScope`
+/// (57i) that each stage's own joins: a stage stops on its token, and a stop
+/// that lands between two stages is the next one's -- `cancelled -- nothing
+/// was written`, exit 130 -- so where the chain stopped and its resume line
+/// are said before a stream's `error`, whichever stage the stop met.
 ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ostream& out);
 
 }  // namespace apogee::commands

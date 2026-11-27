@@ -17,14 +17,23 @@ struct PreviewRunner: CommandRunning {
     /// refusal, its exit unknown to this module (it links no
     /// InfrastructureProcess), so a run that could not start.
     let refusals: [([String], String)]
+    /// Reads the binary refused in its recorded words, answered the same way.
+    let readRefusals: [([String], String)]
 
-    init(reads: [([String], String)], commands: [([String], String)] = [], refusals: [([String], String)] = []) {
+    init(
+        reads: [([String], String)], commands: [([String], String)] = [], refusals: [([String], String)] = [],
+        readRefusals: [([String], String)] = []
+    ) {
         self.reads = reads
         self.commands = commands
         self.refusals = refusals
+        self.readRefusals = readRefusals
     }
 
     func read(binary: URL, _ arguments: [String]) async -> ReadOutcome {
+        if let refusal = Self.answer(arguments, readRefusals) {
+            return .couldNotStart(refusal.trimmingCharacters(in: .newlines))
+        }
         guard let text = Self.answer(arguments, reads), let document = ReadDocument(text: text) else {
             return .couldNotStart("no preview document for apogee \(arguments.joined(separator: " "))")
         }

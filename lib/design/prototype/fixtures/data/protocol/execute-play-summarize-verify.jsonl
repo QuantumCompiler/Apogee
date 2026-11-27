@@ -1,0 +1,13 @@
+{"capabilities":{"accepts":["user","answer","attach","hello","cancel","detach","set","compact"],"ask":true,"events":["session","thinking","thinking_delta","memory","sources","tool_status","tool_call","notice","todo","answer_start","answer_delta","answer_end","result","question","error","task_started","task_plan","task_round","task_grant","task_finished","job","stage","bytes","ready","step","frames","assembling","segment","scene","iteration","pass","document"],"schema":"2026-11-01","tools":true},"chat_id":"20261119-095634-6953","model":"root","next_turn":1,"orchestrating":true,"protocol_version":1,"suite":"coding","type":"session"}
+{"text":"suite coding: no member holds memory on this machine","type":"notice"}
+{"text":"persona: coder, the shipped coding prompt, in every request -- -s replaces it","type":"notice"}
+{"text":"project context: AGENTS.md, 12 words, in every request","type":"notice"}
+{"text":"attaching . (2 files, 95 bytes)","type":"notice"}
+{"text":"attached .: 2 files, 2 chunks, no map: the model's window is unknown, searched by its words: no embedding model is set ('apogee config set-default-embedding') -- its excerpts are retrieved each turn","turn":1,"type":"notice"}
+{"text":"graph: 2 nodes, 1 edge (supported: python 1; skipped: .md 1)","turn":1,"type":"notice"}
+{"text":"stage 1/2 summarize — asking utility (helper): Summarize the passage below in at most three sentences. Keep…","turn":1,"type":"tool_status"}
+{"text":"stage 2/2 verify — asking chat (root): Here is a passage and a summary of it. Passage: The board…","turn":1,"type":"tool_status"}
+{"turn":1,"type":"answer_start"}
+{"text":"The board met on 14 October and moved the release to 3 November; Ana Ruiz owns the checklist.","turn":1,"type":"answer_delta"}
+{"turn":1,"type":"answer_end"}
+{"finish_reason":"stop","model":"root","text":"The board met on 14 October and moved the release to 3 November; Ana Ruiz owns the checklist.","turn":1,"type":"result"}

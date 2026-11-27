@@ -19,6 +19,7 @@
 #include "agentloop/member_call.h"
 #include "agentloop/tool_selection.h"
 #include "ansi/ansi.h"
+#include "ansi/inert.h"
 #include "backends/factory.h"
 #include "cli/chat_history.h"
 #include "cli/chat_recall.h"
@@ -49,6 +50,7 @@
 #include "tasks/unattended.h"
 #include "tasks/view.h"
 #include "tools/consult.h"
+#include "tools/toolsets.h"
 #include "views/ask_prompt.h"
 #include "views/cli_reporter.h"
 #include "views/terminal.h"
@@ -261,7 +263,10 @@ void print_section(std::ostream& out, const tasks::TaskView& view, std::string_v
                 out << heading << ":\n";
                 any = true;
             }
-            out << "  " << round_name(turn) << ": " << row(record) << "\n";
+            // A line (57p): a target, a question and an answer are the
+            // model's or a declaration's, drawn and never obeyed; the ledger
+            // keeps them as they were.
+            out << "  " << round_name(turn) << ": " << ansi::inert_line(row(record)) << "\n";
         }
     }
 }
@@ -311,7 +316,7 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
         << "started:       " << view.created_at << "\n"
         << "updated:       " << view.updated_at << "\n";
     if (!view.reason.empty()) {
-        out << "reason:        " << view.reason << "\n";
+        out << "reason:        " << ansi::inert_line(view.reason) << "\n";
     }
     // Each check's state as the newest completed round left it.
     out << "checks:\n";
@@ -326,7 +331,7 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
         std::istringstream lines{view.plan};
         std::string line;
         while (std::getline(lines, line)) {
-            out << "  " << line << "\n";
+            out << "  " << ansi::inert_line(line) << "\n";  // the model's plan, a line each (57p)
         }
     }
     if (!view.turns.empty()) {
@@ -485,6 +490,37 @@ struct Drive {
     std::optional<tasks::Task> existing;
 };
 
+/// From the lock to the run (57u): a refusal in between -- a grant, a
+/// backend, a suite -- leaves no request it never read, and a new task no
+/// directory, which `task list` would otherwise find with no ledger in it.
+/// Dropped before the lock is let go, and kept from the run on, which reads
+/// and clears the request itself.
+class StartingRun {
+public:
+    StartingRun(fs::path root, std::string id) : root_{std::move(root)}, id_{std::move(id)} {}
+
+    ~StartingRun() {
+        if (!started_) {
+            tasks::discard_unread_request(root_, id_);
+        }
+    }
+
+    StartingRun(const StartingRun&) = delete;
+    StartingRun& operator=(const StartingRun&) = delete;
+    StartingRun(StartingRun&&) = delete;
+    StartingRun& operator=(StartingRun&&) = delete;
+
+    /// The run begins: what the request asks is its to honour.
+    void started() noexcept {
+        started_ = true;
+    }
+
+private:
+    fs::path root_;
+    std::string id_;
+    bool started_ = false;
+};
+
 /// `task run` and `task resume`: the session assembled as `chat` assembles
 /// one, with nobody to ask, and the runner driven over its turns.
 /// In machine mode the events go to `events` -- stdout for the command, a
@@ -554,6 +590,10 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     if (!lock.has_value()) {
         fail_user(lock_error);
     }
+    // A stop may be sent from here on, before the ledger is read or written:
+    // the lock names this task. Declared after the lock, so it is let go
+    // first (57u).
+    StartingRun starting{root, task_id};
 
     tasks::Task task;
     logger::Session session;
@@ -647,6 +687,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     reporter_options.width = static_cast<std::size_t>(platform::terminal_width().value_or(80));
     reporter_options.markdown = !flags.raw && config.ui.markdown;
     reporter_options.hyperlinks = ansi::hyperlinks_supported();
+    reporter_options.answer_is_terminal = platform::is_terminal(platform::StandardStream::Out);
     CliReporter reporter{status_writer, reporter_options};
     const ansi::Style& style = reporter_options.style;
     // A model loading says so on the spinner -- never into machine mode's
@@ -672,14 +713,25 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
             chosen_suite = probe.models.default_suite;
         }
     }
+    // Every member of the suite the task runs under answers under its own
+    // name or the task is refused before anything is made -- one that did not
+    // start as well as one naming nothing (57d), as chat's opening holds it:
+    // asked before the suite is switched to, so nothing is rebuilt for it.
+    {
+        harness::Config probe = config;
+        if (chosen_suite.has_value()) {
+            probe.models.default_suite = *chosen_suite;
+        }
+        if (const std::string refused = validate_active_suite(probe, built); !refused.empty()) {
+            fail_user(what.existing.has_value() ? "task " + task.id + " cannot resume: " + refused
+                                                : refused);
+        }
+    }
     if (chosen_suite.has_value() && *chosen_suite != config.models.default_suite) {
         for (const std::string& line :
              activate_suite(harness, config, *chosen_suite, build_options)) {
             reporter.status().print_line(style.tag(ansi::Role::Warning) + " " + line);
         }
-    }
-    if (const std::string refused = validate_active_suite(config); !refused.empty()) {
-        fail_user(refused);
     }
     std::optional<models::SuiteFootprint> footprint;
     if (!config.models.default_suite.empty()) {
@@ -941,6 +993,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     }
 
     const InterruptScope interrupt;
+    starting.started();
     const tasks::RunOutcome outcome = tasks::run_task(
         tasks::RunRequest{.root = root,
                           .task = task,
@@ -948,7 +1001,9 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
                           .turn = turn,
                           .say =
                               [&reporter, &style](std::string_view line) {
-                                  reporter.status().print_line(style.dim(std::string{line}));
+                                  // The narration repeats a model's target and
+                                  // question: a line, before it is styled (57p).
+                                  reporter.status().print_line(style.dim(ansi::inert_line(line)));
                               },
                           .interrupt = InterruptScope::token(),
                           .poll = std::chrono::milliseconds{200},
@@ -1210,7 +1265,7 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
                     "Grant a tool that writes for this task's life, so it runs without asking -- "
                     "each tool named, every use recorded, never wider than the config or the "
                     "agent allows (repeatable, with --tools)")
-        ->type_name(kToolValue)
+        ->type_name(kOfferedToolValue)
         ->expected(1)
         ->allow_extra_args(false)
         ->multi_option_policy(CLI::MultiOptionPolicy::TakeAll);
@@ -1405,11 +1460,34 @@ std::string task_status_text(const std::string& id) {
 std::string request_task_stop(const std::string& id, tasks::Request request) {
     const fs::path root = harness::tasks_dir();
     const std::string verb{tasks::to_string(request)};
+    // A new run still starting (57u): the lock names its task before its
+    // ledger is written. The request is left for it, and the run reads it
+    // before any model call.
+    if (const std::optional<std::string> running = tasks::running_task(root);
+        running.has_value() && (id.empty() || id == *running) &&
+        !tasks::ledger_written(root, *running)) {
+        if (const std::string failure = tasks::write_request(root, *running, request);
+            !failure.empty()) {
+            throw std::runtime_error("could not ask task " + *running + " to " + verb + ": " +
+                                     failure);
+        }
+        // The run let the lock go without a ledger: it was refused before it
+        // started, so the request is for no one and goes with its directory.
+        if (tasks::running_task(root) != running && !tasks::ledger_written(root, *running)) {
+            tasks::discard_unread_request(root, *running);
+            throw std::runtime_error("task " + *running +
+                                     " ended before it started -- there is nothing to " + verb);
+        }
+        return "asked task " + *running + " to " + verb + ": it stops before it starts";
+    }
     tasks::Task task = find_task(root, id, /*prefer_running=*/true);
-    if (!task_stoppable(task, request)) {
+    // A resume still starting runs the task, though its ledger still says
+    // how it last stopped -- failed, cancelled -- until the run begins.
+    const bool runs = tasks::running_task(root) == task.id;
+    if (!task_stoppable(task, request, runs)) {
         throw std::runtime_error(stop_refusal(task, verb));
     }
-    if (tasks::running_task(root) == task.id) {
+    if (runs) {
         if (const std::string failure = tasks::write_request(root, task.id, request);
             !failure.empty()) {
             throw std::runtime_error("could not ask task " + task.id + " to " + verb + ": " +
@@ -1434,7 +1512,7 @@ std::string request_task_stop(const std::string& id, tasks::Request request) {
         task = std::move(*fresh);
     }
     // Read again under the lock: what it holds now is what is stopped.
-    if (!task_stoppable(task, request)) {
+    if (!task_stoppable(task, request, /*running=*/false)) {
         throw std::runtime_error(stop_refusal(task, verb));
     }
     if (request == tasks::Request::Halt) {
@@ -1464,6 +1542,15 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     // The agent's policy is the one filter over the registry (Milestone X):
     // what it leaves out is not offered, so it cannot be granted either.
     out.tools = agent != nullptr ? apply_tool_policy(available, agent->tools) : available;
+    // A grant of a native tool this build never offers is refused saying why
+    // (57k: a shell or git tool where no program can be started), before the
+    // ceiling would call it no tool of the task's.
+    for (const std::string& grant : policy.grants) {
+        if (const std::string why = tools::why_not_offered(grant); !why.empty()) {
+            out.refusal = "--allow " + grant + ": " + why;
+            return out;
+        }
+    }
     out.refusal = tasks::grant_refusal(
         policy.grants,
         tasks::GrantScope{.available = &available,
@@ -1492,7 +1579,10 @@ TaskGate compose_task_gate(const harness::Config& config, const agent::ToolRegis
     return out;
 }
 
-bool task_stoppable(const tasks::Task& task, tasks::Request request) noexcept {
+bool task_stoppable(const tasks::Task& task, tasks::Request request, bool running) noexcept {
+    if (running) {
+        return !tasks::finished(task);
+    }
     return request == tasks::Request::Halt ? tasks::live(task) : !tasks::finished(task);
 }
 

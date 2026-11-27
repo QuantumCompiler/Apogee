@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <sstream>
+#include <system_error>
 
 #include "contracts/config_edit.h"
 #include "modelstore/hf_ref.h"
@@ -95,6 +96,36 @@ constexpr std::string_view kVideoPointer = "default_video";
         return true;
     }
     return format == models::kMlxFormat && models::read_mlx_kind(dir).word == models::kMlxVideo;
+}
+
+/// Every stored set under `path` -- a model's directory, or one format's
+/// under it -- that a `default_video` naming it could run (`runs_video`);
+/// staging (`.incoming-*`) is no set.
+[[nodiscard]] std::vector<std::filesystem::path> video_sets_under(
+    const std::filesystem::path& path) {
+    std::vector<std::filesystem::path> out;
+    const auto take = [&out](const std::filesystem::path& format_dir) {
+        std::error_code code;
+        for (const auto& entry : std::filesystem::directory_iterator(format_dir, code)) {
+            std::error_code kind;
+            if (entry.is_directory(kind) && !entry.path().filename().string().starts_with(".") &&
+                runs_video(entry.path())) {
+                out.push_back(entry.path());
+            }
+        }
+    };
+    if (models::is_store_format(path.filename().string())) {
+        take(path);
+        return out;
+    }
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(path, code)) {
+        std::error_code kind;
+        if (entry.is_directory(kind) && models::is_store_format(entry.path().filename().string())) {
+            take(entry.path());
+        }
+    }
+    return out;
 }
 
 /// One adapter as `config set-backend --adapters` takes it: `<path>`, or
@@ -209,6 +240,36 @@ bool points_inside(const models::StoreRoots& roots, const StoreReference& refere
     // The set it names, or one inside it; else the model (or format) whose
     // one video model it runs.
     return within(target.path, dir) || (within(dir, target.path) && runs_video(dir));
+}
+
+bool removal_strands(const models::StoreRoots& roots, const StoreReference& reference,
+                     const std::vector<std::filesystem::path>& removes) {
+    const auto removed = [&removes](const std::filesystem::path& path) {
+        return std::ranges::any_of(
+            removes, [&path](const std::filesystem::path& gone) { return within(path, gone); });
+    };
+    if (!reference.backend.empty()) {
+        return removed(expanded(reference.value));
+    }
+    const models::StoreTarget target = models::resolve_store_target(roots, reference.value);
+    if (!target.error.empty() || target.outside) {
+        return false;
+    }
+    // The set it names, or one it lies inside.
+    if (removed(target.path)) {
+        return true;
+    }
+    // A model -- or a format under it -- runs the one video set it holds:
+    // stranded only when one of them goes and none is left (57i). With two
+    // before the delete it named none; with one left after, it names that.
+    const bool takes_one =
+        std::ranges::any_of(removes, [&target](const std::filesystem::path& dir) {
+            return within(dir, target.path) && runs_video(dir);
+        });
+    if (!takes_one) {
+        return false;
+    }
+    return std::ranges::all_of(video_sets_under(target.path), removed);
 }
 
 std::optional<std::string> repointed_value(const models::StoreRoots& roots,

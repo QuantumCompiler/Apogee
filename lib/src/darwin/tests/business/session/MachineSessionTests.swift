@@ -4,6 +4,7 @@ import DataPreferences
 import DataProtocol
 import Foundation
 import InfrastructureProcess
+import Synchronization
 import Testing
 
 /// Reads a session's events one at a time, as a window would.
@@ -206,6 +207,41 @@ struct MachineSessionTests {
         #expect(ContinuousClock.now - started >= .milliseconds(300))
     }
 
+    @Test("6a: terminateNow takes the stop's terminate step at once, long before its own deadline -- one SIGTERM, the stop ending with the child")
+    func terminateNowSignalsAtOnce() async throws {
+        let child = StubbornChild(endsOn: "terminate")
+        let session = MachineSession.start(spawner: StubbornSpawner(child: child), command: child.command, hello: nil)
+        var reader = EventReader(session)
+        child.say(#"{"type":"session","protocol_version":1,"model":"local","next_turn":1}"#)
+        _ = await reader.untilKind { if case .session = $0 { true } else { false } }
+        let started = ContinuousClock.now
+        let stopping = Task { await session.stop(grace: .seconds(30)) }
+        while !child.asked.contains("closeInput") { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(child.asked == ["closeInput"], "EOF first: the child ignores it")
+        await session.terminateNow()
+        #expect(child.asked == ["closeInput", "terminate"], "the SIGTERM sent now, not at the stop's deadline")
+        await stopping.value
+        #expect(ContinuousClock.now - started < .seconds(5), "the stop ended with the child, long before its 30 s")
+        #expect(child.asked == ["closeInput", "terminate"], "no second SIGTERM, no kill")
+        #expect(try #require(await reader.untilEnded()).reason == .stopped)
+        await session.terminateNow()
+        #expect(child.asked == ["closeInput", "terminate"], "an ended child is left alone")
+    }
+
+    @Test("6a: a child that ignores the early SIGTERM too is still killed by the stop, two seconds after its own deadline -- and sent no second SIGTERM")
+    func earlySignalThenTheKill() async throws {
+        let child = StubbornChild(endsOn: "kill")
+        let session = MachineSession.start(spawner: StubbornSpawner(child: child), command: child.command, hello: nil)
+        var reader = EventReader(session)
+        child.say(#"{"type":"session","protocol_version":1,"model":"local","next_turn":1}"#)
+        _ = await reader.untilKind { if case .session = $0 { true } else { false } }
+        let stopping = Task { await session.stop(grace: .milliseconds(100)) }
+        await session.terminateNow()
+        await stopping.value
+        #expect(child.asked == ["closeInput", "terminate", "kill"])
+        #expect(try #require(await reader.untilEnded()).reason == .stopped)
+    }
+
     @Test("a session whose binary will not start ends at once, saying why")
     func couldNotStart() async throws {
         let session = MachineSession.start(
@@ -259,4 +295,63 @@ struct MachineSessionRegistryTests {
         _ = await reader.untilEnded()
         #expect(registry.children.isEmpty)
     }
+}
+
+/// A child that ignores cancel and end of input: it ends only on the signal
+/// it is told to, `terminate` or `kill`, and records each step asked of it,
+/// in order. Its stdout is what the test has it say.
+final class StubbornChild: RunningChild, @unchecked Sendable {
+    let lines: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private let endsOn: String
+    private let log = Mutex<[String]>([])
+    private let exit = Mutex<(code: ChildExit?, waiting: [CheckedContinuation<ChildExit, Never>])>((nil, []))
+
+    init(endsOn: String) {
+        self.endsOn = endsOn
+        (lines, continuation) = AsyncStream.makeStream(of: String.self)
+    }
+
+    let command = ChildCommand(executable: URL(fileURLWithPath: "/nonexistent/stubborn-apogee"))
+
+    var asked: [String] { log.withLock { $0 } }
+
+    func say(_ line: String) { continuation.yield(line) }
+
+    var stderrTail: BoundedTail { BoundedTail() }
+    var processIdentifier: Int32 { 4343 }
+    func write(_ data: Data) throws {}
+    func closeInput() { log.withLock { $0.append("closeInput") } }
+    func interrupt() { log.withLock { $0.append("interrupt") } }
+    func terminate() { signalled("terminate", SIGTERM) }
+    func kill() { signalled("kill", SIGKILL) }
+
+    private func signalled(_ step: String, _ signal: Int32) {
+        log.withLock { $0.append(step) }
+        guard step == endsOn else { return }
+        let waiting = exit.withLock { state -> [CheckedContinuation<ChildExit, Never>] in
+            state.code = ChildExit(reason: .signalled, status: signal)
+            defer { state.waiting = [] }
+            return state.waiting
+        }
+        continuation.finish()
+        waiting.forEach { $0.resume(returning: ChildExit(reason: .signalled, status: signal)) }
+    }
+
+    func waitForExit() async -> ChildExit {
+        await withCheckedContinuation { (waiting: CheckedContinuation<ChildExit, Never>) in
+            let code = exit.withLock { state -> ChildExit? in
+                if let code = state.code { return code }
+                state.waiting.append(waiting)
+                return nil
+            }
+            if let code { waiting.resume(returning: code) }
+        }
+    }
+}
+
+/// Hands out the one stubborn child.
+struct StubbornSpawner: ChildSpawner {
+    let child: StubbornChild
+    func spawn(_ command: ChildCommand) throws -> any RunningChild { child }
 }

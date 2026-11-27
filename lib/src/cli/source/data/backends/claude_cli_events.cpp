@@ -89,8 +89,17 @@ namespace {
 }
 
 /// An `assistant` message is normally already streamed, but a tool_use block
-/// is the one thing the delta stream does not announce in a usable form.
+/// is the one thing the delta stream does not announce in a usable form --
+/// and a failed request's synthetic message (M34) names the failure's kind in
+/// its `error`, which the result after it does not. Its text is the result's
+/// reason again, so it is never an answer.
 [[nodiscard]] std::optional<CliEvent> parse_assistant(const nlohmann::json& root) {
+    // Read only as a string: an error in a shape never seen is not guessed at.
+    if (const auto error = root.find("error"); error != root.end() && error->is_string() &&
+                                               !error->get_ref<const std::string&>().empty()) {
+        return CliEvent{MessageError{.kind = error->get<std::string>()}};
+    }
+
     const auto message = root.find("message");
     if (message == root.end() || !message->is_object()) {
         return std::nullopt;
@@ -212,7 +221,19 @@ std::string describe(const CliEvent& event) {
             } else if constexpr (std::is_same_v<T, ToolOutcome>) {
                 return std::string{"tool_result:"} + (value.is_error ? "error" : "ok");
             } else if constexpr (std::is_same_v<T, TurnComplete>) {
-                return "result:" + (value.is_error ? value.error_subtype : std::string{"success"});
+                if (!value.is_error) {
+                    return "result:success";
+                }
+                // The error, never the subtype "success" Claude Code files a
+                // failed request under (M34): its kind when the provider kept
+                // one, a real subtype (`error_max_turns`), else "error".
+                if (!value.error_type.empty()) {
+                    return "result:" + value.error_type;
+                }
+                const bool named = !value.error_subtype.empty() && value.error_subtype != "success";
+                return "result:" + (named ? value.error_subtype : std::string{"error"});
+            } else if constexpr (std::is_same_v<T, MessageError>) {
+                return "error:" + value.kind;
             } else {
                 return "notice:" + value.kind;
             }

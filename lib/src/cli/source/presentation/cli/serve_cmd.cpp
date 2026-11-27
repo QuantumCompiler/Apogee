@@ -4,9 +4,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -32,8 +34,10 @@
 #include "httpserver/serve.h"
 #include "logger/operational.h"
 #include "mcp/registry.h"
+#include "mcp/types.h"
 #include "operations/suites.h"
 #include "tools/todo.h"
+#include "tools/toolsets.h"
 
 namespace apogee::commands {
 namespace {
@@ -77,7 +81,97 @@ std::string join(const std::vector<std::string>& items) {
     return out;
 }
 
+/// `tools: <n> (<sets>)`: the registry described, never narrowed -- each
+/// native toolset by its word (`files under <root>` for `fs`), the website
+/// tools by name, any other tool by name, and the MCP servers last.
+std::string describe_tools(const agent::ToolRegistry& tools, const std::filesystem::path& fs_root) {
+    std::set<std::string, std::less<>> toolsets;
+    std::vector<std::string> web;
+    std::vector<std::string> others;
+    std::set<std::string, std::less<>> servers;
+    for (const std::string& name : tools.names()) {
+        const std::string toolset = tools::toolset_of(name);
+        if (toolset == "mcp") {
+            std::string server;
+            std::string tool;
+            servers.insert(mcp::split_namespaced(name, server, tool) ? server : name);
+        } else if (toolset == "web") {
+            web.push_back(name);
+        } else if (toolset.empty()) {
+            others.push_back(name);
+        } else {
+            toolsets.insert(toolset);
+        }
+    }
+
+    std::vector<std::string> parts;
+    for (const std::string_view toolset : tools::toolset_names()) {
+        if (!toolsets.contains(toolset)) {
+            continue;
+        }
+        parts.push_back(toolset == "fs" ? "files under " + fs_root.string() : std::string{toolset});
+    }
+    if (!web.empty()) {
+        // An outbound tool is asked about by host, and nobody is there to
+        // ask: it reaches only what `tools.allowed_hosts` lists.
+        parts.push_back(join(web) + " to listed hosts");
+    }
+    parts.insert(parts.end(), others.begin(), others.end());
+    std::string described = join(parts);
+    if (!servers.empty()) {
+        described += described.empty() ? "MCP: " : ", plus MCP: ";
+        described += join(std::vector<std::string>{servers.begin(), servers.end()});
+    }
+    return "tools: " + std::to_string(tools.size()) + " (" + described + ")";
+}
+
+/// The gated tools the checker allows with nobody to ask: those that run on
+/// a client's word alone.
+std::vector<std::string> unasked_tools(const agent::ToolRegistry& tools,
+                                       const agent::PermissionChecker& permission) {
+    std::vector<std::string> out;
+    if (!permission) {
+        return out;
+    }
+    for (const std::string& name : gated_tools(tools)) {
+        const agent::Tool* tool = tools.find(name);
+        if (tool == nullptr || tool->outbound) {
+            continue;  // decided per website, said beside the tool's name
+        }
+        const agent::GateRequest request{.tool = name, .target = {}, .edits = tool->edits};
+        if (permission(request) == agent::Permission::Allow) {
+            out.push_back(name);
+        }
+    }
+    return out;
+}
+
 }  // namespace
+
+std::string serve_summary(const ServeSummaryInput& input) {
+    std::string summary = "serving " + join(input.served);
+    if (!input.default_backend.empty()) {
+        summary += " (default " + input.default_backend + ")";
+    }
+    if (input.tools != nullptr && !input.tools->empty()) {
+        summary += " -- " + describe_tools(*input.tools, input.fs_root);
+        const std::vector<std::string> unasked = unasked_tools(*input.tools, input.permission);
+        summary += " -- runs unasked: " + (unasked.empty() ? std::string{"none"} : join(unasked));
+    } else {
+        summary += " -- tools: none";
+    }
+    if (input.rag.active()) {
+        summary += " -- rag: " + input.rag.collection +
+                   (input.rag.source == RagSource::Config ? " (auto_rag)" : "");
+    } else {
+        summary += " -- rag: off";
+    }
+    summary +=
+        input.session_ttl_minutes > 0
+            ? " -- sessions idle out after " + std::to_string(input.session_ttl_minutes) + " min"
+            : " -- sessions never idle out";
+    return summary;
+}
 
 std::string_view ServeCommand::name() const noexcept {
     return "serve";
@@ -102,7 +196,9 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                     "--allow-remote)");
     cmd->add_option("--port", flags->port, "Port to listen on (default 8080; 0 picks a free one)");
     cmd->add_flag("--allow-remote", flags->allow_remote,
-                  "Permit a non-loopback --bind: this is a server deployment");
+                  "Permit a non-loopback --bind, and on any bind answer whatever Host a reverse "
+                  "proxy forwards (its access control owns the name): this is a server "
+                  "deployment");
     flags->rag_option =
         cmd->add_option("--rag", flags->rag,
                         "Retrieve context from this collection on every request (see 'apogee "
@@ -123,8 +219,14 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
                     "(?rerank= overrides)")
         ->type_name(kBackendValue);
     cmd->add_flag("--tools", flags->tools,
-                  "Let the model call tools server-side (fetch_url); clients see only the "
-                  "final answer");
+                  "Let the model call tools server-side, the built-in set as chat has it: files "
+                  "under tools.fs_root (the launch folder by default), notes, rag, graph, shell "
+                  "and git where this build can start programs, fetch_url to "
+                  "tools.allowed_hosts, web_search where tools.search names a SearXNG, the "
+                  "session todo, and every enabled MCP server. A tool "
+                  "that writes runs only where the config's permissions say allow. Any client "
+                  "of the port can ask, and sees only the final answer; the startup line names "
+                  "what runs unasked");
     cmd->add_flag("--search", flags->search,
                   "Enable the provider's own server-side web search, where it has one");
     cmd->add_flag("--preload", flags->preload,
@@ -352,20 +454,16 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             };
         }
 
-        std::string summary = "serving " + join(options.served);
-        if (!default_key.empty()) {
-            summary += " (default " + default_key + ")";
-        }
-        summary += flags->tools ? " -- tools: fetch_url" : " -- tools: none";
-        if (rag_choice.active()) {
-            summary += " -- rag: " + rag_choice.collection +
-                       (rag_choice.source == RagSource::Config ? " (auto_rag)" : "");
-        } else {
-            summary += " -- rag: off";
-        }
-        summary += flags->session_ttl > 0 ? " -- sessions idle out after " +
-                                                std::to_string(flags->session_ttl) + " min"
-                                          : " -- sessions never idle out";
+        // What the operator is told is what a client can make happen (57n):
+        // the registry as built, and the checker it is gated by.
+        const std::string summary = serve_summary(ServeSummaryInput{
+            .served = options.served,
+            .default_backend = default_key,
+            .tools = flags->tools ? &registry : nullptr,
+            .permission = options.permission,
+            .fs_root = tools::effective_fs_root(harness::expand_env(config.tools.fs_root)).path,
+            .rag = rag_choice,
+            .session_ttl_minutes = flags->session_ttl});
         note(summary);
         note(
             "/v1/admin enabled -- bearer token required; 'apogee serve --print-admin-token' "

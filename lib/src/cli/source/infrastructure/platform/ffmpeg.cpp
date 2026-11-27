@@ -19,130 +19,19 @@ namespace apogee::platform {
 
 namespace {
 
-/// Bytes of a child's stderr kept for an error message.
-constexpr std::size_t kStderrTail = 8 * 1024;
+/// What one run produced: the seam's captured run (`platform/child_process`).
+using Run = CapturedRun;
 
-/// What one run produced.
-struct Run {
-    std::string out;
-    std::string tail;
-    /// Why the run did not finish cleanly, or empty.
-    std::string error;
-};
-
-/// The last line in `tail` with anything on it.
-[[nodiscard]] std::string last_line(std::string_view tail) {
-    while (!tail.empty() && (tail.back() == '\n' || tail.back() == '\r' || tail.back() == ' ')) {
-        tail.remove_suffix(1);
-    }
-    const std::size_t start = tail.find_last_of('\n');
-    return std::string{start == std::string_view::npos ? tail : tail.substr(start + 1)};
-}
-
-/// Runs `program` with `arguments` to completion under `limits`. Each line of
-/// stderr goes to `on_line` as it arrives; the last `kStderrTail` bytes are
-/// kept for the error.
+/// Runs `program` with `arguments` to completion under `limits`, through the
+/// seam's one bounded captured run. Each line of stderr goes to `on_line` as
+/// it arrives; its last bytes are kept for the error.
 [[nodiscard]] Run run(const std::string& program, std::vector<std::string> arguments,
                       const FfmpegLimits& limits,
                       const std::function<void(std::string_view)>& on_line = {}) {
-    Run out;
     ChildCommand command;
     command.program = program;
     command.arguments = std::move(arguments);
-    std::string error;
-    const std::unique_ptr<ChildProcess> child = start_child(command, error);
-    if (child == nullptr) {
-        out.error = "could not start " + program + (error.empty() ? "" : ": " + error);
-        return out;
-    }
-    child->close_stdin();
-
-    const auto deadline = std::chrono::steady_clock::now() + limits.timeout;
-    std::string pending;  // a stderr line not yet ended
-    const auto take_stderr = [&](std::string_view piece) {
-        out.tail += piece;
-        if (out.tail.size() > kStderrTail) {
-            out.tail.erase(0, out.tail.size() - kStderrTail);
-        }
-        if (!on_line) {
-            return;
-        }
-        pending += piece;
-        for (std::size_t end = pending.find('\n'); end != std::string::npos;
-             end = pending.find('\n')) {
-            on_line(std::string_view{pending}.substr(0, end));
-            pending.erase(0, end + 1);
-        }
-    };
-    const auto stop = [&](std::string why) {
-        child->terminate();
-        (void)child->wait_for_exit(std::chrono::seconds{2});
-        out.error = std::move(why);
-    };
-
-    bool out_open = true;
-    bool err_open = true;
-    std::string piece;
-    while (out_open || err_open) {
-        if (limits.stopped && limits.stopped()) {
-            stop("stopped");
-            return out;
-        }
-        if (std::chrono::steady_clock::now() >= deadline) {
-            stop(program + " took longer than " +
-                 std::to_string(
-                     std::chrono::duration_cast<std::chrono::seconds>(limits.timeout).count()) +
-                 " seconds");
-            return out;
-        }
-        if (out_open) {
-            switch (child->read_stdout(piece, std::chrono::milliseconds{50})) {
-                case ReadStatus::Data:
-                    out.out += piece;
-                    if (out.out.size() > limits.max_output) {
-                        stop(program + " wrote more than " +
-                             std::to_string(limits.max_output / (1024 * 1024)) + " MB");
-                        return out;
-                    }
-                    break;
-                case ReadStatus::Timeout:
-                    break;
-                case ReadStatus::Eof:
-                case ReadStatus::Error:
-                    out_open = false;
-                    break;
-            }
-        }
-        if (err_open) {
-            switch (child->read_stderr(piece, std::chrono::milliseconds{out_open ? 0 : 50})) {
-                case ReadStatus::Data:
-                    take_stderr(piece);
-                    break;
-                case ReadStatus::Timeout:
-                    break;
-                case ReadStatus::Eof:
-                case ReadStatus::Error:
-                    err_open = false;
-                    break;
-            }
-        }
-    }
-    if (!pending.empty() && on_line) {
-        on_line(pending);
-    }
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-        deadline - std::chrono::steady_clock::now());
-    const std::optional<int> status =
-        child->wait_for_exit(std::max(remaining, std::chrono::milliseconds{1000}));
-    if (!status.has_value()) {
-        stop(program + " did not exit");
-        return out;
-    }
-    if (*status != 0) {
-        const std::string said = last_line(out.tail);
-        out.error = program + " failed" + (said.empty() ? "" : ": " + said);
-    }
-    return out;
+    return run_captured(command, limits, on_line);
 }
 
 /// `seconds` as ffmpeg takes a time: plain decimal, never an exponent.

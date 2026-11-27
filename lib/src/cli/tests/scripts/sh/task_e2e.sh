@@ -19,6 +19,10 @@
 #     cancellation, and `task halt` stopping one when its round ends;
 #   * `chats delete` refused on a live task's conversation, allowed once the
 #     task is cancelled; and the task ids offered by completion;
+#   * a `task cancel` or `task halt` sent while a resume is still starting --
+#     its MCP server connecting -- kept and honoured before any round; and a
+#     new run stopped in its setup and killed there leaving no problem for
+#     `task list`, before the next run or after it (57u);
 #   * the autonomy policy (27i): a write granted with `--allow` run with
 #     nothing prompting, the grant and its use with its target in the ledger
 #     and `task status`; a question answered by `--on-question answer:` to
@@ -464,6 +468,92 @@ script halted '{"text": "It is 42.\nTASK STATUS: DONE"}'
     2>/dev/null || fail "task status --output-format json of the resumed task"
 stream_check "$WORK_DIR/unhalted.jsonl" "$(ledger "$HALTED")" "$WORK_DIR/unhalted-status.json" 1 \
     || fail "the resumed task's stream does not open with its whole history"
+
+# --- 57u: a stop sent while a resume starts is kept, before any model call ------------
+# The sweep's probe: a task failed on a question, its config given an MCP
+# server that takes six seconds to fail, `task resume` in the background and
+# the stop sent 1.5 s into its setup -- while the lock already names the task
+# and the runner has not begun. Once acknowledged with exit 0 and then
+# cleared by the very run it was for; now the run ends before any round.
+"$APOGEE_BIN" mcp create slow --command /bin/sh --args -c 'sleep 6' </dev/null >"$WORK_DIR/slow.txt" 2>&1 \
+    || fail "mcp create slow: $(cat "$WORK_DIR/slow.txt")"
+turns_of() { python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['turns'])" "$(session_of "$1")"; }
+stop_during_setup() {  # stop_during_setup <halt|cancel> <exit code> <status> <reason>
+    local verb=$1 want_code=$2 want_status=$3 want_reason=$4 runner code i
+    local rounds turns
+    rounds=$(field "$UNASKED" "[x['event'] for x in t['transitions']].count('round_started')")
+    turns=$(turns_of "$UNASKED")
+    "$APOGEE_BIN" task resume "$UNASKED" </dev/null >"$WORK_DIR/setup-$verb.txt" 2>&1 &
+    runner=$!
+    for i in $(seq 1 200); do
+        grep -q "$UNASKED" "$APOGEE_HOME/tasks/task.lock" 2>/dev/null && break
+        sleep 0.1
+    done
+    sleep 1.5
+    # Still starting: the ledger has not moved past how it last stopped.
+    [ "$(field "$UNASKED" "t['transitions'][-1]['event']")" = finished ] \
+        || fail "the resume began before the $verb was sent -- not its setup: $(cat "$WORK_DIR/setup-$verb.txt")"
+    "$APOGEE_BIN" task "$verb" "$UNASKED" </dev/null >"$WORK_DIR/setup-$verb-stop.txt" 2>&1 \
+        || fail "task $verb during a resume's setup: $(cat "$WORK_DIR/setup-$verb-stop.txt")"
+    grep -q "asked task $UNASKED to $verb" "$WORK_DIR/setup-$verb-stop.txt" \
+        || fail "task $verb did not ask the starting run: $(cat "$WORK_DIR/setup-$verb-stop.txt")"
+    wait "$runner"
+    code=$?
+    [ "$code" = "$want_code" ] || fail "a resume stopped by $verb in its setup exited $code: $(cat "$WORK_DIR/setup-$verb.txt")"
+    [ "$(field "$UNASKED" "t['status']")" = "$want_status" ] \
+        || fail "the $verb was not kept: $(cat "$WORK_DIR/setup-$verb.txt")"
+    [ "$(field "$UNASKED" "t['reason']")" = "$want_reason" ] \
+        || fail "the $verb's reason: $(field "$UNASKED" "t['reason']")"
+    # No round run and no model call: the ledger and the conversation as they were.
+    [ "$(field "$UNASKED" "[x['event'] for x in t['transitions']].count('round_started')")" = "$rounds" ] \
+        || fail "a round ran after the $verb"
+    [ "$(turns_of "$UNASKED")" = "$turns" ] || fail "a turn ran after the $verb"
+    [ ! -e "$APOGEE_HOME/tasks/$UNASKED/request" ] || fail "the $verb's request was left standing"
+}
+stop_during_setup cancel 130 cancelled "cancelled by 'apogee task cancel' before round 1"
+stop_during_setup halt 1 halted "halted by 'apogee task halt' before round 1"
+# A new run stopped in its setup and then killed there, before its signal
+# handlers are up -- the person giving up on the 20 s connect: what is left is
+# the stop it never read, which `task list` passes over (never `no task
+# '<id>'`, ids being never reused) and the next run's lock takes away.
+"$APOGEE_BIN" task run "Never started" --tools </dev/null >"$WORK_DIR/setup-killed.txt" 2>&1 &
+RUNNER=$!
+SETUP_KILLED=""
+for i in $(seq 1 200); do
+    [ "$(sed -n 1p "$APOGEE_HOME/tasks/task.lock" 2>/dev/null)" = "$RUNNER" ] \
+        && SETUP_KILLED=$(sed -n 2p "$APOGEE_HOME/tasks/task.lock") && break
+    sleep 0.1
+done
+[ -n "$SETUP_KILLED" ] || fail "the run to kill never took its lock: $(cat "$WORK_DIR/setup-killed.txt")"
+[ ! -e "$(ledger "$SETUP_KILLED")" ] || fail "the run to kill was past its setup"
+"$APOGEE_BIN" task cancel "$SETUP_KILLED" </dev/null >"$WORK_DIR/setup-killed-stop.txt" 2>&1 \
+    || fail "task cancel during a new run's setup: $(cat "$WORK_DIR/setup-killed-stop.txt")"
+grep -q "asked task $SETUP_KILLED to cancel: it stops before it starts" "$WORK_DIR/setup-killed-stop.txt" \
+    || fail "task cancel did not ask the starting run: $(cat "$WORK_DIR/setup-killed-stop.txt")"
+kill -TERM "$RUNNER"
+wait "$RUNNER"
+CODE=$?
+[ "$CODE" = 143 ] || fail "a run killed in its setup exited $CODE: $(cat "$WORK_DIR/setup-killed.txt")"
+[ "$(ls "$APOGEE_HOME/tasks/$SETUP_KILLED")" = request ] \
+    || fail "the killed run's directory is not its unread stop alone: $(ls -A "$APOGEE_HOME/tasks/$SETUP_KILLED")"
+"$APOGEE_BIN" task list </dev/null >"$WORK_DIR/setup-killed-list.txt" 2>&1 \
+    || fail "task list after a run killed in its setup: $(cat "$WORK_DIR/setup-killed-list.txt")"
+grep -q "$SETUP_KILLED" "$WORK_DIR/setup-killed-list.txt" \
+    && fail "task list names the run killed in its setup: $(cat "$WORK_DIR/setup-killed-list.txt")"
+grep -q "skipped" "$WORK_DIR/setup-killed-list.txt" \
+    && fail "task list found a problem: $(cat "$WORK_DIR/setup-killed-list.txt")"
+"$APOGEE_BIN" mcp disable slow </dev/null >/dev/null 2>&1 || fail "mcp disable slow"
+# The next run takes the dead holder's lock over and leaves the unread stop
+# be -- its id is never minted again, so a run in the same second lists in
+# turn -- and `task list` stays quiet.
+script killed '{"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"}'
+"$APOGEE_BIN" task run "Answer after the kill" -m killed --require 42 </dev/null >"$WORK_DIR/after-kill.txt" 2>&1 \
+    || fail "the run after the kill: $(cat "$WORK_DIR/after-kill.txt")"
+AFTER_KILL=$(newest)
+[ "$AFTER_KILL" != "$SETUP_KILLED" ] && [ "$(field "$AFTER_KILL" "t['goal']")" = "Answer after the kill" ] \
+    || fail "the run after the kill is not the newest task: $AFTER_KILL"
+"$APOGEE_BIN" task list </dev/null 2>&1 | grep -q "skipped" \
+    && fail "task list found a problem after the next run: $("$APOGEE_BIN" task list </dev/null 2>&1)"
 
 # --- completion offers the tasks -----------------------------------------------------
 OFFERED=$("$APOGEE_BIN" __complete task status "" </dev/null 2>/dev/null)

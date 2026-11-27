@@ -152,6 +152,79 @@ struct SuiteSessionTests {
         #expect(starter.launches[1].suite == "fast")
     }
 
+    // MARK: - 6a, finding 2: a switch held over a new chat's first turn
+
+    /// A new chat under `pair` whose library reads the list back after each
+    /// turn (`movesAfterReadBack`), its first turn sent and the switch to
+    /// `fast` held for its end; returns once the turn's `result` is in.
+    func firstTurnWithSwitchHeld(_ first: ScriptedSession, _ second: ScriptedSession) async -> (SessionViewModel, ScriptedStarter) {
+        let starter = ScriptedStarter(sessions: [first, second])
+        let model = SessionViewModel(starter: starter, launch: ChatLaunch(suite: "pair"))
+        model.movesAfterReadBack = true
+        model.start()
+        first.emit(fixtureStream("chat-under-suite")[0])
+        _ = await eventually { model.transcript.status == .ready }
+        #expect(model.chatID == Self.chatID && model.savedChatID == nil, "named by its session event, not yet written")
+        model.draft = "Which suite answers?"
+        model.submit()
+        await model.switchSuite(to: "fast")
+        #expect(model.held == [.suite("fast", force: false)])
+        for line in fixtureStream("chat-under-suite").dropFirst() { first.emit(line) }
+        _ = await eventually { model.transcript.acceptsInput }
+        return (model, starter)
+    }
+
+    static let carried = "switching to suite fast (--suite fast) -- machine mode carries no suite, so the session restarts under it; the conversation carries on on the suite's chat member, and a local model loads again"
+
+    @Test("a new chat's first turn, the switch held for its end: moved only once the list read after it names the chat written -- --resume, the turn kept, never 'can't be carried on'")
+    func switchHeldOverAFirstTurn() async {
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let (model, starter) = await firstTurnWithSwitchHeld(first, second)
+        // Released by the turn's end into the wait for the read -- the branch
+        // that makes no move -- so nothing below can be a move still to come.
+        #expect(model.moveAwaitsReadBack && model.held.isEmpty, "the move waits for the list's word")
+        #expect(!first.calls.contains("stop") && starter.openedCount == 1)
+        #expect(!notes(model).contains { $0.contains("can't be carried on") })
+        // The library's read after the turn: the chat is listed, so written.
+        model.identify(Self.chatID)
+        await model.runHeldMove()
+        #expect(!model.moveAwaitsReadBack)
+        #expect(first.calls.contains("stop"))
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches[1].resume == Self.chatID && starter.launches[1].suite == "fast")
+        #expect(notes(model).last == Self.carried)
+        #expect(!notes(model).contains { $0.contains("can't be carried on") })
+        #expect(model.transcript.items.contains { $0.content == .user("Which suite answers?") }, "the first turn stays drawn: carried on")
+    }
+
+    @Test("the list read answering only after the child has stopped: the relaunch still carries --resume with the chat it names")
+    func listReadAfterTheChildStopped() async {
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let (model, starter) = await firstTurnWithSwitchHeld(first, second)
+        first.end()
+        #expect(await eventually { model.transcript.status == .ended })
+        model.identify(Self.chatID)
+        await model.runHeldMove()
+        #expect(await eventually { starter.openedCount == 2 })
+        #expect(starter.launches[1].resume == Self.chatID && starter.launches[1].suite == "fast")
+        #expect(!notes(model).contains { $0.contains("can't be carried on") })
+    }
+
+    @Test("a turn sent before the list read answers: the move is held again for that turn's end, never ending it")
+    func moveHeldAgainForTheNextTurn() async {
+        let first = ScriptedSession()
+        let second = ScriptedSession()
+        let (model, starter) = await firstTurnWithSwitchHeld(first, second)
+        model.draft = "And another?"
+        model.submit()
+        model.identify(Self.chatID)
+        await model.runHeldMove()
+        #expect(!first.calls.contains("stop") && starter.openedCount == 1)
+        #expect(model.held == [.suite("fast", force: false)], "said again: sent when this turn ends")
+    }
+
     @Test("a suite the CLI refuses at launch -- over this machine's memory -- is put back, said in its words, and the session carries on under the one before")
     func refusedSuitePutBack() async {
         let first = ScriptedSession()

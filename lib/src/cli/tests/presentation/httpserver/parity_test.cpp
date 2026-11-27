@@ -199,8 +199,12 @@ const std::map<std::string, Classification>& table() {
                    "there is deliberately no POST .../cycle/halt")},
         {"train cycle resume",
          carve_out("edits the cycle's state on the host; training control is CLI-only")},
+        {"mcp serve",
+         carve_out("the MCP server mode (54a): this process's own stdio, spawned by another MCP "
+                   "host -- pipes, never a port")},
         {"__mcp-tools",
-         carve_out("an MCP server on this process's own stdio, spawned by another client")},
+         carve_out("the hidden alias of mcp serve, kept for hosts registered with it: this "
+                   "process's own stdio, spawned by another MCP host")},
         {"task run",
          carve_out("an unattended run of the host's own session and tools, under its lock; task "
                    "control is CLI-only -- the reads are served under /v1/admin/tasks*")},
@@ -276,6 +280,9 @@ const std::map<std::string, Classification>& table() {
         {"tui", read_only()},
         {"__complete", read_only()},
         {"__machine-schema", read_only()},
+        {"__quantize",
+         carve_out("a quantization run as a child of models quantize (57i), its progress a "
+                   "protocol on this process's own stdout for the apogee that started it")},
         {"config get", read_only()},
         {"config path", read_only()},
         {"mcp list", read_only()},
@@ -283,6 +290,12 @@ const std::map<std::string, Classification>& table() {
         // The shipped presets (47c): a read of compiled-in data resolved on
         // this machine; `create --from` is `mcp create`'s twin's `from`.
         {"mcp presets", read_only()},
+        // The fields an ACP host's Add an Agent takes (56d): a read of this
+        // binary's own path and the root it runs under. `acp` itself, its
+        // parent and no leaf, is carved out: an ACP agent on this process's
+        // own stdio, spawned by an agent host such as Xcode (56a) -- pipes,
+        // never a port.
+        {"acp registration", read_only()},
         // The review skills (48b): reads of the shipped lenses and the
         // user's own files, beside `task recipes`.
         {"review skills list", read_only()},

@@ -141,6 +141,7 @@ public struct SessionList: View {
 
     private func row(_ chat: ChatSummary) -> some View {
         let current = library.isOpen(chat)
+        let compacting = library.isCompacting(chat)
         return Button {
             shell.go(.sessions)
             Task { await library.open(.chat(chat.id)) }
@@ -151,9 +152,17 @@ public struct SessionList: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(library.when(chat))
-                    .font(.apogeeMeta.monospacedDigit())
-                    .foregroundStyle(Palette.textTertiary)
+                if compacting {
+                    // A saved chat's compaction runs as a job (GUI 6b): busy
+                    // until it ends, Stop in the row's menu.
+                    ProgressView()
+                        .controlSize(.mini)
+                        .accessibilityLabel("compacting")
+                } else {
+                    Text(library.when(chat))
+                        .font(.apogeeMeta.monospacedDigit())
+                        .foregroundStyle(Palette.textTertiary)
+                }
             }
             .font(.apogeeSmall)
             .foregroundStyle(current ? Palette.textPrimary : Palette.textSecondary)
@@ -164,7 +173,7 @@ public struct SessionList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(chat.backend.map { "\(chat.name) · \($0)" } ?? chat.name)
+        .help(compacting ? "\(chat.name) · compacting: apogee chats compact \(chat.id) --yes" : chat.backend.map { "\(chat.name) · \($0)" } ?? chat.name)
         .contextMenu {
             // Each asks or shows in the Sessions place, so it comes into view.
             Button("Details…") {
@@ -175,11 +184,17 @@ public struct SessionList: View {
                 shell.go(.sessions)
                 library.renaming = chat
             }
-            Button("Compact…") {
-                shell.go(.sessions)
-                library.askToCompact(chat)
+            if compacting {
+                Button("Stop compacting") {
+                    Task { await library.stopCompacting(chat) }
+                }
+            } else {
+                Button("Compact…") {
+                    shell.go(.sessions)
+                    library.askToCompact(chat)
+                }
+                .disabled(!library.canCompact(chat))
             }
-            .disabled(!library.canCompact(chat))
             Button("Delete…", role: .destructive) {
                 shell.go(.sessions)
                 library.askToDelete(chat)
@@ -298,6 +313,16 @@ struct RenameSheet: View {
         .task {
             await library.start(inView: false)
             library.query = "plan"
+        }
+}
+
+#Preview("A saved chat compacting: its row busy, Stop in its menu") {
+    let library = SessionsPreview.library(chats: SessionsDocuments.chatsListTwo, jobs: PreviewJobs())
+    SessionList(library: library, shell: SessionsPreview.shell())
+        .frame(width: 256, height: 480)
+        .task {
+            await library.start(inView: false)
+            await SessionsPreview.compactFirst(library)
         }
 }
 

@@ -10,8 +10,9 @@
 # deliverable is copied from the latest release instead of built again:
 # CI copies it into the run's artifacts, and a merge's release publishes the
 # copy. This file declares, once, what each deliverable is built from: the
-# CLI, and the macOS application (gui-darwin). A further GUI application adds
-# its own entry here, and its own pipeline asks this script the same question.
+# CLI, the macOS application (gui-darwin) and the mod, the Claude plugin (mod).
+# A further application adds its own entry here, and its own pipeline asks this
+# script the same question.
 #
 # CI asks it with <from> the latest release's commit and <to> the pull
 # request's test merge -- so the question is "does what would merge differ
@@ -57,11 +58,29 @@ paths_of() {
             echo "lib/scripts/changed.sh"
             # The release name, which the bundle reports as its version.
             echo "lib/release/VERSION"
+            # The logo its icon is made from: the suite holds the committed
+            # icon set to it.
+            echo "lib/design/assets/Logo.png"
+            # Read by the app's parity tests, which hold its table to them
+            # (2026-11-22): the CLI's refusals and the Apple apps' backlog
+            # index, where every gap is queued.
+            echo "lib/src/cli/source/presentation/cli/tui_parity.cpp"
+            echo "lib/documentation/backlog/darwin/README.md"
             # Its pipeline's own definition.
             echo ".github/workflows/darwin.yml"
             ;;
+        mod)
+            # The Claude plugin's own tree: its manifest, hooks module and
+            # layers, its contract, tests and checks, and the npm pins they
+            # run with.
+            echo "lib/src/mod/"
+            # This declaration.
+            echo "lib/scripts/changed.sh"
+            # Its pipeline's own definition.
+            echo ".github/workflows/mod.yml"
+            ;;
         *)
-            printf 'changed.sh: no deliverable named %s (known: cli, gui-darwin)\n' "$1" >&2
+            printf 'changed.sh: no deliverable named %s (known: cli, gui-darwin, mod)\n' "$1" >&2
             exit 2
             ;;
     esac

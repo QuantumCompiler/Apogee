@@ -877,6 +877,52 @@ TEST_CASE("models delete names and offers every reference into what goes, by the
     }
 }
 
+TEST_CASE("deleting one of a model's two video sets keeps the video pointer naming the other",
+          "[commands][models][delete][video]") {
+    // 57i, finding 3 -- probe p3 as a test: `models.default_video: org--clip`
+    // over two pipelines. The pointer named neither before (`video generate`
+    // refuses a model holding two); deleting one fixes it rather than
+    // stranding it, so nothing is said and --and-backends clears nothing.
+    const apogee::testing::CliHome home{"models:\n  default_video: org--clip\n"};
+    const std::filesystem::path clip = home.models() / "org--clip" / "pipeline";
+    for (const char* id : {"aaaaaaaaaaaa", "bbbbbbbbbbbb"}) {
+        std::filesystem::create_directories(clip / id);
+        std::ofstream{clip / id / "model_index.json", std::ios::binary}
+            << R"({"_class_name": "WanPipeline", "_diffusers_version": "0.35.0"})";
+    }
+    const std::string before = home.config_text();
+    std::string out;
+    REQUIRE(
+        home.run({"models", "delete", "org--clip/pipeline/bbbbbbbbbbbb", "--yes", "--and-backends"},
+                 &out) == 0);
+    INFO(out);
+    CHECK(out.find("finds nothing until it names another") == std::string::npos);
+    CHECK(out.find("cleared") == std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(clip / "bbbbbbbbbbbb"));
+    CHECK(home.config_text() == before);
+
+    // The last one: warned, and cleared.
+    REQUIRE(
+        home.run({"models", "delete", "org--clip/pipeline/aaaaaaaaaaaa", "--yes", "--and-backends"},
+                 &out) == 0);
+    CHECK(out.find("\nmodels.default_video names this, and 'apogee video generate' without "
+                   "--model finds nothing until it names another.\n") != std::string::npos);
+    CHECK(out.find("cleared models.default_video in ") != std::string::npos);
+    CHECK(apogee::harness::load_config(home.config_path()).models.default_video.empty());
+
+    // Both in one plan -- the whole model -- warns and clears too.
+    const apogee::testing::CliHome whole{"models:\n  default_video: org--clip\n"};
+    const std::filesystem::path both = whole.models() / "org--clip" / "pipeline";
+    for (const char* id : {"aaaaaaaaaaaa", "bbbbbbbbbbbb"}) {
+        std::filesystem::create_directories(both / id);
+        std::ofstream{both / id / "model_index.json", std::ios::binary}
+            << R"({"_class_name": "WanPipeline", "_diffusers_version": "0.35.0"})";
+    }
+    REQUIRE(whole.run({"models", "delete", "org--clip", "--yes", "--and-backends"}, &out) == 0);
+    CHECK(out.find("finds nothing until it names another") != std::string::npos);
+    CHECK(apogee::harness::load_config(whole.config_path()).models.default_video.empty());
+}
+
 TEST_CASE("the ask names what a delete clears beside the entries it removes",
           "[commands][models][delete][store_references]") {
     using apogee::commands::remove_backends_too;

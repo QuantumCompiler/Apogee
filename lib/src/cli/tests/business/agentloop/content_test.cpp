@@ -2,12 +2,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "backends/mock.h"
+#include "contracts/cancellation.h"
 #include "contracts/config.h"
+#include "contracts/errors.h"
 
 using apogee::agentloop::compact_history;
 using apogee::agentloop::Compaction;
@@ -127,6 +130,23 @@ TEST_CASE("a failed compaction returns the history unchanged, and says why",
     CHECK(done.history[1].content.plain_text() == "two");
 }
 
+TEST_CASE("a cancelled compaction is the turn's cancel, never a failed compaction",
+          "[agentloop][content][compaction][cancel][57r]") {
+    // The degrade catch took every HarnessError, CancelledError among them:
+    // a stopped turn went on over the history, said as "compaction failed".
+    MockProvider::Options options;
+    options.backend_name = "mock";
+    options.turns = {MockTurn{.text = "a summary"}};
+    Harness harness{Config{}};
+    harness.register_provider("mock", std::make_shared<MockProvider>(std::move(options)));
+    harness.use_default_router();
+    const apogee::harness::CancellationToken stop = apogee::harness::CancellationToken::create();
+    stop.cancel();
+    const std::vector<ChatMessage> history{ChatMessage::user("one"), ChatMessage::assistant("two")};
+    CHECK_THROWS_AS(compact_history(harness, history, "mock", stop),
+                    apogee::harness::CancelledError);
+}
+
 TEST_CASE("compaction with nothing to fold asks no model and says so",
           "[agentloop][content][compaction]") {
     // 55b: an empty conversation, and one holding only the answer an earlier
@@ -179,6 +199,100 @@ TEST_CASE("an empty summary is a failed compaction, the history kept",
 
 // ---------------------------------------------------------------------------
 // Context monitoring
+namespace {
+
+/// An assistant message calling `name` as `id`.
+ChatMessage calling_tool(const std::string& id, const std::string& name) {
+    ChatMessage message = ChatMessage::assistant("");
+    message.tool_calls = {apogee::harness::ToolCall{.id = id, .name = name, .arguments = "{}"}};
+    return message;
+}
+
+ChatMessage answering(const std::string& id, const std::string& name, std::string content) {
+    apogee::harness::ToolResult result;
+    result.tool_call_id = id;
+    result.name = name;
+    result.content = std::move(content);
+    return ChatMessage::from_tool_result(result);
+}
+
+/// A compactor that summarises anything as SUMMARY.
+struct Compactor {
+    std::shared_ptr<MockProvider> mock;
+    Harness harness{Config{}};
+
+    Compactor() {
+        MockProvider::Options options;
+        options.backend_name = "mock";
+        options.turns = {MockTurn{.text = "SUMMARY"}};
+        mock = std::make_shared<MockProvider>(std::move(options));
+        harness.register_provider("mock", mock);
+        harness.use_default_router();
+    }
+};
+
+bool calls_any_tool(const std::vector<ChatMessage>& messages) {
+    return std::ranges::any_of(
+        messages, [](const ChatMessage& message) { return !message.tool_calls.empty(); });
+}
+
+}  // namespace
+
+TEST_CASE("compaction never keeps a tool call without its results",
+          "[agentloop][content][compaction][57q]") {
+    // A failed or cancelled step after a finished tool phase leaves a call
+    // and its result at the end of history. Compaction kept the call and
+    // folded its result, and every later Anthropic request was refused -- a
+    // regression of Milestone F's rollback. The probe's saved chat:
+    Compactor compactor;
+    const std::vector<ChatMessage> probe{
+        ChatMessage::user("q1"),
+        ChatMessage::assistant("done"),
+        ChatMessage::user("list it"),
+        calling_tool("call-A", "list_directory"),
+        answering("call-A", "list_directory", "a.txt"),
+    };
+    const Compaction done = compact_history(compactor.harness, probe, "mock");
+    REQUIRE(done.compacted());
+    REQUIRE(done.history.size() == 2);
+    CHECK(done.history[0].role == Role::System);
+    CHECK(done.history[0].content.plain_text().ends_with("SUMMARY"));
+    // The newest plain answer is the one kept.
+    CHECK(done.history[1].role == Role::Assistant);
+    CHECK(done.history[1].content.plain_text() == "done");
+    CHECK_FALSE(calls_any_tool(done.history));
+
+    // All tool work: the summary alone.
+    const Compaction tools_only =
+        compact_history(compactor.harness,
+                        {ChatMessage::user("list it"), calling_tool("call-B", "list_directory"),
+                         answering("call-B", "list_directory", "b.txt")},
+                        "mock");
+    REQUIRE(tools_only.compacted());
+    REQUIRE(tools_only.history.size() == 1);
+    CHECK(tools_only.history[0].role == Role::System);
+}
+
+TEST_CASE("a conversation already holding a call without its result still compacts",
+          "[agentloop][content][compaction][57q]") {
+    // What an older compaction saved, and a turn after it: the summariser is
+    // sent the history without the unanswered call, as any request is, so
+    // the compaction that would clear it is not refused itself.
+    Compactor compactor;
+    const std::vector<ChatMessage> stuck{
+        ChatMessage::system("an earlier summary"),
+        calling_tool("call-A", "list_directory"),
+        ChatMessage::user("and now?"),
+        ChatMessage::assistant("an answer"),
+    };
+    const Compaction done = compact_history(compactor.harness, stuck, "mock");
+    REQUIRE(done.compacted());
+    REQUIRE(compactor.mock->requests().size() == 1);
+    CHECK_FALSE(calls_any_tool(compactor.mock->requests().front().messages));
+    CHECK_FALSE(calls_any_tool(done.history));
+    CHECK(done.history.back().content.plain_text() == "an answer");
+}
+
 // ---------------------------------------------------------------------------
 
 TEST_CASE("the 80 and 90 percent thresholds fire in order", "[agentloop][context]") {

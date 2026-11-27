@@ -72,6 +72,77 @@ struct PipelineCycleReadsTests {
         #expect(run?.isResumable == true)
     }
 
+    @Test("a pipeline document from the CLI's 57h: where a resume starts, the spec it names, a cycle pass by its prefix, a live holder (57g)")
+    func resumeDocuments() throws {
+        // Recorded from the build tree's binary over a scratch home on the
+        // mock trainer (GUI 6i): `nightly` named `Nightly SFT`, a spec-file
+        // run, `three` with --continue-on-fail, a cycle pass, a live holder.
+        let named = try #require(PipelineRun(document: document("train-pipeline-status-named")))
+        #expect(named.specName == "Nightly SFT" && named.specRef == "nightly" && named.hasResumeField && named.holder == nil)
+        #expect(named.resume?.stage == 2 && named.resume?.name == "b" && named.resume?.pipeline == "nightly" && named.resume?.note == nil)
+        #expect(!named.isCyclePass)
+
+        let file = try #require(PipelineRun(document: document("train-pipeline-status-spec-file")))
+        #expect(file.specName == "two" && file.specRef == "/Users/someone/two.yaml" && file.resume?.pipeline == "/Users/someone/two.yaml")
+        let gone = try #require(PipelineRun(document: document("train-pipeline-status-spec-file-gone")))
+        #expect(gone.resume?.stage == 2 && gone.resume?.pipeline == nil, "its file gone, nothing finds its spec")
+
+        let kept = try #require(PipelineRun(document: document("train-pipeline-status-kept-failed")))
+        #expect(kept.status == "failed" && kept.stages.map(\.status) == ["failed", "passed", "failed"])
+        #expect(kept.resume?.stage == 3 && kept.resume?.name == "c" && kept.resume?.pipeline == "three")
+        #expect(kept.resume?.note == "stage 1, a, failed its gate and stays as it is")
+        #expect(kept.resumesAt?.index == 1, "the first stage that has not passed is not where the CLI resumes")
+
+        let pass = try #require(PipelineRun(document: document("train-pipeline-status-cycle-pass")))
+        #expect(pass.isCyclePass && pass.status == "aborted" && pass.specName == "cyclic")
+        #expect(pass.hasResumeField && pass.resume == nil && pass.specRef == nil)
+        #expect(pass.isResumable, "by its status alone -- an older binary's rule -- it would be")
+        #expect(pass.stages.first?.dataset.hasSuffix("/training/cycle/work/merged.jsonl") == true, "it trained on the pass's data, not the spec's")
+        #expect(fixture("train-pipeline-resume-cycle-pass.err").contains("is a cycle pass, and its candidate was discarded -- 'apogee train cycle run' runs the next pass"))
+
+        let held = try #require(PipelineRun(document: document("train-pipeline-status-named-held")))
+        #expect(held.holder == 67959 && held.resume?.stage == 2, "resume stays set while a live process holds it")
+        #expect(fixture("train-pipeline-resume-held.err").contains("is running now (process 67959) -- it cannot be resumed while it runs"))
+
+        let older = try #require(PipelineRun(document: document("train-pipeline-status-aborted")))
+        #expect(!older.hasResumeField && older.resume == nil && older.specRef == nil && older.holder == nil, "recorded before 57h")
+        let manifest = try #require(document("train-pipeline-status-named").value["pipeline"].flatMap(PipelineRun.init))
+        #expect(!manifest.hasResumeField && manifest.holder == nil, "the manifest alone carries none of it")
+        let odd = PipelineRun(document: ReadDocument(text: #"{"kind":"pipeline","pipeline":{"pipeline_run_id":"p","status":"aborted"},"holder":{},"resume":{"name":"x"}}"#)!)
+        #expect(odd?.holder == 0 && odd?.hasResumeField == true && odd?.resume == nil, "a holder naming no process; a resume with no stage is none")
+    }
+
+    @Test("the cycle's lock as a binary from the CLI's 57g states it, and an unreadable history as its 57h does")
+    func lockAndUnreadable() throws {
+        let lock = "/Users/someone/.apogee/training/cycle/cycle.lock"
+        let stale = TrainingStatus(document: document("train-status-cycle-stale-lock"))
+        #expect(stale.staleLock == lock && !stale.cycleActive && stale.statesLockLiveness)
+        #expect(stale.cycle?.halted == false && stale.cycleError == nil)
+        let history = try #require(CycleHistory(document: document("train-cycle-status-stale-lock")))
+        #expect(history.staleLock == lock && !history.active && history.statesLockLiveness)
+        #expect(fixture("train-cycle-run-stale-lock.err").contains("If none is, remove the file and run again"), "cycle run refuses it")
+
+        let live = TrainingStatus(document: document("train-status-cycle-live-lock"))
+        #expect(live.cycleActive && live.staleLock == nil && live.statesLockLiveness)
+        let liveHistory = try #require(CycleHistory(document: document("train-cycle-status-live-lock")))
+        #expect(liveHistory.active && liveHistory.staleLock == nil && liveHistory.statesLockLiveness)
+
+        let first = TrainingStatus(document: document("train-status-stale-lock-no-history"))
+        #expect(first.cycle == nil && first.cycleError == nil && first.staleLock == lock, "a first pass killed before it wrote a history")
+
+        let unreadable = TrainingStatus(document: document("train-status-cycle-unreadable"))
+        #expect(unreadable.cycle == nil)
+        #expect(unreadable.cycleError == "/Users/someone/.apogee/training/cycle/history.json: cycle history: runs must be an array")
+        #expect(fixture("train-cycle-status-unreadable.err").hasPrefix("apogee train: the cycle history is unreadable: /Users/someone/"))
+
+        let fresh = TrainingStatus(document: document("train-status-fresh"))
+        #expect(fresh.cycle == nil && fresh.cycleError == nil && fresh.staleLock == nil && fresh.statesLockLiveness, "a fresh home: both null")
+
+        let older = TrainingStatus(document: document("train-status-cycle-held"))
+        #expect(older.cycleActive && older.staleLock == nil && !older.statesLockLiveness && older.cycleError == nil, "recorded before 57g")
+        #expect(CycleHistory(document: document("train-cycle-status-held"))?.statesLockLiveness == false)
+    }
+
     @Test("only fusing, passed and failed are past the gate")
     func gated() {
         #expect(["pending", "training", "evaluating"].allSatisfy { !PipelineRun.isGated($0) })

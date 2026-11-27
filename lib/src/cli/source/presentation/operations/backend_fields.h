@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "contracts/config.h"
+#include "operations/suites.h"
 
 /// Editing a backend in place (46b): the one core `config set-backend` and
 /// its admin twin call, so an entry edited over HTTP is byte for byte the
@@ -57,9 +58,22 @@ struct BackendFieldsOutcome {
 ///
 /// An edit that leaves an `mlx` entry over an MLX directory whose kind no mlx
 /// entry runs is refused by that kind (`kind_refusal`, 55d).
+///
+/// An edit that leaves the entry with an `mcp_serve:` list (54b) -- the list
+/// set, or kept under a moved type or path -- is asked of the entry's
+/// provider through `metered`, on the config as the edit leaves it: asked
+/// inside the write, of the very text it writes, so every edit the write
+/// applies (an adapter set cleared beside a moved type among them) is asked
+/// as it lands. A provider that bills each call, or one that cannot say,
+/// refuses the edit naming the rule (`harness::mcp_serve_ineligible`), the
+/// file untouched. A null probe tells nothing, and unknown is metered; the
+/// CLI hands its own
+/// (`provider_metered_probe`), the admin twin the one its composition root
+/// gave it.
 [[nodiscard]] BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path,
                                                       std::string_view name,
-                                                      const std::vector<BackendFieldEdit>& edits);
+                                                      const std::vector<BackendFieldEdit>& edits,
+                                                      const MeteredProbe& metered = {});
 
 /// **The kind decides the role** (55d): why entry `name` may not run what it
 /// names, or empty when it may. An `mlx` entry over an MLX directory is held
@@ -73,6 +87,30 @@ struct BackendFieldsOutcome {
 /// whose record says `voice` never becomes a chat backend by any of them.
 [[nodiscard]] std::string kind_refusal(std::string_view name,
                                        const harness::BackendConfig& backend);
+
+/// `apogee config set-backend <name>` with `edits` as flags, each value one
+/// word a person copies -- double-quoted where a shell would split it.
+[[nodiscard]] std::string set_backend_command(std::string_view name,
+                                              const std::vector<BackendFieldEdit>& edits = {});
+
+/// The edit that takes backend `name`'s adapters off, `edits` beside it --
+/// `set_backend_command(name, edits) --adapters ""` -- the door every move of
+/// an entry's base under the adapters it keeps names: 55e's refusals and a
+/// merged promote's (57i).
+[[nodiscard]] std::string adapters_take_off(std::string_view name,
+                                            const std::vector<BackendFieldEdit>& edits = {});
+
+/// Why entry `name`'s base may not be replaced under the adapters it keeps
+/// by weights no re-pin could fit (57i): `'<name>' applies adapters over its
+/// model_path (<their paths>), and <why> -- take them off first: <the
+/// take-off edit>, or <other>`; empty when it applies none. A merged
+/// `train promote --as <name>` asks it before anything is fused or stored:
+/// an adapter trained over the old base never fits a fine-tune merged over
+/// it, so 55e's re-pin is no door here -- only taking them off, or `other`.
+[[nodiscard]] std::string base_replaced_under_adapters(std::string_view name,
+                                                       const harness::BackendConfig& entry,
+                                                       std::string_view why,
+                                                       std::string_view other);
 
 /// **A role is the kind's to take** (M33): why entry `name` may not be
 /// `models.<field>` -- one of `models_role_fields()` -- or empty when it may.

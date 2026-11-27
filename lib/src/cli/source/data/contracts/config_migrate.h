@@ -63,6 +63,12 @@ struct CommentedOption {
     /// it -- and a file holding the first line anywhere has it.
     std::string_view opens{};
     std::string_view closes{};
+    /// The key it teaches, when it is one (57f): looked for in the object the
+    /// template holds the block in -- `default_video` in `models`, `review`
+    /// at the top level -- so a file that writes the key itself, without the
+    /// template's comment, has the option. Empty for one that names no one
+    /// key (the `backends.*` examples), which only its first line marks.
+    std::string_view key{};
 };
 
 /// The starter config's commented options, by release, oldest first (55g).
@@ -76,7 +82,8 @@ struct CommentedOption {
 /// it. Only a JSONC config is compared (the template's own format); a YAML
 /// one gives nothing -- it migrates first. Since 55g also each commented
 /// option `template_text` carries that `content` lacks and upgrade can place
-/// -- one inside a missing section comes with it, so it counts with it.
+/// -- one inside a missing section comes with it, so it counts with it; one
+/// whose key the file writes is not lacking (57f), comment or none.
 [[nodiscard]] std::vector<std::string> missing_template_options(std::string_view content,
                                                                 std::string_view template_text);
 
@@ -97,9 +104,11 @@ struct Upgrade {
 /// re-indented to the file's own. Then (55g) each commented option it lacks:
 /// its block in the object the template holds it in, beside the line the
 /// template has after it (else before it) when the file has that line once,
-/// else last in that object; an object written on one line takes none.
-/// Nothing present is reordered, rewritten or removed; a current config
-/// comes back unchanged with nothing added.
+/// else last in that object; an object written on one line takes none, and
+/// an option whose key that object already writes is the file's (57f), so
+/// neither its example goes in nor is it named added. Nothing present is
+/// reordered, rewritten or removed; a current config comes back unchanged
+/// with nothing added.
 [[nodiscard]] Upgrade upgrade_config_text(std::string_view content, std::string_view template_text);
 
 }  // namespace apogee::harness
