@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Tab completion › the four stubs (`completions/_apogee`, `apogee.bash`, `apogee.fish`, `apogee.ps1`) |
 | **Labels** | `completion` `bash` `zsh` `fish` `powershell` `quoting` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M41](bash-3-2-completes-every-word.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | CLI-M37's probes (2026-11-22), then a sandboxed investigation and a skeptic's re-run the same day |
 | **Created** | 2026-11-22 |
@@ -61,7 +61,7 @@ The sandbox, 2026-11-22, with the built binary `apogee 0.2.0 (33ea685d, 2026-11-
 
 Each stub forwards the text of each word, not its value, and only the stub knows its shell's quoting:
 - **zsh** (`_apogee:10`) sends compsys' `words`, which hold the line's syntax (`'models'`, `my\ notes`, `'cl`). compsys already holds the value under the cursor in `PREFIX`, `SUFFIX` and `compstate[quote]`. Its insertion is already right: `compadd -- $lines` (`:20`), with no `-Q`, quotes for the line.
-- **bash** (`apogee.bash:15-19`) splits `COMP_LINE` with `IFS=$' \t' read -r -a`, which knows no quotes. That came with c5d1a258 (2026-09-24), which left `COMP_WORDS` to stop the `:` split. Raw insertion (`:39`) and the unquoted `$(…)` read date from v0.1.0. (CLI-M41 replaces that read with a glob-free `read`.)
+- **bash** (`apogee.bash:15-19`) splits `COMP_LINE` with `IFS=$' \t' read -r -a`, which knows no quotes. That came with c5d1a258 (2026-09-24), which left `COMP_WORDS` to stop the `:` split. Raw insertion (`:39`) and the unquoted `$(…)` read date from v0.1.0. (CLI-M41, shipped 2026-11-27, replaced that read with a glob-free `read`.)
 - **fish** (`apogee.fish:3`, `:6`) takes the context from `commandline -opc`, which is tokenized and probably unescaped. The current token, from `commandline -ct`, is raw, and goes to `__fish_complete_path` raw too (`:17`).
 - **PowerShell** (`apogee.ps1:7`, `:10`) sends each element's `Extent.Text`, quotes included, and returns the raw candidate as CompletionText.
 
@@ -185,18 +185,19 @@ The bug becomes a quoted-line table, run through the real line editors so the ar
 | 2026-11-22 | **The fix lives in the stubs, and the protocol stays literal.** Only a stub knows its shell's grammar. The binary's `line_tokens` refuses an open quote, and a new line-mode argument would break older binaries (ADR 0006). | the spec |
 | 2026-11-22 | **Gated on CLI-M41 and CLI-M37.** M41 rewrites bash's `:8` and `:26`, and this item's bash tokenizer builds on them and must pass M41's `/bin/bash` lane. M37 rewrites PowerShell's element loop and builds the `pwsh` harness this item extends. | the spec |
 | 2026-11-27 | **CLI-M37 shipped**, so this item waits on CLI-M41 alone. Its walk records the element at the cursor (`$typing`), and its comma trim skips a string element, which PowerShell replaces whole: this item keeps that guard when it strips the quote. Its `[powershell]` case in `lifecycle_test.cpp` is the harness this item extends. | CLI-M37's ship |
+| 2026-11-27 | **CLI-M41 shipped**, so nothing gates this item. The bash stub's lines this document cites by number moved: the function's IFS (`:8`) is now `local IFS=$' \t\n'` at `:12`; the cut and the blank split (`:15-19`) are `:19-23`; the answer read (`:26`) is `out=$(…) \|\| :` and `IFS=$'\n' read -r -d '' -a lines` at `:35-37`; the raw insertion (`:39`) is `COMPREPLY=(${lines[@]+"${lines[@]}"})` at `:52`; the `:` trim (`:45`) is `:58`; and `compopt` (`:52`) is `:65`, now `\|\| :`. M41's `[bash]` case in `lifecycle_test.cpp`, over the shared `write_fake_apogee`, is the `/bin/bash` lane this item must pass, and `cli.shell_completion` runs under `/bin/bash` too. | CLI-M41's ship |
 | 2026-11-22 | **The bash `:` trim is keyed on readline's `$2`**, after the skeptic measured that a quote-keyed trim destroys `llama3.2\:` (Evidence 5). | the spec |
 
 ## Out of scope
 
 - **Offering chat names with a space** (`complete_sources.cpp:401-402`). That is a follow-up once all four stubs quote. Until then, a spaced name would still break in any stub not yet fixed.
 - **The half-made spaced collection.** `embed ingest "my notes" <file>` writes and offers `embeddings/my notes.db`, refuses to register `my notes` in the config, and exits 0: [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), with the read side's rule in [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md).
-- **macOS bash 3.2's one-word argv**: [CLI-M41](bash-3-2-completes-every-word.md).
+- **macOS bash 3.2's one-word argv**: [CLI-M41](../../../assistant/cli/MILESTONES.md#2026-11-27--bash-3-2-completes-every-word-maintenance-item-m41-macoss-bash-32-completes-every-word), shipped 2026-11-27.
 - **PowerShell's cursor**: [CLI-M37](../../../assistant/cli/MILESTONES.md#2026-11-27--powershell-completes-the-word-at-the-cursor-maintenance-item-m37-a-tab-completes-the-word-at-the-cursor-on-every-powershell), shipped 2026-11-27.
 
 ## Links
 
-- **Blocked by:** [CLI-M41](bash-3-2-completes-every-word.md) · **Blocks:** —
+- **Blocked by:** — · **Blocks:** —
 - **Relates to:**
   - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its rule that "the line is read up to the cursor" gains "and read as the shell reads it". It does not depend on this item.
   - [CLI-M40](../../../assistant/cli/MILESTONES.md#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host) (shipped 2026-11-27): `delete-allowed-host` offers entries as written, and this item's bash quoting is what makes inserting `*.example.com` or a raw URL safe there (zsh already is).

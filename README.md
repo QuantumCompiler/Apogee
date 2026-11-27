@@ -28,6 +28,8 @@ For a release other than the latest, name it, as `0.2.0` or `v0.2.0`: `curl … 
 
 Prefer to do it by hand? Take your platform's archive from the [releases page](https://github.com/QuantumCompiler/Apogee/releases) — `apogee-<target>.tar.gz` for macOS and Linux, `apogee-<target>.zip` for Windows, each holding the binary, the completion stubs and `machine-schema.json` (the machine-mode protocol as a JSON Schema, for front-end authors) — then run `apogee check --fix` once, and `apogee bootstrap`.
 
+**Tab completion in macOS's own `/bin/bash`:** the installers put bash's stub where bash-completion v2 looks, and bash-completion v2 does not load on bash 3.2, so add `source ~/.local/share/bash-completion/completions/apogee` to your `~/.bash_profile`.
+
 **Platforms:** `macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64`, `windows-arm64` — every release binary is built natively on its own runner, with llama.cpp in it. Two notes: macOS binaries are unsigned (a `curl` install is clean; for a browser download, `apogee check` detects the quarantine attribute and prints the exact fix), and on Windows the vendor-CLI backends are not available yet — use a direct-API backend there.
 
 **The macOS app:** each release also carries `apogee-gui-darwin.zip`, holding `Apogee.app` for Apple silicon on macOS 27 or later, and a README. It drives the `apogee` the one-liner above installs. It is signed ad hoc and not notarized, so the first time, right-click `Apogee.app`, choose Open, then Open again (or System Settings → Privacy & Security → Open Anyway).

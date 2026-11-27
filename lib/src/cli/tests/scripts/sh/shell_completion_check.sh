@@ -14,8 +14,11 @@
 #     first <TAB> of every shell.
 #
 # Each shell present on the host is checked; bash always is, since this script
-# runs under it. A missing zsh or fish is reported, not failed -- CI runners do
-# not all carry them, and this is a developer gate (`make test`).
+# runs under it -- PATH's bash, and /bin/bash too where it is another version:
+# macOS's own is 3.2, which joins a quoted "${a[@]:n}" into one word when IFS
+# holds no space, so the stub once sent the whole line as one word there
+# (CLI-M41). A missing zsh or fish is reported, not failed -- CI runners do not
+# all carry them, and this is a developer gate (`make test`).
 set -euo pipefail
 
 binary="$1"
@@ -114,8 +117,17 @@ cases=(
 )
 
 # ---- bash -------------------------------------------------------------------
+# Every bash the host has, each once by version: PATH's, then /bin/bash where
+# it is another (3.2 on a Mac whose PATH finds Homebrew's first).
+bashes=("$(command -v bash)")
+if [ -x /bin/bash ] && [ "$(/bin/bash -c 'echo $BASH_VERSION')" != "$(bash -c 'echo $BASH_VERSION')" ]; then
+    bashes+=(/bin/bash)
+fi
+# bash_complete <bash> <words...>
 bash_complete() {
-    bash --norc --noprofile -c '
+    local shell="$1"
+    shift
+    "$shell" --norc --noprofile -c '
         source "$1"; shift
         # As bash hands them over: the raw line to the cursor, and words
         # split at COMP_WORDBREAKS -- which the stub must not trust.
@@ -134,15 +146,28 @@ bash_complete() {
         printf "%s\n" "${COMPREPLY[@]}"
     ' _ "$stubs/apogee.bash" "$@"
 }
-for case in "${cases[@]}"; do
-    IFS='|' read -r -a parts <<<"$case|"
-    words=("${parts[@]:0:${#parts[@]}-1}")
-    needle="${parts[${#parts[@]}-1]}"
-    expect bash "$(bash_complete "${words[@]}")" "$needle" "${words[*]}"
+versions=()
+for shell in "${bashes[@]}"; do
+    version="$("$shell" -c 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}"')"
+    versions+=("$version")
+    for case in "${cases[@]}"; do
+        IFS='|' read -r -a parts <<<"$case|"
+        words=("${parts[@]:0:${#parts[@]}-1}")
+        needle="${parts[${#parts[@]}-1]}"
+        expect "bash $version" "$(bash_complete "$shell" "${words[@]}")" "$needle" "${words[*]}"
+    done
+    # Past a `:`, bash replaces only what follows it: the candidate is the rest.
+    expect "bash $version" "$(bash_complete "$shell" models pull llama3.2:)" "3b" "models pull llama3.2:"
+    # Two top-level candidates are two words, never one line of both.
+    output="$(bash_complete "$shell" c)"
+    expect "bash $version" "$output" "chat" "c"
+    expect "bash $version" "$output" "config" "c"
 done
-# Past a `:`, bash replaces only what follows it: the candidate is the rest.
-expect bash "$(bash_complete models pull llama3.2:)" "3b" "models pull llama3.2:"
-echo "bash: checked ${#cases[@]} lines, plus a word-break"
+under="${versions[0]}"
+if [ "${#versions[@]}" -gt 1 ]; then
+    under="$under and ${versions[1]}"
+fi
+echo "bash: checked ${#cases[@]} lines, plus a word-break and two candidates, under $under"
 
 # ---- zsh --------------------------------------------------------------------
 # compadd and _files only exist inside a completion widget, so they are stood

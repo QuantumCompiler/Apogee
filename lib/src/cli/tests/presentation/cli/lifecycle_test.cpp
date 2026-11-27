@@ -1771,6 +1771,27 @@ struct TabOffer {
     return offers;
 }
 
+/// The `apogee` a stub's case puts first on PATH in `bin` (CLI-M37, shared
+/// with CLI-M41's bash case): it answers by saying the words it was sent, each
+/// in brackets, on one line -- or, for a case that asks through
+/// APOGEE_FAKE_ANSWER, that answer's own lines, or (`none`) nothing.
+void write_fake_apogee(const std::filesystem::path& bin) {
+    std::filesystem::create_directories(bin);
+    const std::filesystem::path fake = bin / "apogee";
+    std::ofstream{fake, std::ios::binary} << R"(#!/bin/sh
+case "${APOGEE_FAKE_ANSWER-}" in
+'') ;;
+none) exit 0 ;;
+*) printf '%s\n' "$APOGEE_FAKE_ANSWER"; exit 0 ;;
+esac
+line=
+for word in "$@"; do line="$line[$word]"; done
+printf '%s\n' "$line"
+)";
+    std::filesystem::permissions(fake, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::add);
+}
+
 }  // namespace
 
 TEST_CASE("the PowerShell stub completes the word at the cursor, under either argument passing",
@@ -1788,20 +1809,7 @@ TEST_CASE("the PowerShell stub completes the word at the cursor, under either ar
     // through APOGEE_FAKE_ANSWER, a candidate of its own, or (`none`) nothing.
     const apogee::testing::TempDir work{"lifecycle-pwsh-" + std::to_string(std::random_device{}())};
     const std::filesystem::path bin = work.path() / "bin";
-    std::filesystem::create_directories(bin);
-    const std::filesystem::path fake = bin / "apogee";
-    std::ofstream{fake, std::ios::binary} << R"(#!/bin/sh
-case "${APOGEE_FAKE_ANSWER-}" in
-'') ;;
-none) exit 0 ;;
-*) printf '%s\n' "$APOGEE_FAKE_ANSWER"; exit 0 ;;
-esac
-line=
-for word in "$@"; do line="$line[$word]"; done
-printf '%s\n' "$line"
-)";
-    std::filesystem::permissions(fake, std::filesystem::perms::owner_all,
-                                 std::filesystem::perm_options::add);
+    write_fake_apogee(bin);
     std::ofstream{work.path() / "attached-note.txt"} << "a file to complete\n";
     const std::filesystem::path stub =
         std::filesystem::path{APOGEE_SOURCE_DIR}.parent_path() / "completions" / "apogee.ps1";
@@ -1904,4 +1912,199 @@ function Show([string]$Label, [string]$Line, [int]$Column) {
     REQUIRE(nothing != offers.end());
     INFO("offered for an empty answer: " << nothing->second.texts);
     CHECK(nothing->second.texts.find("attached-note.txt") != std::string::npos);
+}
+
+namespace {
+
+/// One Tab in bash (CLI-M41): what the caller's shell has set and the line or
+/// words bash hands `_apogee`, as bash text run in a subshell of its own, and
+/// what `COMPREPLY` then holds, joined with `|`. A Tab the fake `apogee` does
+/// not answer replies with the words the stub sent it, one bracket a word --
+/// so `[models][]` is two words arriving split, and `[models ]` one joined.
+struct BashTab {
+    std::string_view label;
+    std::string_view setup;
+    std::string_view replied;
+};
+
+constexpr std::array kBashTabs{
+    BashTab{.label = "a fresh word", .setup = "COMP_LINE='apogee '", .replied = "[__complete][]"},
+    BashTab{.label = "below the top level",
+            .setup = "COMP_LINE='apogee models '",
+            .replied = "[__complete][models][]"},
+    BashTab{.label = "a flag's value",
+            .setup = "COMP_LINE='apogee chat -m '",
+            .replied = "[__complete][chat][-m][]"},
+    BashTab{.label = "a value being typed",
+            .setup = "COMP_LINE='apogee chat -m cl'",
+            .replied = "[__complete][chat][-m][cl]"},
+    // Mid-line: the words up to the cursor, never past it.
+    BashTab{.label = "mid-line",
+            .setup = "COMP_LINE='apogee chat -m cl --tools'; COMP_POINT=17",
+            .replied = "[__complete][chat][-m][cl]"},
+    // No COMP_LINE -- a caller driving the function by hand: COMP_WORDS.
+    BashTab{.label = "from COMP_WORDS",
+            .setup = "unset COMP_LINE COMP_POINT; COMP_WORDS=(apogee chat -m ''); COMP_CWORD=3",
+            .replied = "[__complete][chat][-m][]"},
+    // Two candidates are two words, never one line of both pasted in.
+    BashTab{.label = "two candidates",
+            .setup = R"(export APOGEE_FAKE_ANSWER=$':values\nchat\nconfig'; COMP_LINE='apogee c')",
+            .replied = "chat|config"},
+    // Past a `:`, each candidate loses what bash will not replace.
+    BashTab{
+        .label = "past a word-break",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nllama3.2:3b\nllama3.2:1b'; COMP_LINE='apogee models pull llama3.2:')",
+        .replied = "3b|1b"},
+    // An answer line is a candidate as it stands, never matched against the
+    // folder, which holds fileA.txt and fileB.txt.
+    BashTab{
+        .label = "a candidate shaped like a glob",
+        .setup =
+            R"(export APOGEE_FAKE_ANSWER=$':values\nfile*'; COMP_LINE='apogee chat --attach f')",
+        .replied = "file*"},
+    // What the caller's own shell has set changes nothing.
+    BashTab{.label = "a caller's IFS",
+            .setup = R"(IFS=$'\n'; COMP_LINE='apogee chat -m ')",
+            .replied = "[__complete][chat][-m][]"},
+    BashTab{
+        .label = "a caller's nullglob",
+        .setup =
+            R"(shopt -s nullglob; export APOGEE_FAKE_ANSWER=$':values\nnomatch*\nchat'; COMP_LINE='apogee c')",
+        .replied = "nomatch*|chat"},
+    BashTab{
+        .label = "a caller's failglob",
+        .setup =
+            R"(shopt -s failglob; export APOGEE_FAKE_ANSWER=$':values\nnomatch*'; COMP_LINE='apogee c')",
+        .replied = "nomatch*"},
+    BashTab{.label = "a caller's set -u, and an empty answer",
+            .setup = "set -u; export APOGEE_FAKE_ANSWER=:values; COMP_LINE='apogee models list '",
+            .replied = ""},
+    BashTab{.label = "a caller's set -u, and no answer at all",
+            .setup = "set -u; export APOGEE_FAKE_ANSWER=none; COMP_LINE='apogee chat --attach '",
+            .replied = ""},
+    // A caller's `set -e`: a Tab never closes the shell -- not when the
+    // binary fails, nor where bash 3.2 has no compopt.
+    BashTab{.label = "a caller's set -e, and a binary that fails",
+            .setup =
+                R"(set -e; apogee() { printf ':values\nchat\n'; return 1; }; COMP_LINE='apogee c')",
+            .replied = "chat"},
+    BashTab{.label = "a caller's set -e, and an empty answer",
+            .setup = "set -e; export APOGEE_FAKE_ANSWER=:values; COMP_LINE='apogee models list '",
+            .replied = ""},
+};
+
+/// A bash on this host, and the version it says it is.
+struct HostBash {
+    std::string program;
+    std::string version;
+};
+
+/// The bashes this host has, each once by version: PATH's, then macOS's own
+/// `/bin/bash` where it is another -- 3.2 on a Mac, Homebrew's bash first.
+[[nodiscard]] std::vector<HostBash> host_bashes() {
+    std::vector<HostBash> found;
+    for (const std::string& program :
+         {apogee::platform::find_on_path("bash"), std::string{"/bin/bash"}}) {
+        std::error_code code;
+        if (program.empty() || !std::filesystem::exists(program, code)) {
+            continue;
+        }
+        apogee::platform::ChildCommand command;
+        command.program = program;
+        command.arguments = {"--norc", "--noprofile", "-c", R"(printf %s "$BASH_VERSION")"};
+        command.unset_environment = {"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS"};
+        const apogee::platform::CapturedRun ran = apogee::platform::run_captured(
+            command, apogee::platform::CapturedLimits{.timeout = std::chrono::seconds{30}});
+        if (ran.status != 0 || ran.out.empty()) {
+            continue;
+        }
+        if (std::ranges::none_of(
+                found, [&ran](const HostBash& seen) { return seen.version == ran.out; })) {
+            found.push_back(HostBash{.program = program, .version = ran.out});
+        }
+    }
+    return found;
+}
+
+/// The driver's lines, `<row>\t<COMPREPLY joined with |>`, by row.
+[[nodiscard]] std::map<std::string, std::string, std::less<>> bash_replies(const std::string& out) {
+    std::map<std::string, std::string, std::less<>> replies;
+    std::istringstream lines{out};
+    std::string line;
+    while (std::getline(lines, line)) {
+        const std::size_t tab = line.find('\t');
+        if (tab != std::string::npos) {
+            replies[line.substr(0, tab)] = line.substr(tab + 1);
+        }
+    }
+    return replies;
+}
+
+}  // namespace
+
+TEST_CASE("the bash stub sends the words it is given, on every bash the host has",
+          "[commands][completion][bash]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const std::vector<HostBash> bashes = host_bashes();
+    if (bashes.empty()) {
+        SKIP("no bash on PATH or at /bin/bash: the bash stub cannot run here");
+    }
+
+    // The stub itself, sourced into `bash --norc --noprofile`, with the fake
+    // `apogee` first on PATH, in a folder a glob would match in.
+    const apogee::testing::TempDir work{"lifecycle-bash-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path bin = work.path() / "bin";
+    write_fake_apogee(bin);
+    std::ofstream{work.path() / "fileA.txt"} << "a file a glob matches\n";
+    std::ofstream{work.path() / "fileB.txt"} << "another\n";
+    const std::filesystem::path stub =
+        std::filesystem::path{APOGEE_SOURCE_DIR}.parent_path() / "completions" / "apogee.bash";
+    REQUIRE(std::filesystem::exists(stub));
+
+    // Each Tab in a subshell of its own, so what one caller sets reaches no
+    // other, and a Tab the stub fails on prints no row.
+    std::string driver = R"sh(source "$1"
+PATH="$2:$PATH"
+show() {
+    set +u
+    local IFS='|'
+    printf '%s\t%s\n' "$1" "${COMPREPLY[*]}"
+}
+)sh";
+    for (std::size_t index = 0; index < kBashTabs.size(); ++index) {
+        driver += "(\n" + std::string{kBashTabs[index].setup} + "\n_apogee\nshow " +
+                  std::to_string(index) + "\n)\n";
+    }
+    driver += "exit 0\n";
+
+    for (const HostBash& bash : bashes) {
+        apogee::platform::ChildCommand command;
+        command.program = bash.program;
+        command.arguments = {"--norc", "--noprofile", "-c",        driver,
+                             "_",      stub.string(), bin.string()};
+        command.working_directory = work.path().string();
+        command.unset_environment = {"APOGEE_FAKE_ANSWER", "BASH_ENV",   "ENV",
+                                     "SHELLOPTS",          "BASHOPTS",   "COMP_LINE",
+                                     "COMP_POINT",         "COMP_WORDS", "COMP_CWORD"};
+        const apogee::platform::CapturedRun ran = apogee::platform::run_captured(
+            command, apogee::platform::CapturedLimits{.timeout = std::chrono::minutes{1}});
+        INFO("bash " << bash.version << " at " << bash.program);
+        INFO("its run: " << ran.error);
+        INFO("its stderr: " << ran.tail);
+        REQUIRE(ran.status == 0);
+        const std::map<std::string, std::string, std::less<>> replies = bash_replies(ran.out);
+
+        for (std::size_t index = 0; index < kBashTabs.size(); ++index) {
+            const BashTab& tab = kBashTabs[index];
+            INFO("Tab with " << tab.label << ": " << tab.setup);
+            const auto found = replies.find(std::to_string(index));
+            CHECK(found != replies.end());
+            if (found != replies.end()) {
+                CHECK(found->second == tab.replied);
+            }
+        }
+    }
 }
