@@ -6,15 +6,15 @@ The work queue, seen one release at a time. This page is the **overview**: what 
 
 The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1), released 2026-11-26.
 
-**Still to build: 6 items.**
-- **The CLI:** 4. Track 58, Claude aware of Apogee: the MCP server introduces itself, serves graphs and knowledge records, offers a lighter set to coding hosts, and refreshes what you list.
+**Still to build: 7 items.**
+- **The CLI:** 5. Track 58, Claude aware of Apogee: the MCP server introduces itself, serves graphs and knowledge records, offers a lighter set to coding hosts, and refreshes what you list. Track 64, self-update: `apogee update`.
 - **The mod:** 2. Track 2, Claude aware of Apogee: Apogee as a Claude Code plugin, and graphs and knowledge records in the desktop mod.
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
 Outside the release, 28 maintenance items can be picked up any time: the CLI's M36–M47 (2026-11-22) and M48–M60 (2026-11-26), and the Apple apps' M21–M23 (2026-11-26). Ten wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, M58 on the Apple apps' M22 and M60 on M58, and the Apple apps' M23 on M21. None of the 28 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md) and [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md); and any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55, M57 and M59; the Apple apps' M21 and M22).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55, M57 and M59; the Apple apps' M21 and M22).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -26,6 +26,12 @@ Outside the release, 28 maintenance items can be picked up any time: the CLI's M
 | 58b | [Graphs and knowledge records served](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) | — |
 | 58c | [A lighter tool set for coding hosts](cli/v0.2.2/mcp-serve-coding-host-profile.md) | — |
 | 58d | [Claude can refresh what you list](cli/v0.2.2/mcp-serve-opt-in-refresh.md) | — |
+
+**Track 64, self-update:** `apogee update`, the third install path beside the two installers, with a once-a-day notice. Its one call for you: whether that notice is on by default.
+
+| # | Item | Waits on |
+|---|---|---|
+| 64a | [`apogee update` brings the installed binary to the latest release](cli/v0.2.2/apogee-update.md) | — |
 
 ### The mod ([queue](mod/README.md#v022))
 

@@ -331,7 +331,7 @@ The release's second-sweep track *(track 57, opened 2026-10-31, the user's call:
 
 ## In progress
 
-### v0.2.2 — Claude aware of Apogee (track 58)
+### v0.2.2 — Claude aware of Apogee (track 58) and self-update (track 64)
 
 Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP server that makes Claude aware of Apogee's local models, retrieval and knowledge graph). The spike drove the shipped `apogee mcp serve` as a host would: 22 read-only tools and an opt-in local `complete` already answer, search and the graph tools with no model; what is missing is awareness. The user's calls: both hosts (the mod's track 2 packages it for Claude Code and the desktop mod), opt-in writes per graph and collection, the next release.
 
@@ -339,6 +339,10 @@ Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP se
 - [ ] **Graphs and knowledge records served** *(58b — [backlog](../../backlog/cli/v0.2.2/mcp-serve-graphs-and-knowledge.md))* — `apogee graph list` and six reads: Claude could not find a named graph (`list_collections` lists collections only) and could not reach the decision records at all.
 - [ ] **A lighter tool set for coding hosts** *(58c — [backlog](../../backlog/cli/v0.2.2/mcp-serve-coding-host-profile.md))* — `--profile knowledge` drops the 8 file and git tools Claude Code already has.
 - [ ] **Claude can refresh what you list** *(58d — [backlog](../../backlog/cli/v0.2.2/mcp-serve-opt-in-refresh.md))* — a listed code graph's model-free update and a listed collection's re-ingest (local embedder only), recorded sources only.
+
+The release's self-update track *(track 64, opened 2026-11-26, the user's call, placed here)*: `apogee update`, deferred out of v0.1.0 (2026-09-01) and carried in this file's ideas until now, becomes the third install path beside the two installers.
+
+- [ ] **`apogee update`** *(64a — [backlog](../../backlog/cli/v0.2.2/apogee-update.md))* — this target's archive from the latest release (or the one `--version` names), checked against GitHub's published sha256, replaced in place, the install repaired through the new binary's `check --fix` and `bootstrap` as the installers end; `--check` reports without changing anything; a once-a-day notice on a terminal of the release channel, whose default is the user's call.
 
 ---
 
@@ -483,7 +487,6 @@ After v0.2.5 (the user's call): Apogee's own sessions, opt-in, train a local mod
 ## Ideas / candidate features
 
 - Plugin system (`plugin.yaml` overlay — deliberately left out of the initial plan; separable later on top of the config engine)
-- **Self-update (`apogee update`)** — deliberately deferred out of v0.1.0 *(decided 2026-09-01)*, and now unblocked: the distribution host is settled and the release pipeline exists. It becomes the **third parity path** alongside the two installers, so it must go through `apogee check --fix` like they do rather than seeding anything itself. Needs its own backlog item; the background update notifier (TTY-only, 24h cache, subcommand skip-list) rides with it.
 - Remote MCP transports + OAuth connectors (and the connector-driven review agents that ride them)
 - **An Xcode plug-in for Apogee** *(2026-10-31, the user's call: not now)* — Xcode 27 installs plug-ins from a git URL (skills, MCP servers and an ACP agent configuration, in Anthropic's Claude Code plugin format), which would make track 56's setup one click. A plug-in that ships its own binary wants Developer ID signing and notarization, against the ad-hoc signing the release uses; until then Apogee is added by hand with `acp registration`'s fields.
 - **Forge integration for the review agents** — a GitHub and/or GitLab tool server for the merge-request agent's MR mode (read the MR, its discussions and diff; look up a ticket) and the forge credential slots deferred from the credential store (2026-09-13). The forge target, once the user's call gating this item, was answered by track 48 (2026-10-18): both, through the spawned `gh` and `glab` whose logins stay theirs — so no forge credential slot is needed — over the `forge/` seam v0.1.9 shipped for the review agent. What remains is that seam offered to a chat agent as tools; it would be the first user of the in-binary MCP server pattern beyond Apogee's own tools.
