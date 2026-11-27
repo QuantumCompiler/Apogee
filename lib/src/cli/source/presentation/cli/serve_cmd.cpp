@@ -23,6 +23,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "events/bus.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
@@ -470,9 +471,8 @@ void ServeCommand::bind(CLI::App& root, const RootContext& context) {
             .rag = rag_choice,
             .session_ttl_minutes = flags->session_ttl});
         note(summary);
-        note(
-            "/v1/admin enabled -- bearer token required; 'apogee serve --print-admin-token' "
-            "prints it");
+        note("/v1/admin enabled -- bearer token required; '" + harness::printed_program() +
+             " serve --print-admin-token' prints it");
         if (!httpserver::is_loopback_host(flags->bind)) {
             note(
                 "bound to a non-loopback host: the inference plane is unauthenticated, so "

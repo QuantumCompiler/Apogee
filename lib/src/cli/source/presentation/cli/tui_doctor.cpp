@@ -14,6 +14,7 @@
 #include "cli/providers_cmd.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "operations/system_view.h"
 
 namespace apogee::commands {
@@ -143,7 +144,8 @@ tui::ListOptions providers_view_options(const RootContext& context) {
             statuses.empty() ? "not scanned yet -- s scans this machine for providers"
                              : "as the last scan found them -- s scans again"};
         if (!config.has_value()) {
-            heading.emplace_back("no config file yet -- 'apogee config init' writes one");
+            heading.emplace_back("no config file yet -- '" + harness::printed_program() +
+                                 " config init' writes one");
         }
         return std::pair{std::move(heading), std::move(rows)};
     };

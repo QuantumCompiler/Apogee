@@ -617,8 +617,9 @@ void build_members(harness::Harness& harness, const harness::Config& config,
     const backends::BuildResult built = backends::build_providers(harness, build_options);
     if (built.constructed_count() == 0) {
         std::string message = "no usable backend is configured";
-        message += built.skipped_summary().empty() ? " (add one with 'apogee config add-backend')"
-                                                   : " -- " + built.skipped_summary();
+        message += built.skipped_summary().empty()
+                       ? " (add one with '" + harness::printed_program() + " config add-backend')"
+                       : " -- " + built.skipped_summary();
         fail_user(message);
     }
     // A suite member naming nothing, or one that did not start (57d), is

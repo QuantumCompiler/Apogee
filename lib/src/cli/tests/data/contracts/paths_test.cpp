@@ -154,6 +154,55 @@ TEST_CASE("the channel names are the three the build and MODE take", "[paths][ch
     CHECK(apogee::harness::channel_flag(Channel::Test) == "--test");
 }
 
+TEST_CASE("each channel's program is the name CMake builds it under", "[paths][channels][M49]") {
+    // Compile-tested: CMake's OUTPUT_NAMEs (source/CMakeLists.txt,
+    // apogee_channel_executable), which main.cpp holds its own stamp to.
+    static_assert(apogee::harness::channel_program(Channel::Release) == "apogee");
+    static_assert(apogee::harness::channel_program(Channel::Dev) == "apogee-dev");
+    static_assert(apogee::harness::channel_program(Channel::Test) == "apogee-test");
+    for (const Channel channel : apogee::harness::kChannels) {
+        CHECK(apogee::harness::channel_program(channel).starts_with("apogee"));
+    }
+}
+
+TEST_CASE("a printed command starts with the build's name, then the root flag in force",
+          "[paths][channels][M49]") {
+    using Words = std::vector<std::string>;
+    // No flag: the build's own name, whichever channel it is.
+    for (const Channel baked : apogee::harness::kChannels) {
+        const apogee::testing::BakedChannelGuard guard{baked};
+        INFO(apogee::harness::channel_name(baked) << " build");
+        CHECK(apogee::harness::program_words() ==
+              Words{std::string{apogee::harness::channel_program(baked)}});
+        // A channel flag is echoed as typed, its own channel's included.
+        for (const Channel asked : apogee::harness::kChannels) {
+            const apogee::harness::RootFlagScope scope{flag_for(asked)};
+            CHECK(apogee::harness::program_words() ==
+                  Words{std::string{apogee::harness::channel_program(baked)},
+                        std::string{apogee::harness::channel_flag(asked)}});
+        }
+        CHECK(apogee::harness::program_words().size() == 1);
+    }
+
+    // `--custom` and its file, made absolute and normalized, as two words:
+    // the renderer quotes them, so nothing here does.
+    const std::filesystem::path relative =
+        std::filesystem::path{"a b"} / "x" / ".." / "config" / "config.json";
+    {
+        const apogee::harness::RootFlagScope scope{custom_flag(relative)};
+        const Words words = apogee::harness::program_words();
+        REQUIRE(words.size() == 3);
+        CHECK(words[0] == "apogee");
+        CHECK(words[1] == "--custom");
+        const std::filesystem::path file{words[2]};
+        CHECK(file.is_absolute());
+        CHECK(file == (std::filesystem::current_path() / "a b" / "config" / "config.json")
+                          .lexically_normal());
+    }
+    // The scope gone, the flag is gone from the words too.
+    CHECK(apogee::harness::program_words() == Words{"apogee"});
+}
+
 TEST_CASE("with no flag and no APOGEE_HOME each channel's build owns its own root",
           "[paths][channels]") {
     for (const Channel channel : apogee::harness::kChannels) {

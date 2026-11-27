@@ -177,8 +177,9 @@ namespace {
         }
         if (!target.format.empty() && target.format != models::kMlxFormat) {
             refusal = "'" + value + "' is " + target.format +
-                      " weights, and a drafter is an MLX directory -- 'apogee models convert "
-                      "<a draft head> --mlx' makes one";
+                      " weights, and a drafter is an MLX directory -- '" +
+                      harness::printed_program() +
+                      " models convert <a draft head> --mlx' makes one";
             return {};
         }
         // A model: its one drafter.
@@ -192,11 +193,11 @@ namespace {
         if (drafters.size() == 1) {
             return models::resolve_store_target(roots, drafters.front()).path.string();
         }
-        refusal = drafters.empty() ? "'" + value +
-                                         "' stores no MLX drafter -- 'apogee models convert "
-                                         "<its draft head> --mlx' makes one"
-                                   : "'" + value + "' stores " + std::to_string(drafters.size()) +
-                                         " drafters -- name one:";
+        refusal = drafters.empty()
+                      ? "'" + value + "' stores no MLX drafter -- '" + harness::printed_program() +
+                            " models convert <its draft head> --mlx' makes one"
+                      : "'" + value + "' stores " + std::to_string(drafters.size()) +
+                            " drafters -- name one:";
         for (const std::string& handle : drafters) {
             refusal += " " + handle;
         }
@@ -437,7 +438,8 @@ BackendFieldsOutcome set_backend_fields(const std::filesystem::path& path, std::
     // Each edit as it will be written: a drafter's resolved below (53i).
     std::vector<BackendFieldEdit> edits = requested;
     if (edits.empty()) {
-        out.refusal = "name a field to set -- 'apogee config set-backend --help' lists them";
+        out.refusal = "name a field to set -- '" + harness::printed_program() +
+                      " config set-backend --help' lists them";
         return out;
     }
     harness::Config config;

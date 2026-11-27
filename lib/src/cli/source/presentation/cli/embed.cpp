@@ -655,7 +655,8 @@ std::vector<CollectionRow> collection_rows() {
 
 std::string render_collection_rows(const std::vector<CollectionRow>& rows) {
     if (rows.empty()) {
-        return "no collections yet -- create one with 'apogee embed ingest <name> <path>'\n";
+        return "no collections yet -- create one with '" + harness::printed_program() +
+               " embed ingest <name> <path>'\n";
     }
     std::string out;
     for (const CollectionRow& row : rows) {

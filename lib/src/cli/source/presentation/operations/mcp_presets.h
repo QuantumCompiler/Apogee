@@ -39,10 +39,9 @@
 namespace apogee::operations {
 
 /// What `mcp list` and the shell's MCP view say with no server configured:
-/// the presets first, then the scaffold.
-inline constexpr std::string_view kNoMcpServers =
-    "No MCP servers configured. See what Apogee ships ready to register: apogee mcp presets "
-    "-- or create one: apogee mcp create <name>";
+/// the presets first, then the scaffold, each command begun with the build's
+/// own words (CLI-M49).
+[[nodiscard]] std::string no_mcp_servers();
 
 struct McpPreset {
     std::string_view name;
@@ -55,7 +54,8 @@ struct McpPreset {
     /// The tool and JSON arguments `mcp test` tries it with.
     std::string_view try_tool;
     std::string_view try_arguments;
-    /// Empty when it registers into Apogee; else why it never does.
+    /// Empty when it registers into Apogee; else why it never does --
+    /// `refusal_of` says it with the door to every host's entry.
     std::string_view refusal;
     /// What a person must do outside Apogee for it to answer, said under the
     /// preset in `mcp presets`, after `create --from`'s "Test it" line and as
@@ -68,6 +68,11 @@ struct McpPreset {
 
 /// The preset `name` (exactly), or nullptr.
 [[nodiscard]] const McpPreset* find_mcp_preset(std::string_view name) noexcept;
+
+/// `preset`'s refusal as a person reads it: why it never registers into
+/// Apogee, then the door to every other host's entry, begun with the build's
+/// own words (CLI-M49) -- `(apogee mcp presets)`. Empty when it registers.
+[[nodiscard]] std::string refusal_of(const McpPreset& preset);
 
 /// Every preset's name, for `--from`'s completion and its refusal.
 [[nodiscard]] std::vector<std::string_view> mcp_preset_names();

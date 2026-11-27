@@ -6,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::harness {
@@ -204,6 +205,23 @@ std::optional<RootFlag> root_flag() {
     return flags.flag;
 }
 
+std::vector<std::string> program_words() {
+    std::vector<std::string> words{std::string{channel_program(baked_channel())}};
+    const std::optional<RootFlag> flag = root_flag();
+    if (!flag.has_value()) {
+        return words;
+    }
+    if (flag->channel.has_value()) {
+        words.emplace_back(channel_flag(*flag->channel));
+        return words;
+    }
+    words.emplace_back(kCustomFlag);
+    std::error_code code;
+    const std::filesystem::path absolute = std::filesystem::absolute(flag->custom_config, code);
+    words.push_back(code ? flag->custom_config.string() : absolute.lexically_normal().string());
+    return words;
+}
+
 RootFlagScope::RootFlagScope(std::optional<RootFlag> flag) {
     FlagSlot& flags = slot();
     const std::scoped_lock lock{flags.mutex};
@@ -261,7 +279,8 @@ std::string config_conflict(const std::filesystem::path& config_directory) {
     }
     return "both " + legacy.string() + " and " + current.string() +
            " exist, and which one is current is yours to say -- move the other aside (once "
-           "config.yaml is the one, 'apogee config migrate' converts it)";
+           "config.yaml is the one, '" +
+           harness::printed_program() + " config migrate' converts it)";
 }
 
 std::filesystem::path default_config_path() {

@@ -16,6 +16,7 @@
 #include "cli/knowledge.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "knowledge/record.h"
 
 namespace apogee::commands {
@@ -189,8 +190,8 @@ tui::ListOptions graph_view_options(const RootContext& context) {
         }
         std::vector<std::string> heading;
         if (rows.empty()) {
-            heading.emplace_back(
-                "no graph yet -- 'apogee graph build <collection>' builds one over a collection");
+            heading.emplace_back("no graph yet -- '" + harness::printed_program() +
+                                 " graph build <collection>' builds one over a collection");
         }
         return std::pair{std::move(heading), std::move(rows)};
     };

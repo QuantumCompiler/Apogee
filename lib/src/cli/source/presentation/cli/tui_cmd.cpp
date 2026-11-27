@@ -25,6 +25,7 @@
 #include "cli/tui_workbench.h"
 #include "cli/version_command.h"
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 #include "platform/system_info.h"
 #include "platform/termination.h"
@@ -253,8 +254,9 @@ void TuiCommand::bind(CLI::App& root, const RootContext& context) {
             if (flags->output_format != OutputFormat::Text ||
                 flags->input_format.value_or(InputFormat::Text) != InputFormat::Text) {
                 std::cerr << "apogee tui: --output-format and --input-format are machine mode's, "
-                             "for a pipe -- the shell draws its own screen; 'apogee chat' or "
-                             "'apogee execute' takes them\n";
+                             "for a pipe -- the shell draws its own screen; '" +
+                                 harness::printed_program() + " chat' or '" +
+                                 harness::printed_program() + " execute' takes them\n";
                 throw CLI::RuntimeError(kUserError);
             }
             launch = ShellLaunch{.flags = flags, .mode = launch_mode(*flags)};

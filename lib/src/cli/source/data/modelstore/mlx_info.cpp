@@ -11,6 +11,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/suggested_command.h"
 #include "modelstore/kv_cache.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/store.h"
@@ -712,8 +713,8 @@ std::string mlx_drafter_refusal(const std::filesystem::path& base,
     std::error_code code;
     const std::string named = drafter.string();
     if (!std::filesystem::is_directory(drafter, code)) {
-        return "there is no drafter at " + named + " -- 'apogee models convert <a draft head> " +
-               "--mlx' makes one";
+        return "there is no drafter at " + named + " -- '" + harness::printed_program() +
+               " models convert <a draft head> " + "--mlx' makes one";
     }
     if (!std::filesystem::is_regular_file(drafter / "config.json", code)) {
         return named + " is not an MLX directory: it has no config.json";
@@ -745,8 +746,10 @@ std::string mlx_drafter_refusal(const std::filesystem::path& base,
         return base.string() + " is mlx-lm's build (kind " + base_kind.word +
                (base_kind.source == MlxKindSource::Recorded ? ", recorded" : ", none recorded") +
                "), laid out for mlx-lm, and drafting runs through mlx-vlm's speculative path, "
-               "which loads the base through mlx-vlm -- 'apogee models convert <its SafeTensors "
-               "set> --mlx' builds it through mlx-vlm, and the drafter runs beside that";
+               "which loads the base through mlx-vlm -- '" +
+               harness::printed_program() +
+               " models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, and the "
+               "drafter runs beside that";
     }
     if (base_kind.word != kMlxVision) {
         return base.string() + " is " + describe(base_kind) +

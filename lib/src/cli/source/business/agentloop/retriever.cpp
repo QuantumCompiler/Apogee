@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <set>
 
+#include "contracts/suggested_command.h"
 #include "embedstore/vector.h"
 
 namespace apogee::agentloop {
@@ -48,14 +49,15 @@ constexpr std::array<std::string_view, 3> kIngestRetrieverNames{kLexical, kVecto
         return "the collection is empty";
     }
     if (store.dimension == 0) {
-        return "the collection holds no vectors -- re-run `apogee embed ingest` with "
-               "--retriever vector to build them";
+        return "the collection holds no vectors -- re-run `" + harness::printed_program() +
+               " embed ingest` with --retriever vector to build them";
     }
     if (!store.mixed_models.empty()) {
         // A partial re-ingest under another model (57s): never one space.
         return "the collection's vectors are from more than one model (" +
-               spoken_models(store.mixed_models) + ") -- re-run `apogee embed ingest` over every " +
-               "source with '" + embedder.model + "' to vector-query";
+               spoken_models(store.mixed_models) + ") -- re-run `" + harness::printed_program() +
+               " embed ingest` over every " + "source with '" + embedder.model +
+               "' to vector-query";
     }
     if (store.recorded_model.empty() || store.recorded_model != embedder.model) {
         const std::string from = store.recorded_model.empty()
@@ -64,19 +66,20 @@ constexpr std::array<std::string_view, 3> kIngestRetrieverNames{kLexical, kVecto
         // Every source, never "the current model" alone: re-ingesting part
         // of the collection leaves the rest in the old space (57s).
         return "the collection's vectors are from " + from +
-               " but the embedding backend would use '" + embedder.model +
-               "' -- re-run `apogee embed ingest` over every source with '" + embedder.model +
-               "' to vector-query";
+               " but the embedding backend would use '" + embedder.model + "' -- re-run `" +
+               harness::printed_program() + " embed ingest` over every source with '" +
+               embedder.model + "' to vector-query";
     }
     if (store.vector_dims > 1) {
         return "the collection holds vectors of " + std::to_string(store.vector_dims) +
-               " different widths (mixed vector spaces) -- re-run `apogee embed ingest` over "
-               "every source with one model";
+               " different widths (mixed vector spaces) -- re-run `" + harness::printed_program() +
+               " embed ingest` over every source with one model";
     }
     if (store.lexical_only > 0) {
         return std::to_string(store.lexical_only) + " of " + std::to_string(store.chunk_count) +
                " chunks have no vectors and would be invisible to vector search -- re-run "
-               "`apogee embed ingest` over every source to vector-query";
+               "`" +
+               harness::printed_program() + " embed ingest` over every source to vector-query";
     }
     return {};
 }

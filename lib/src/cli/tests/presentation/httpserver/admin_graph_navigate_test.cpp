@@ -12,6 +12,8 @@
 
 #include "agentloop/graph_context.h"
 #include "contracts/layout.h"
+#include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "support/env_guard.h"
 #include "support/graph_fixture.h"
@@ -94,6 +96,28 @@ TEST_CASE("a served read of an unbuilt collection carries the build that runs as
     CHECK(error_of(response)["type"] == "not_found_error");
     CHECK(error_of(response)["message"] ==
           "no graph built for '-y' -- run: apogee graph build -- -y");
+}
+
+TEST_CASE("a served build hint names the root flag the server runs under, as the CLI prints it",
+          "[httpserver][admin][graph][M49]") {
+    // CLI-M49 (ADR 0002): `serve --custom <file>` -- the flag held in force
+    // for the run, which serve's threads read -- names the root in the body,
+    // the same command the CLI prints. The flag names the fixture's own root,
+    // so the chain agrees with its APOGEE_HOME.
+    const Fixture fixture;
+    {
+        const apogee::embedstore::Store plain{apogee::harness::embeddings_dir() / "plain.db"};
+    }
+    const std::string file =
+        std::filesystem::absolute(fixture.config_path).lexically_normal().string();
+    const apogee::harness::RootFlagScope flag{
+        apogee::harness::RootFlag{.channel = std::nullopt, .custom_config = fixture.config_path}};
+    const HttpResponse response = apogee::httpserver::admin_graph_neighbors(
+        fixture.context(), "plain", get({{"node", "Fox"}}));
+    CHECK(response.status == 404);
+    CHECK(error_of(response)["message"] == "no graph built for 'plain' -- run: apogee --custom " +
+                                               apogee::harness::shell_word(file) +
+                                               " graph build plain");
 }
 
 TEST_CASE("served navigation failures carry the CLI's message and the right status",

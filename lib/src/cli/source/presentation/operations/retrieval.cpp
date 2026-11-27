@@ -6,6 +6,7 @@
 #include "agentloop/embed_func.h"
 #include "agentloop/graph_context.h"
 #include "contracts/collection_name.h"
+#include "contracts/suggested_command.h"
 #include "operations/collections.h"
 
 namespace apogee::commands {
@@ -81,8 +82,8 @@ std::string rag_choice_refusal(const RagChoice& choice, std::string_view config_
     std::string refused =
         choice.active() ? harness::collection_read_error(choice.collection) : std::string{};
     if (!refused.empty() && choice.source == RagSource::Config) {
-        refused +=
-            " -- from " + std::string{config_key} + " in the config; 'apogee check' names the fix";
+        refused += " -- from " + std::string{config_key} + " in the config; '" +
+                   harness::printed_program() + " check' names the fix";
     }
     return refused;
 }

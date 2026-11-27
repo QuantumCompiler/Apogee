@@ -33,6 +33,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
@@ -156,8 +157,9 @@ LoadedAgent load_agent(const harness::Config& config, const std::filesystem::pat
         const std::optional<harness::AgentConfig> resolved =
             harness::resolve_agent(config, flags.agent, &loaded.bundled);
         if (!resolved.has_value()) {
-            fail_user("no agent named '" + flags.agent + "' (available: " +
-                      known_agent_names(config) + "; create one with 'apogee agents create')");
+            fail_user("no agent named '" + flags.agent +
+                      "' (available: " + known_agent_names(config) + "; create one with '" +
+                      harness::printed_program() + " agents create')");
         }
         loaded.name = flags.agent;
         loaded.config = *resolved;
@@ -587,7 +589,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
             if (!built.skipped_summary().empty()) {
                 message += " -- " + built.skipped_summary();
             } else {
-                message += " (add one with 'apogee config add-backend')";
+                message +=
+                    " (add one with '" + harness::printed_program() + " config add-backend')";
             }
             fail_user(message);
         }
@@ -725,7 +728,8 @@ void AnalyzeCommand::bind(CLI::App& root, const RootContext& context) {
         // --- machine mode: the same loop, a different Reporter ---------------
         if (flags->output_format == OutputFormat::StreamJson) {
             if (flags->interactive) {
-                fail_user("--interactive has no machine-mode form; drive 'apogee chat' instead");
+                fail_user("--interactive has no machine-mode form; drive '" +
+                          harness::printed_program() + " chat' instead");
             }
             JsonReporter reporter{std::cout};
             agent::ToolRegistry registry =

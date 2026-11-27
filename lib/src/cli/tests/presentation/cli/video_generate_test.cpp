@@ -1168,7 +1168,7 @@ TEST_CASE("an explicit engine that cannot run is refused before a spawn, naming 
         fixture.run.options.engine = "mlx";
         fixture.run.ready.refusal = apogee::video::VideoRefusal::NoMlxVideo;
         fixture.run.ready.reason = "mlx-video is not installed in the Python environment at /venv";
-        fixture.run.ready.remedy = std::string{apogee::video::kMlxVideoSetupRemedy};
+        fixture.run.ready.remedy = apogee::video::mlx_video_setup_remedy();
         const VideoGenerateResult result = fixture.run.go();
         CHECK(result.exit_code == 1);
         CHECK(result.error ==

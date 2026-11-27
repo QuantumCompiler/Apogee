@@ -102,12 +102,17 @@ endforeach()
 # On Windows it also carries the manifest below, so every channel reads its
 # text as UTF-8.
 function(apogee_channel_executable target channel)
-    target_compile_definitions(${target} PRIVATE APOGEE_CHANNEL="${channel}")
     if(channel STREQUAL "release")
-        set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee)
+        set(program apogee)
     else()
-        set_target_properties(${target} PROPERTIES OUTPUT_NAME apogee-${channel})
+        set(program apogee-${channel})
     endif()
+    # The name is stamped too (CLI-M49): main.cpp holds it to
+    # channel_program(), the name every printed command starts with, so the
+    # two cannot drift apart.
+    target_compile_definitions(${target} PRIVATE APOGEE_CHANNEL="${channel}"
+                                                 APOGEE_PROGRAM="${program}")
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME ${program})
     apogee_windows_manifest(${target})
 endfunction()
 

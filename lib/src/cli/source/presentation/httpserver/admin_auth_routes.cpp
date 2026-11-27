@@ -7,6 +7,7 @@
 #include <string>
 
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "operations/credential_views.h"
 #include "secrets/store.h"
 
@@ -72,8 +73,8 @@ HttpResponse admin_put_credential(const AdminAuthContext& context, std::string_v
     if (!is_loopback_host(request.remote_address)) {
         return error_response(403,
                               "this route accepts a secret and is served to loopback peers only "
-                              "-- connect from the same machine, or use 'apogee auth add' on "
-                              "the host",
+                              "-- connect from the same machine, or use '" +
+                                  harness::printed_program() + " auth add' on the host",
                               kForbidden);
     }
     HttpResponse refusal;

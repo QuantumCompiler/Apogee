@@ -14,6 +14,7 @@
 #include "cli/helpers.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "operations/suites.h"
 #include "symphony/definition.h"
 
@@ -502,7 +503,8 @@ void bind_set_suite(CLI::App& parent, const RootContext& context) {
         if (found == config.suites.end()) {
             const std::vector<std::string> known = config.suite_names();
             fail("no suite named '" + flags->name + "'" +
-                 (known.empty() ? " (none is configured -- 'apogee config add-suite')"
+                 (known.empty() ? " (none is configured -- '" + harness::printed_program() +
+                                      " config add-suite')"
                                 : " (configured: " + joined(known) + ")"));
         }
         const SuiteConfig before = found->second;
@@ -618,7 +620,8 @@ std::string point_default_suite(const std::filesystem::path& path, const std::st
         if (found == config.suites.end()) {
             const std::vector<std::string> known = config.suite_names();
             fail("no suite named '" + name + "'" +
-                 (known.empty() ? " (none is configured -- 'apogee config add-suite')"
+                 (known.empty() ? " (none is configured -- '" + harness::printed_program() +
+                                      " config add-suite')"
                                 : " (configured: " + joined(known) + ")"));
         }
         value = found->first;

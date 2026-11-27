@@ -161,10 +161,10 @@ tui::ListOptions train_view_options(const RootContext& context,
             .label = "cycle",
             .confirm =
                 [](const tui::ListRow& /*row*/) {
-                    return std::string{
-                        "Run the training cycle once ('apogee train cycle run')? It "
-                        "trains, gates and may promote -- this machine is held until "
-                        "it ends"};
+                    return std::string{"Run the training cycle once ('" +
+                                       harness::printed_program() +
+                                       " train cycle run')? It trains, gates and may promote -- "
+                                       "this machine is held until it ends"};
                 },
             .run =
                 [&context, progress, binary](const tui::ListRow& /*row*/) {

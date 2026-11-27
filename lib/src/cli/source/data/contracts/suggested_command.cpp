@@ -5,6 +5,8 @@
 #include <span>
 #include <utility>
 
+#include "contracts/paths.h"
+
 namespace apogee::harness {
 namespace {
 
@@ -138,8 +140,20 @@ CommandPart option_placeholder(std::string_view flag, std::string_view text, boo
                        .greedy = greedy};
 }
 
+std::string printed_program(CommandShell shell) {
+    std::string out;
+    for (const std::string& word : program_words()) {
+        out += (out.empty() ? "" : " ") + shell_word(word, shell);
+    }
+    return out;
+}
+
+std::string printed_program() {
+    return printed_program(native_command_shell());
+}
+
 std::string render(const SuggestedCommand& command, CommandShell shell) {
-    std::string line = command.program;
+    std::string line = command.program.empty() ? printed_program(shell) : command.program;
     for (const std::string& verb : command.verbs) {
         line += " " + verb;
     }

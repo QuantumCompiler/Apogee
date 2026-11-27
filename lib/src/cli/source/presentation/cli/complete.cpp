@@ -27,6 +27,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
 #include "logger/operational.h"
@@ -812,7 +813,8 @@ void CompleteCommand::bind(CLI::App& root, const RootContext& context) {
             if (!built.skipped_summary().empty()) {
                 message += " -- " + built.skipped_summary();
             } else {
-                message += " (add one with 'apogee config add-backend')";
+                message +=
+                    " (add one with '" + harness::printed_program() + " config add-backend')";
             }
             fail_user(message);
         }

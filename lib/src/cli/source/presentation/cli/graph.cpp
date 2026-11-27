@@ -109,9 +109,9 @@ void require_plain_name(std::string_view name) {
 }
 
 [[nodiscard]] std::string missing_problem(const std::string& name) {
-    return "no graph or collection named '" + name +
-           "' -- ingest documents first with 'apogee embed ingest', or add a graph with "
-           "'apogee config add-graph'";
+    return "no graph or collection named '" + name + "' -- ingest documents first with '" +
+           harness::printed_program() + " embed ingest', or add a graph with '" +
+           harness::printed_program() + " config add-graph'";
 }
 
 /// A collection that must already exist: a read never creates an empty
@@ -579,7 +579,8 @@ void print_named_node(const embedstore::Store& store, const embedstore::GraphNod
         const std::optional<embedstore::Chunk> chunk = it->second->chunk_by_id(ref.chunk_id);
         if (!chunk.has_value()) {
             std::cout << "  " << ref.collection << ": chunk id " << ref.chunk_id
-                      << " (no longer present -- run `apogee graph build` to reconcile)\n";
+                      << " (no longer present -- run `" + harness::printed_program() +
+                             " graph build` to reconcile)\n";
             continue;
         }
         std::cout << "  " << ref.collection << ": " << chunk->source << " [chunk " << chunk->ordinal
@@ -972,8 +973,8 @@ void build_collection(const harness::Config& config, const std::filesystem::path
     embedstore::Store store = open_existing(target.name);
     if (store.chunk_count() == 0) {
         fail_user("collection '" + target.name +
-                  "' has no chunks to extract from -- ingest documents first with 'apogee embed "
-                  "ingest'");
+                  "' has no chunks to extract from -- ingest documents first with '" +
+                  harness::printed_program() + " embed ingest'");
     }
     // The edits the first build makes -- the entry when there is none,
     // graph.enabled when it is not already true -- dry-run before extraction
@@ -1092,7 +1093,8 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
             return;
         }
         fail_user("no member collection of graph '" + target.name +
-                  "' has any data -- ingest documents first with 'apogee embed ingest'");
+                  "' has any data -- ingest documents first with '" + harness::printed_program() +
+                  " embed ingest'");
     }
     const Providers providers{config, config_path};
     const Generation generation =

@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 13 maintenance items can be picked up any time: the CLI's M49–M61 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48 shipped 2026-11-27); the Apple apps have none. Two wait on another maintenance item: the CLI's M56 on M55, and M60 on M58. None of the 13 waits on a decision from you.
+Outside the release, 12 maintenance items can be picked up any time: the CLI's M50–M61 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48 and M49 shipped 2026-11-27); the Apple apps have none. Two wait on another maintenance item: the CLI's M56 on M55, and M60 on M58. None of the 12 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M49–M55, M57–M59 and M61).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M50–M55, M57–M59 and M61).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -54,7 +54,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M49 | [A printed command names the binary and root that printed it](cli/maintenance/a-printed-command-names-the-binary-that-printed-it.md) | — |
 | CLI | M50 | [A backend name the editors refuse gets the rename door that reaches it](cli/maintenance/a-refused-backend-name-gets-the-rename-that-reaches-it.md) | — |
 | CLI | M51 | [The TUI's row actions reach a row whose name starts with a dash](cli/maintenance/the-tuis-row-actions-reach-a-dash-led-row.md) | — |
 | CLI | M52 | [A refused agent or MCP scaffold writes nothing](cli/maintenance/a-refused-scaffold-writes-nothing.md) | — |

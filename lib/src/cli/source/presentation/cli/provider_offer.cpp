@@ -8,6 +8,7 @@
 
 #include "backends/provider_table.h"
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "models/source_ollama.h"
 #include "operations/backend_fields.h"
 
@@ -239,8 +240,8 @@ OfferOutcome offer_registration(const OfferContext& context, const harness::Conf
     (void)backends::record_offer_answer(context.cache_path, accepted ? "accepted" : "declined",
                                         context.today);
     if (!accepted) {
-        out << "not registered -- 'apogee providers scan --register' does it whenever you "
-               "like\n";
+        out << "not registered -- '" + harness::printed_program() +
+                   " providers scan --register' does it whenever you like\n";
         return OfferOutcome::Declined;
     }
     apply_registration(context.config_path, plan);

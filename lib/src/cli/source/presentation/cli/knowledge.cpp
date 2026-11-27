@@ -25,6 +25,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "contracts/utf8.h"
 #include "harness/roles.h"
 #include "knowledge/clerk.h"
@@ -212,7 +213,8 @@ void print_validation(const CaptureResult& result) {
     std::error_code code;
     if (!std::filesystem::exists(path, code)) {
         throw KnowledgeRefusal{"no knowledge collection named '" + db +
-                                   "' -- capture a record first with 'apogee knowledge capture'",
+                                   "' -- capture a record first with '" +
+                                   harness::printed_program() + " knowledge capture'",
                                false};
     }
     return knowledge::Store{path, harness::knowledge_raw_dir()};
@@ -466,7 +468,8 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             if (!built.skipped_summary().empty()) {
                 message += " -- " + built.skipped_summary();
             } else {
-                message += " (add one with 'apogee config add-backend')";
+                message +=
+                    " (add one with '" + harness::printed_program() + " config add-backend')";
             }
             fail_user(message);
         }
@@ -886,9 +889,10 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                 std::cout << "Record '" << rx->id << "' is in collection \"" << db
                           << "\", which holds no embedded records -- nothing to reindex.\n";
             }
-            std::cout << "Its text index is maintained automatically, so 'apogee knowledge query' "
-                         "works as is.\nTo switch this collection to vector search, re-capture its "
-                         "records with --retriever vector.\n";
+            std::cout << "Its text index is maintained automatically, so '" +
+                             harness::printed_program() +
+                             " knowledge query' works as is.\nTo switch this collection to vector "
+                             "search, re-capture its records with --retriever vector.\n";
             return;
         }
         if (rx->id.empty()) {

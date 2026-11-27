@@ -7,6 +7,7 @@
 #include <functional>
 
 #include "contracts/errors.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/pipeline_info.h"
 
 namespace apogee::models {
@@ -396,10 +397,10 @@ bool choose_file(const HfListing& listing, HfRef& ref, std::string& error) {
                 "  apogee models convert " +
                 ref.repo_id() + " " + repo_directory_name(ref) +
                 ".gguf\n"
-                "(conversion runs in Apogee's Python environment: 'apogee train setup "
-                "--with convert' installs it once)\n\n"
-                "Or look for a community GGUF conversion -- searching the model's name with "
-                "\"GGUF\" usually finds one.";
+                "(conversion runs in Apogee's Python environment: '" +
+                harness::printed_program() +
+                " train setup --with convert' installs it once)\n\nOr look for a community GGUF "
+                "conversion -- searching the model's name with \"GGUF\" usually finds one.";
         } else {
             error += "Apogee runs GGUF models. Look for a GGUF conversion of this model.";
         }

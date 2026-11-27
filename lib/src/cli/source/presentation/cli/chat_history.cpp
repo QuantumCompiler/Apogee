@@ -19,6 +19,7 @@
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "operations/backend_names.h"
 #include "platform/platform.h"
@@ -582,8 +583,9 @@ void ChatsCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << "forgot " << forgot.summaries << " chat summar"
                   << (forgot.summaries == 1 ? "y" : "ies") << " -- every transcript stays"
-                  << (recalls ? "; chats finished from now on are summarised again (apogee config "
-                                "set memory.recall false stops it)"
+                  << (recalls ? "; chats finished from now on are summarised again (" +
+                                    harness::printed_program() +
+                                    " config set memory.recall false stops it)"
                               : "")
                   << "\n";
     });

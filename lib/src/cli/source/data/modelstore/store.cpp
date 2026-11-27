@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/hf_ref.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
@@ -1093,14 +1094,15 @@ std::string legacy_refusal(const StoreRoots& roots, std::string_view given) {
     for (const LegacySnapshot& snapshot : legacy.snapshots) {
         if (matches(snapshot.dir, snapshot.model)) {
             return "'" + std::string{given} + "' is in the old flat layout (" +
-                   snapshot.dir.string() +
-                   ") -- run 'apogee models migrate' to move it into the new one";
+                   snapshot.dir.string() + ") -- run '" + harness::printed_program() +
+                   " models migrate' to move it into the new one";
         }
     }
     for (const LegacyGguf& gguf : legacy.ggufs) {
         if (matches(gguf.file, gguf.model)) {
             return "'" + std::string{given} + "' is in the old flat layout (" + gguf.file.string() +
-                   ") -- run 'apogee models migrate' to move it into the new one";
+                   ") -- run '" + harness::printed_program() +
+                   " models migrate' to move it into the new one";
         }
     }
     return {};

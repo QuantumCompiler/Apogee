@@ -5,6 +5,7 @@
 #include <span>
 #include <vector>
 
+#include "contracts/suggested_command.h"
 #include "harness/roles.h"
 #include "operations/backend_names.h"
 #include "symphony/tools.h"
@@ -45,8 +46,8 @@ std::string validate_suite_member(const harness::Config& config, std::string_vie
     if (config.find_backend(member.backend) == nullptr) {
         const std::vector<std::string> known = config.backend_names();
         return where + "no backend named '" + member.backend + "' in this config" +
-               (known.empty() ? " (it has no backends yet -- add one with 'apogee config "
-                                "add-backend')"
+               (known.empty() ? " (it has no backends yet -- add one with '" +
+                                    harness::printed_program() + " config add-backend')"
                               : " (known backends: " + joined(known) + ")");
     }
     if (member.context_size.has_value() && *member.context_size < 1) {
@@ -301,8 +302,8 @@ std::string validate_suite_delete(const harness::Config& config, std::string_vie
         return {};
     }
     return "'" + std::string{name} +
-           "' is the default suite (models.default_suite) -- set another first, or none: "
-           "apogee config set-default-suite off";
+           "' is the default suite (models.default_suite) -- set another first, or none: " +
+           harness::printed_program() + " config set-default-suite off";
 }
 
 }  // namespace apogee::commands

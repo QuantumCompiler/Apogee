@@ -212,9 +212,19 @@ if [ -n "$CHANNEL_BIN" ]; then
     user="$WORK/home-$channel"
     mkdir -p "$user"
     env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" check --fix >/dev/null 2>&1
-    # The channel's bootstrap, minimal, says what the release's does (51).
+    # The channel's bootstrap, minimal, says what the release's does (51) --
+    # each command it prints naming its own binary (CLI-M49), which is read
+    # back as the release's name before the two are compared.
     env -u APOGEE_HOME HOME="$user" APOGEE_MINIMAL_INSTALL=1 "$CHANNEL_BIN" bootstrap \
-        >"$WORK/bootstrap-$channel.txt" 2>&1 </dev/null
+        >"$WORK/bootstrap-$channel-said.txt" 2>&1 </dev/null
+    sed -e "s/'$(basename "$CHANNEL_BIN") /'$(basename "$APOGEE_BIN") /g" \
+        -e "s/ $(basename "$CHANNEL_BIN") / $(basename "$APOGEE_BIN") /g" \
+        "$WORK/bootstrap-$channel-said.txt" >"$WORK/bootstrap-$channel.txt"
+    if ! grep -qF "'$(basename "$CHANNEL_BIN") " "$WORK/bootstrap-$channel-said.txt"; then
+        echo "INSTALL PARITY: the $channel channel's bootstrap names no command of its own:" >&2
+        cat "$WORK/bootstrap-$channel-said.txt" >&2
+        exit 1
+    fi
     if ! diff "$WORK/bootstrap-a.txt" "$WORK/bootstrap-$channel.txt"; then
         echo "INSTALL PARITY VIOLATED: the $channel channel bootstraps differently" >&2
         exit 1
@@ -253,6 +263,16 @@ if [ -n "$CHANNEL_BIN" ]; then
         fi
     done
 
+    # And it names itself in the commands it prints (CLI-M49): pasted, a
+    # remedy runs this channel's binary over this root, never the release's.
+    said="$(env -u APOGEE_HOME HOME="$user" "$CHANNEL_BIN" embed list </dev/null 2>&1)"
+    door="'$(basename "$CHANNEL_BIN") embed ingest <name> <path>'"
+    if ! printf '%s\n' "$said" | grep -qF "$door"; then
+        echo "INSTALL PARITY: '$(basename "$CHANNEL_BIN") embed list' does not name $door:" >&2
+        printf '%s\n' "$said" >&2
+        exit 1
+    fi
+
     # Its uninstall removes its own install and nothing of the other's -- with
     # the other channel's flag in the air, which uninstall ignores. Run from a
     # copy, so the binary that removes itself is the sandbox's; and only after
@@ -288,6 +308,14 @@ if [ -n "$CHANNEL_BIN" ]; then
     same_tree "$user/$(root_name "$channel")" "'$(basename "$APOGEE_BIN") --$channel'"
     if [ -e "$user/$(root_name "$release")" ]; then
         echo "INSTALL PARITY: '--$channel' also seeded the $release root" >&2
+        exit 1
+    fi
+    # Its printed commands carry the flag, so pasted they reach that root too.
+    said="$(env -u APOGEE_HOME HOME="$user" "$APOGEE_BIN" "--$channel" embed list </dev/null 2>&1)"
+    door="'$(basename "$APOGEE_BIN") --$channel embed ingest <name> <path>'"
+    if ! printf '%s\n' "$said" | grep -qF "$door"; then
+        echo "INSTALL PARITY: '$(basename "$APOGEE_BIN") --$channel embed list' does not name $door:" >&2
+        printf '%s\n' "$said" >&2
         exit 1
     fi
     echo "install parity: the $channel channel seeds the same tree at $(root_name "$channel")," \

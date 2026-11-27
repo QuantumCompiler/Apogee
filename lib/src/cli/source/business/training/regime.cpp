@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "contracts/suggested_command.h"
 #include "training/datasets.h"
 
 namespace apogee::training {
@@ -44,7 +45,8 @@ std::string validate_regime_kits(const harness::RegimeSpec& spec,
                                  const std::filesystem::path& kits_dir) {
     if (spec.kits.empty()) {
         return "no kits -- pass --kit <name> (repeatable), --all-kits, or set regime.kits; "
-               "'apogee datasets kits' lists them";
+               "'" +
+               harness::printed_program() + " datasets kits' lists them";
     }
     for (const std::string& name : spec.kits) {
         const std::optional<std::filesystem::path> path = find_kit(kits_dir, name);

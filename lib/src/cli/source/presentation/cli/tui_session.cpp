@@ -12,6 +12,7 @@
 #include "cli/permissions.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "harness/roles.h"
 #include "logger/session.h"
 #include "views/ask_prompt.h"
@@ -371,8 +372,9 @@ TuiSessionDriver::Handed TuiSessionDriver::play(const std::string& symphony,
     if (bare.empty()) {
         return {.said =
                     "not played: no suite and no backend is the default to open an execute "
-                    "session on -- 'apogee config set-default-suite <name>' or 'apogee "
-                    "config set-default <backend>' names one"};
+                    "session on -- '" +
+                    harness::printed_program() + " config set-default-suite <name>' or '" +
+                    harness::printed_program() + " config set-default <backend>' names one"};
     }
     open(Opening{.mode = SessionMode::Execute, .first_line = line});
     return {.sent = true, .said = line + " in a new execute session on " + bare + " (no suite)"};

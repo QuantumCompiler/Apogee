@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "backends/model_roster.h"
+#include "contracts/suggested_command.h"
 #include "harness/harness.h"
 
 namespace apogee::commands {
@@ -82,7 +83,8 @@ std::string named_backend_refusal(const harness::Config& config, const backends:
     }
     message += " is configured but could not be started: " + reason;
     if (started.empty()) {
-        return message + " (no backend started; 'apogee check' says why)";
+        return message + " (no backend started; '" + harness::printed_program() +
+               " check' says why)";
     }
     std::string list;
     for (const std::string& backend : started) {

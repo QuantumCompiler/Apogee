@@ -404,7 +404,7 @@ std::string clear_door(const harness::Config& config, const std::vector<StoreRef
         return {};
     }
     if (reference.backend.empty()) {
-        return "apogee config set-default-video off";
+        return harness::printed_program() + " config set-default-video off";
     }
     const auto set_backend = [&reference](std::string_view flag, const std::string& value) {
         return harness::render(

@@ -232,7 +232,8 @@ std::string dataset_kits_text() {
     std::ostringstream out;
     if (installed.empty()) {
         out << "no kits under " << harness::training_kits_dir().string()
-            << " -- run 'apogee check --fix' to seed the bundled ones\n";
+            << " -- run '" + harness::printed_program() +
+                   " check --fix' to seed the bundled ones\n";
         return out.str();
     }
     std::size_t width = 4;
@@ -294,8 +295,8 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         }
         const std::filesystem::path script = harness::training_scripts_dir() / "prepare_dataset.py";
         if (!std::filesystem::is_regular_file(script, code)) {
-            fail_user("the shipped script is missing: " + script.string() +
-                      " -- run 'apogee check --fix' to seed it");
+            fail_user("the shipped script is missing: " + script.string() + " -- run '" +
+                      harness::printed_program() + " check --fix' to seed it");
         }
         const training::PythonEnv env = require_python_env(config, "datasets prepare");
         bool parquet = source.extension() == ".parquet";
@@ -309,7 +310,8 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         if (parquet && !env.status().has(training::RequirementSet::Prepare)) {
             fail_user(
                 "Parquet needs the 'prepare' requirement set in the Python environment -- "
-                "run 'apogee train setup --with prepare'");
+                "run '" +
+                harness::printed_program() + " train setup --with prepare'");
         }
 
         std::filesystem::path out;
@@ -466,7 +468,8 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         const std::optional<std::filesystem::path> kit_path =
             training::find_kit(harness::training_kits_dir(), *synth_kit);
         if (!kit_path.has_value()) {
-            fail_user("no kit named '" + *synth_kit + "' -- 'apogee datasets kits' lists them");
+            fail_user("no kit named '" + *synth_kit + "' -- '" + harness::printed_program() +
+                      " datasets kits' lists them");
         }
         training::Kit kit;
         try {
@@ -484,8 +487,8 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         const Providers providers{config, config_path};
         const std::vector<std::string> built = providers.harness.provider_names();
         if (std::find(built.begin(), built.end(), teacher.key) == built.end()) {
-            fail_user("teacher '" + teacher.key +
-                      "' could not be built -- 'apogee check' says why");
+            fail_user("teacher '" + teacher.key + "' could not be built -- '" +
+                      harness::printed_program() + " check' says why");
         }
 
         training::SynthOptions options;

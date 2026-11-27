@@ -97,8 +97,8 @@ void require_backend_exists(const std::filesystem::path& path, const std::string
                 known += candidate;
             }
             fail("no backend named '" + name + "' in this config" +
-                 (known.empty() ? " (it has no backends yet -- add one with 'apogee config "
-                                  "add-backend')"
+                 (known.empty() ? " (it has no backends yet -- add one with '" +
+                                      harness::printed_program() + " config add-backend')"
                                 : " (known backends: " + known + ")"));
         }
         // A role names an entry that runs what it names (55d), of the kind
@@ -670,16 +670,16 @@ struct StoreScanRow {
                 continue;
             }
             if (config->backends.contains(row.name)) {
-                row.skip =
-                    "its default name belongs to a backend on another model -- 'apogee "
-                    "config add-backend' registers it by hand under another";
+                row.skip = "its default name belongs to a backend on another model -- '" +
+                           harness::printed_program() +
+                           " config add-backend' registers it by hand under another";
                 continue;
             }
         }
         if (row.skip.empty() && names[row.name] > 1) {
             row.skip = std::to_string(names[row.name]) +
-                       " stored models share this default name -- 'apogee config add-backend' "
-                       "registers each by hand";
+                       " stored models share this default name -- '" + harness::printed_program() +
+                       " config add-backend' registers each by hand";
         }
     }
     return rows;
@@ -724,7 +724,8 @@ void render_store_scan(const std::vector<StoreScanRow>& rows, std::size_t snapsh
                   << names << "\n";
     }
     if (rows.empty() && snapshots == 0 && draft_heads.empty()) {
-        std::cout << "the model store is empty -- 'apogee models pull' fills it\n";
+        std::cout << "the model store is empty -- '" + harness::printed_program() +
+                         " models pull' fills it\n";
     }
 }
 
@@ -774,10 +775,11 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
 
         if (!config.has_value()) {
             if (*register_flag) {
-                fail("no config file at " + path.string() +
-                     " -- run 'apogee config init' first, then register");
+                fail("no config file at " + path.string() + " -- run '" +
+                     harness::printed_program() + " config init' first, then register");
             }
-            std::cout << "\nno config file yet -- 'apogee config init' writes one\n";
+            std::cout << "\nno config file yet -- '" + harness::printed_program() +
+                             " config init' writes one\n";
             return;
         }
         std::size_t registerable = 0;
@@ -786,8 +788,8 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
         }
         if (!*register_flag) {
             if (registerable > 0) {
-                std::cout << "\nregister the unregistered ones as backends: apogee config scan "
-                             "--register\n";
+                std::cout << "\nregister the unregistered ones as backends: " +
+                                 harness::printed_program() + " config scan --register\n";
             }
             return;
         }
@@ -841,9 +843,8 @@ void bind_init(CLI::App& parent, const RootContext& context) {
         // beside it would be a second answer, and --force would write JSON
         // into the YAML file's name. Either way, migrate is the move.
         if (context.config_path.empty() && harness::is_legacy_config_path(path)) {
-            fail(path.string() +
-                 " is this install's config, in the older YAML format -- 'apogee config migrate' "
-                 "converts it to " +
+            fail(path.string() + " is this install's config, in the older YAML format -- '" +
+                 harness::printed_program() + " config migrate' converts it to " +
                  std::string{harness::kConfigFileName} +
                  "; init writes a starter config only where there is none");
         }
@@ -866,8 +867,8 @@ void bind_migrate(CLI::App& parent, const RootContext& context) {
         const std::filesystem::path path = config_path_for(context);
         std::error_code code;
         if (!std::filesystem::exists(path, code)) {
-            fail("no config file at " + path.string() +
-                 " -- nothing to migrate; 'apogee config init' writes a new one");
+            fail("no config file at " + path.string() + " -- nothing to migrate; '" +
+                 harness::printed_program() + " config init' writes a new one");
         }
         try {
             if (harness::jsonc::looks_like_jsonc(harness::read_config_file(path))) {
@@ -895,9 +896,9 @@ void bind_upgrade(CLI::App& parent, const RootContext& context) {
         "comments that explain it; nothing already there changes");
     cmd->callback([&context]() {
         const std::filesystem::path path = config_path_for(context);
-        const std::string yaml = path.string() +
-                                 " is in the older YAML format -- 'apogee config migrate' converts "
-                                 "it to JSON first; upgrade adds options to a JSON config";
+        const std::string yaml =
+            path.string() + " is in the older YAML format -- '" + harness::printed_program() +
+            " config migrate' converts it to JSON first; upgrade adds options to a JSON config";
         const std::string current =
             path.string() +
             " is current -- it has every option this release's starter config has\n";

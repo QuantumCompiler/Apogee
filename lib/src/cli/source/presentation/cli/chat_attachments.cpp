@@ -14,6 +14,7 @@
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "harness/roles.h"
 #include "operations/graph_sources.h"
@@ -111,7 +112,8 @@ ChatAttachments::ChatAttachments(const harness::Harness& harness, logger::Sessio
     const harness::Resolution role = harness::resolve_backend(
         harness_.config(), harness::RoleRequest{.role = harness::ModelRole::Embedding});
     if (!harness::is_named(role.from)) {
-        lexical_reason_ = "no embedding model is set ('apogee config set-default-embedding')";
+        lexical_reason_ = "no embedding model is set ('" + harness::printed_program() +
+                          " config set-default-embedding')";
         return;
     }
     std::string reason;
@@ -190,7 +192,8 @@ bool ChatAttachments::readable(std::string_view spec, std::vector<agentloop::Fou
         if (!hooks_.confirm_large ||
             !hooks_.confirm_large(std::string{spec} + " needs " + what + " -- go ahead?")) {
             hooks_.say(std::string{spec} + " not attached: it needs " + what +
-                           " -- set a local vision model with 'apogee config set-default-vision'",
+                           " -- set a local vision model with '" + harness::printed_program() +
+                           " config set-default-vision'",
                        true);
             return false;
         }

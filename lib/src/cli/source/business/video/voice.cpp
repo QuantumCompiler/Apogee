@@ -6,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
 #include "modelstore/voice_info.h"
@@ -58,15 +59,14 @@ std::string choose_voice_engine(std::string_view asked, VideoEngine directory,
     if (directory == VideoEngine::Mlx) {
         return "'" + std::string{name} +
                "' is an MLX voice model, which speaks on MLX (mlx-audio), not PyTorch -- "
-               "PyTorch speaks with a voice model as Kokoro publishes it: 'apogee models pull "
-               "hexgrad/Kokoro-82M' stores one, and 'apogee train setup --with voice' installs "
-               "what runs it";
+               "PyTorch speaks with a voice model as Kokoro publishes it: '" +
+               harness::printed_program() + " models pull hexgrad/Kokoro-82M' stores one, and '" +
+               harness::printed_program() + " train setup --with voice' installs what runs it";
     }
     return "'" + std::string{name} +
            "' is a voice model as Kokoro publishes it, which speaks on PyTorch (kokoro), not "
            "MLX -- MLX speaks with its MLX build: 'apogee models convert " +
-           std::string{name} + " --mlx' makes one, after '" + std::string{kMlxAudioSetupRemedy} +
-           "'";
+           std::string{name} + " --mlx' makes one, after '" + mlx_audio_setup_remedy() + "'";
 }
 
 nlohmann::json voice_request_document(const VoiceRequest& request,

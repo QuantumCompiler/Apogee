@@ -8,6 +8,7 @@
 #include <system_error>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "contracts/video_run.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/sidecar.h"
@@ -73,8 +74,8 @@ std::string resolve_voice_model(const models::StoreRoots& roots, std::string_vie
     if (given.empty()) {
         const std::vector<StoredSpeaker> voices = stored_speakers(roots);
         if (voices.empty()) {
-            return "no voice model in the store -- 'apogee models pull hexgrad/Kokoro-82M' "
-                   "stores the reference one";
+            return "no voice model in the store -- '" + harness::printed_program() +
+                   " models pull hexgrad/Kokoro-82M' stores the reference one";
         }
         if (voices.size() > 1) {
             return "the store holds " + std::to_string(voices.size()) +

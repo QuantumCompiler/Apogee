@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "contracts/suggested_command.h"
 #include "operations/code_exec_server.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
@@ -43,7 +44,7 @@ constexpr std::array<McpPreset, 3> kPresets{{
         .try_arguments = "{}",
         .refusal = "'self' is Apogee's own tools, served for another MCP host: registered into "
                    "Apogee it would serve Apogee the tools it already has natively. Give "
-                   "another host its entry instead (apogee mcp presets)",
+                   "another host its entry instead",
         .note = "",
     },
     // 56d: Xcode's own tools, through the stdio bridge Xcode 26.3 and later
@@ -80,6 +81,19 @@ constexpr std::array<McpPreset, 3> kPresets{{
 }
 
 }  // namespace
+
+std::string refusal_of(const McpPreset& preset) {
+    if (preset.refusal.empty()) {
+        return {};
+    }
+    return std::string{preset.refusal} + " (" + harness::printed_program() + " mcp presets)";
+}
+
+std::string no_mcp_servers() {
+    return "No MCP servers configured. See what Apogee ships ready to register: " +
+           harness::printed_program() +
+           " mcp presets -- or create one: " + harness::printed_program() + " mcp create <name>";
+}
 
 std::span<const McpPreset> mcp_presets() noexcept {
     return kPresets;
@@ -147,12 +161,12 @@ McpPresetResolution resolve_mcp_preset(const McpPreset& preset, const McpPresetH
     if (!std::filesystem::exists(registration.script, code)) {
         out.missing = registration.script.filename().string() + " is not seeded under " +
                       registration.script.parent_path().string();
-        out.remedy = "apogee check --fix";
+        out.remedy = harness::printed_program() + " check --fix";
         return out;
     }
     if (registration.interpreter.empty()) {
         out.missing = registration.missing;
-        out.remedy = "apogee train setup";
+        out.remedy = harness::printed_program() + " train setup";
     }
     return out;
 }
@@ -160,11 +174,12 @@ McpPresetResolution resolve_mcp_preset(const McpPreset& preset, const McpPresetH
 McpPresetResolution resolve_preset_for_create(std::string_view name, const McpPresetHost& host) {
     const McpPreset* preset = find_mcp_preset(name);
     if (preset == nullptr) {
-        throw std::runtime_error("no preset named '" + std::string{name} + "' (the presets: " +
-                                 names_listed() + " -- see: apogee mcp presets)");
+        throw std::runtime_error("no preset named '" + std::string{name} +
+                                 "' (the presets: " + names_listed() +
+                                 " -- see: " + harness::printed_program() + " mcp presets)");
     }
     if (!preset->refusal.empty()) {
-        throw std::runtime_error(std::string{preset->refusal});
+        throw std::runtime_error(refusal_of(*preset));
     }
     McpPresetResolution resolution = resolve_mcp_preset(*preset, host);
     if (!resolution.runnable()) {
@@ -216,7 +231,7 @@ nlohmann::json mcp_presets_document(const McpPresetHost& host) {
             row["register"] = "apogee mcp create " + std::string{preset.server_name} + " --from " +
                               std::string{preset.name};
         } else {
-            row["refusal"] = preset.refusal;
+            row["refusal"] = refusal_of(preset);
         }
         if (!preset.note.empty()) {
             row["note"] = preset.note;

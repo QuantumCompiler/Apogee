@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/sidecar.h"
@@ -439,8 +440,9 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
     const std::string_view name = given.empty() ? pointer : given;
     if (name.empty()) {
         return "no pipeline to run -- name one with --model, or point models.default_video at "
-               "one ('apogee config set-default-video <pipeline>'); 'apogee models pull "
-               "<owner>/<repo>' stores one";
+               "one ('" +
+               harness::printed_program() + " config set-default-video <pipeline>'); '" +
+               harness::printed_program() + " models pull <owner>/<repo>' stores one";
     }
     out.source = given.empty() ? "models.default_video" : "--model";
     const models::StoreTarget target = models::resolve_store_target(roots, name);
@@ -516,9 +518,8 @@ std::string resolve_video_pipeline(const models::StoreRoots& roots, std::string_
                 !wan.empty()) {
                 return wan;
             }
-            return "'" + std::string{name} +
-                   "' holds no pipeline and no MLX video model -- 'apogee models list' shows "
-                   "the store's";
+            return "'" + std::string{name} + "' holds no pipeline and no MLX video model -- '" +
+                   harness::printed_program() + " models list' shows the store's";
         }
         if (found.size() > 1) {
             std::vector<std::string> handles;
@@ -694,7 +695,7 @@ VideoGenerateResult generate_clip(const harness::Config& config, const models::S
     // diffusers loads a LoRA through peft; mlx-video through its own loader.
     if (!loras.empty() && engine == video::VideoEngine::Torch && !ready.peft) {
         return refuse("a LoRA loads through peft, which the video runtime does not have yet -- " +
-                      std::string{video::kVideoSetupRemedy});
+                      video::video_setup_remedy());
     }
     // A continuation's seed image: the clip's last frame, taken now and
     // gone when the run is.

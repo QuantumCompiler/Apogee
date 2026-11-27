@@ -18,6 +18,7 @@
 #include "cli/interrupt.h"
 #include "cli/version_command.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -230,8 +231,8 @@ void RootCommand::notice_legacy_config() const {
         return;
     }
     std::cerr << "apogee: " << resolved.config.string()
-              << " is in the older YAML format and still loads -- 'apogee config migrate' "
-                 "converts it to "
+              << " is in the older YAML format and still loads -- '" + harness::printed_program() +
+                     " config migrate' converts it to "
               << harness::kConfigFileName << "\n";
 }
 

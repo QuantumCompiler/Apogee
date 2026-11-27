@@ -7,6 +7,7 @@
 
 #include "contracts/collection_name.h"
 #include "contracts/config_yaml.h"
+#include "contracts/suggested_command.h"
 #include "graph/code_languages.h"
 #include "operations/collections.h"
 #include "operations/graph_sources.h"
@@ -116,7 +117,8 @@ NamedGraphValidation validate_named_graph(const harness::Config& config, std::st
     }
     if (!graph.extract_backend.empty() && config.find_backend(graph.extract_backend) == nullptr) {
         out.error = "extraction backend '" + graph.extract_backend +
-                    "' is not configured (add it with 'apogee config add-backend')";
+                    "' is not configured (add it with '" + harness::printed_program() +
+                    " config add-backend')";
         return out;
     }
     // Source trees (27k): absolute, each label once and never a member

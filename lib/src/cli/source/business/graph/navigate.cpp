@@ -663,10 +663,11 @@ GraphTarget resolve_graph_target(const harness::Config& config, const GraphSelec
     }
     const std::vector<std::string> built = built_graph_names(config);
     if (built.empty()) {
-        throw NavigationError(
-            Kind::NotBuilt,
-            "no graph is built yet -- build one with 'apogee graph build "
-            "<collection>' or 'apogee graph build --source <dir> --graph <name>'");
+        throw NavigationError(Kind::NotBuilt, "no graph is built yet -- build one with '" +
+                                                  harness::printed_program() +
+                                                  " graph build <collection>' or '" +
+                                                  harness::printed_program() +
+                                                  " graph build --source <dir> --graph <name>'");
     }
     if (built.size() > 1) {
         throw NavigationError(

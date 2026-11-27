@@ -15,6 +15,7 @@
 #include "cli/helpers.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "graph/navigate.h"
 #include "machine/json_reporter.h"
 
@@ -193,7 +194,8 @@ void print_provenance(std::ostream& out, const graph::NodeCard& card) {
             out << "  " << (mention.collection.empty() ? "" : mention.collection + ": ");
             if (mention.missing) {
                 out << "chunk id " << mention.chunk_id
-                    << " (no longer present -- `apogee graph build` reconciles it)\n";
+                    << " (no longer present -- `" + harness::printed_program() +
+                           " graph build` reconciles it)\n";
             } else {
                 out << mention.source << " [chunk " << mention.chunk << "]\n";
             }

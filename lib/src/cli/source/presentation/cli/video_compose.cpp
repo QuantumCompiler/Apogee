@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "contracts/video_run.h"
 #include "harness/roles.h"
 #include "modelstore/sidecar.h"
@@ -527,9 +528,9 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
         if (!options.edit.empty()) {
             backend = harness::resolve_chat_backend(config, options.planner);
             if (backend.empty()) {
-                return refuse(
-                    "no backend is configured to edit with -- add one with 'apogee config "
-                    "add-backend', or name one with --planner");
+                return refuse("no backend is configured to edit with -- add one with '" +
+                              harness::printed_program() +
+                              " config add-backend', or name one with --planner");
             }
             say("editing " +
                 (edits_again ? "the project kept at " + sidecar.string()
@@ -649,9 +650,9 @@ VideoComposeResult compose_video(const harness::Config& config, const models::St
     } else {
         const std::string backend = harness::resolve_chat_backend(config, options.planner);
         if (backend.empty()) {
-            return refuse(
-                "no backend is configured to plan with -- add one with 'apogee config "
-                "add-backend', or name one with --planner");
+            return refuse("no backend is configured to plan with -- add one with '" +
+                          harness::printed_program() +
+                          " config add-backend', or name one with --planner");
         }
         say("planning the scenes with " + backend);
         const video::PlannedScenes planned = video::plan_scenes(

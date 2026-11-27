@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// Apogee's on-disk layout root, and the one chain that chooses it.
 ///
@@ -104,6 +105,22 @@ inline constexpr std::array<Channel, 3> kChannels{Channel::Release, Channel::Dev
             break;
     }
     return "--release";
+}
+
+/// The name a channel's executable installs under: `apogee`, `apogee-dev`,
+/// `apogee-test` -- what CMake's OUTPUT_NAME gives it (CLI-M49). The
+/// executable holds its own stamp to it at compile time (`main.cpp`), so a
+/// printed command names the binary a person types for this install.
+[[nodiscard]] constexpr std::string_view channel_program(Channel channel) noexcept {
+    switch (channel) {
+        case Channel::Dev:
+            return "apogee-dev";
+        case Channel::Test:
+            return "apogee-test";
+        case Channel::Release:
+            break;
+    }
+    return "apogee";
 }
 
 /// The global flag rooting a run at the install a config file sits in.
@@ -215,6 +232,15 @@ struct CustomRoot {
 
 /// The root flag in force for this run, if any.
 [[nodiscard]] std::optional<RootFlag> root_flag();
+
+/// The words a printed command starts with (CLI-M49): this build's name
+/// (`channel_program(baked_channel())`), then the root flag in force for the
+/// run, if one chose the root -- the channel flag as typed, or `--custom` and
+/// its file made absolute and normalized, so the command runs from any
+/// folder. Unquoted: the renderer quotes (`contracts/suggested_command.h`).
+/// A root chosen by `APOGEE_HOME` adds no word: the shell that pastes the
+/// command keeps the variable.
+[[nodiscard]] std::vector<std::string> program_words();
 
 /// Puts `flag` in force for the scope's lifetime and the previous one back
 /// after: a run's flag is that run's affair, never persisted -- the next run

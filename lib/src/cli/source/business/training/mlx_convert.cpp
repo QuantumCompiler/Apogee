@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "training/convert.h"
 #include "training/script_runner.h"
 
@@ -352,8 +353,9 @@ MlxConverter script_mlx_converter(std::filesystem::path interpreter, std::filesy
             // A seeded driver from before the route asked for: 27b's knows
             // no `--with` (53f), 53f's no mlx-embeddings (53h).
             return error + " -- the seeded converter at " + script.string() +
-                   " is older than this build: 'apogee check --fix' brings an earlier Apogee's "
-                   "up to this build's, and an edited one is kept, so delete it first";
+                   " is older than this build: '" + harness::printed_program() +
+                   " check --fix' brings an earlier Apogee's up to this build's, and an edited one "
+                   "is kept, so delete it first";
         }
         return unsupported_model_type(error).empty()
                    ? error

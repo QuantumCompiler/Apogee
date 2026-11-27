@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "contracts/errors.h"
+#include "contracts/suggested_command.h"
 #include "contracts/utf8.h"
 #include "harness/context_windows.h"
 #include "harness/roles.h"
@@ -277,12 +278,14 @@ LLMProvider& SimpleRouter::route(std::string_view model) const {
         // while any entry was skipped.
         message += " (started backends: " + join_names(known_names_) + ")";
         if (about == nullptr && default_model_.empty()) {
-            message += "; no models.default is set -- 'apogee config set-default <name>'";
+            message += "; no models.default is set -- '" + harness::printed_program() +
+                       " config set-default <name>'";
         }
     } else if (!unstarted_.empty()) {
-        message += " (no backend started; 'apogee check' says why)";
+        message += " (no backend started; '" + harness::printed_program() + " check' says why)";
     } else {
-        message += " -- no backends are configured; add one with 'apogee config add-backend'";
+        message += " -- no backends are configured; add one with '" + harness::printed_program() +
+                   " config add-backend'";
     }
     if (about == nullptr) {
         throw NoAvailableBackendError(requested, message);

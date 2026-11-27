@@ -9,6 +9,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 
 namespace apogee::backends {
@@ -206,8 +207,9 @@ void MlxEmbedProvider::drain_stderr() {
 
 std::string MlxEmbedProvider::older_copy() const {
     return "the MLX embedding driver at " + options_.driver.string() +
-           " does not apply adapters -- it is an older copy: 'apogee check --fix' brings an "
-           "earlier Apogee's up to this build's, and an edited one is kept, so delete it first";
+           " does not apply adapters -- it is an older copy: '" + harness::printed_program() +
+           " check --fix' brings an earlier Apogee's up to this build's, and an edited one is "
+           "kept, so delete it first";
 }
 
 std::string MlxEmbedProvider::with_tail(const std::string& message) const {
@@ -341,7 +343,8 @@ void MlxEmbedProvider::ensure_child(const harness::StatusSink& on_status,
             options_.backend_name,
             "the driver at " + options_.driver.string() +
                 " did not load an embedding model -- it is not the shipped mlx_embed.py: "
-                "delete it and run 'apogee check --fix' to restore it");
+                "delete it and run '" +
+                harness::printed_program() + " check --fix' to restore it");
     }
     if (!options_.adapters.empty() && ready_->adapter.empty()) {
         // A driver that ignored --adapter and loaded the bare model, whose
@@ -397,7 +400,8 @@ void MlxEmbedProvider::await_ready(const harness::CancellationToken& cancellatio
                 options_.backend_name,
                 "the MLX embedding driver speaks protocol " + std::to_string(event->protocol) +
                     ", and this build speaks " + std::to_string(mlx::kProtocolVersion) +
-                    " -- delete it and run 'apogee check --fix' to restore the shipped one");
+                    " -- delete it and run '" + harness::printed_program() +
+                    " check --fix' to restore the shipped one");
         }
         ready_ = *event;
         return;

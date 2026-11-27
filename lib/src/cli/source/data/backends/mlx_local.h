@@ -215,8 +215,10 @@ struct MlxModelInfo {
 
 [[nodiscard]] MlxModelInfo inspect_mlx_model(const std::filesystem::path& dir);
 
-/// The fix that installs the vision dependency (27c).
-inline constexpr std::string_view kMlxVisionRemedy = "apogee train setup --with mlx-vlm";
+/// The fix that installs the vision dependency (27c):
+/// `apogee train setup --with mlx-vlm`, begun with the build's own words
+/// (CLI-M49).
+[[nodiscard]] std::string mlx_vision_remedy();
 
 /// mlx-vlm as installed in the environment (27c): its package directory
 /// and the version its distribution record names -- read from files, never
@@ -232,8 +234,9 @@ struct MlxVlmPackage {
 
 [[nodiscard]] MlxVlmPackage find_mlx_vlm(const MlxHost& host);
 
-/// The fix that installs the embedding dependency (53h).
-inline constexpr std::string_view kMlxEmbeddingsRemedy = "apogee train setup --with mlx-embeddings";
+/// The fix that installs the embedding dependency (53h):
+/// `apogee train setup --with mlx-embeddings`.
+[[nodiscard]] std::string mlx_embeddings_remedy();
 
 /// mlx-embeddings as installed in the environment (53h): its package
 /// directory and version, read from files as mlx-vlm's are, never imported.

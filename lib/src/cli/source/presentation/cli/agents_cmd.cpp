@@ -17,6 +17,7 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "operations/collections.h"
 #include "operations/read_views.h"
@@ -237,7 +238,8 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
         const harness::Config config = load(config_path);
         const std::optional<harness::AgentConfig> agent = harness::resolve_agent(config, *name);
         if (!agent.has_value()) {
-            fail("no agent named '" + *name + "' (see: apogee agents list)");
+            fail("no agent named '" + *name + "' (see: " + harness::printed_program() +
+                 " agents list)");
         }
         const std::vector<std::filesystem::path> files = scaffold::agent_files(config_path, *agent);
         if (files.empty()) {
@@ -246,10 +248,9 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
         std::error_code code;
         for (const std::filesystem::path& file : files) {
             if (!std::filesystem::exists(file, code)) {
-                fail(file.string() +
-                     " does not exist -- 'apogee check --fix' seeds the bundled "
-                     "files; a missing custom file wants 'apogee agents create "
-                     "--force'");
+                fail(file.string() + " does not exist -- '" + harness::printed_program() +
+                     " check --fix' seeds the bundled files; a missing custom file wants '" +
+                     harness::printed_program() + " agents create --force'");
             }
         }
         // $EDITOR may carry flags ("code --wait"): split on spaces, like
@@ -298,7 +299,8 @@ void bind_delete(CLI::App& parent, const RootContext& context) {
                      "' is a bundled agent with no config entry; delete its files under "
                      "prompts/ and schemas/ to reset them, or add an entry to override it");
             }
-            fail("no agent named '" + *name + "' (see: apogee agents list)");
+            fail("no agent named '" + *name + "' (see: " + harness::printed_program() +
+                 " agents list)");
         }
         const std::vector<std::filesystem::path> files = scaffold::agent_files(config_path, *entry);
         try {

@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 
 namespace apogee::httpserver {
 namespace {
@@ -108,11 +109,11 @@ bool bearer_valid(const HttpRequest& request, std::string_view token) {
 }
 
 HttpResponse unauthorized_response() {
-    HttpResponse response = error_response(
-        401,
-        "admin authorization required -- send Authorization: Bearer <token> (see 'apogee serve "
-        "--print-admin-token')",
-        kAuthenticationError);
+    HttpResponse response =
+        error_response(401,
+                       "admin authorization required -- send Authorization: Bearer <token> (see '" +
+                           harness::printed_program() + " serve --print-admin-token')",
+                       kAuthenticationError);
     response.headers["WWW-Authenticate"] = "Bearer realm=\"apogee-admin\"";
     return response;
 }

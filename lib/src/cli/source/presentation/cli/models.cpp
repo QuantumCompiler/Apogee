@@ -26,6 +26,7 @@
 #include "cli/models_pull.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/roles.h"
 #include "machine/json_reporter.h"
 #include "models/lineage.h"
@@ -794,7 +795,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.profile = "-";
             row.state = "old layout";
             row.verified = "-";
-            row.note = "run 'apogee models migrate' to move it into the model store";
+            row.note = "run '" + harness::printed_program() +
+                       " models migrate' to move it into the model store";
             rows.push_back(std::move(row));
         }
         for (const models::LegacySnapshot& flat : legacy.snapshots) {
@@ -808,7 +810,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             row.profile = "-";
             row.state = "old layout";
             row.verified = "-";
-            row.note = "run 'apogee models migrate' to move it into the model store";
+            row.note = "run '" + harness::printed_program() +
+                       " models migrate' to move it into the model store";
             rows.push_back(std::move(row));
         }
     }
@@ -910,7 +913,8 @@ ModelGroup model_group(const ModelRow& row) {
 std::string render_model_table(const std::vector<ModelRow>& all_rows, const ansi::Style& style,
                                bool all) {
     if (all_rows.empty()) {
-        return "no backends configured -- run 'apogee config init' to write a starter config\n";
+        return "no backends configured -- run '" + harness::printed_program() +
+               " config init' to write a starter config\n";
     }
 
     // The tables, in their order, each with its rows in the listing's order
@@ -1353,9 +1357,10 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         << "\n";
     const std::string backends = backends_on(config, stored.file);
     out << "backends:     "
-        << (backends.empty() ? "none -- 'apogee config add-backend <name> --type llamacpp "
-                               "--model-path <the path below>'"
-                             : backends)
+        << (backends.empty()
+                ? "none -- '" + harness::printed_program() +
+                      " config add-backend <name> --type llamacpp --model-path <the path below>'"
+                : backends)
         << "\n";
     out << "model_path:   " << stored.file.string() << "\n";
     if (!stored.projector.empty()) {
@@ -1550,8 +1555,8 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         out << "repair:       apogee models repair " << handle << "\n";
     } else if ((consumed.has_value() || !mlx_made.empty()) &&
                backends_on(config, stored.dir).empty()) {
-        out << "listing:      folded -- a conversion consumed it; 'apogee models list --all' "
-               "shows it\n";
+        out << "listing:      folded -- a conversion consumed it; '" + harness::printed_program() +
+                   " models list --all' shows it\n";
     }
     return out.str();
 }
@@ -1584,10 +1589,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     } else if (kind.word == models::kMlxDrafter) {
         // A drafter runs as a backend's draft, never as one (53i).
         const std::string drafting = backends_drafting_with(config, stored.dir);
-        out << (drafting.empty() ? "none -- it runs as the draft of an mlx backend over its "
-                                   "base: 'apogee config set-backend <that backend> --draft "
-                                   "<the path below>'"
-                                 : "none of its own; the draft of " + drafting);
+        out << (drafting.empty()
+                    ? "none -- it runs as the draft of an mlx backend over its base: '" +
+                          harness::printed_program() +
+                          " config set-backend <that backend> --draft <the path below>'"
+                    : "none of its own; the draft of " + drafting);
     } else {
         out << "none -- no chat backend runs it; the kind line says what does";
     }
@@ -1923,7 +1929,7 @@ std::string render_model_info(const harness::Config& config, std::string_view na
                                                            : package.version) +
                                   " -- the embedding role names this backend; it answers no chat"
                             : "no -- mlx-embeddings is not installed (" +
-                                  std::string{backends::kMlxEmbeddingsRemedy} + ")")
+                                  backends::mlx_embeddings_remedy() + ")")
                     << "\n";
                 return out.str();
             }

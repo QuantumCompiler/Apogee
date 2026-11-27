@@ -26,6 +26,7 @@
 #include "cli/provider_offer.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/harness.h"
 #include "platform/platform.h"
 #include "secrets/store.h"
@@ -181,8 +182,8 @@ void say(const std::vector<std::string>& lines) {
     }
     std::error_code missing;
     if (!std::filesystem::exists(config_path, missing)) {
-        fail("no config file at " + config_path.string() +
-             " -- run 'apogee config init' first, then register");
+        fail("no config file at " + config_path.string() + " -- run '" +
+             harness::printed_program() + " config init' first, then register");
     }
     return config_path;
 }
@@ -213,10 +214,10 @@ void bind_register(CLI::App& parent, const RootContext& context) {
         }
         const std::filesystem::path config_path = registration_config(context);
         if (!backends::load_provider_cache().scanned()) {
-            fail(
-                "this machine has not been scanned for providers yet -- 'apogee providers "
-                "scan' looks, then 'apogee providers register " +
-                *provider + "' registers what it found");
+            fail("this machine has not been scanned for providers yet -- '" +
+                 harness::printed_program() +
+                 " providers scan' looks, then 'apogee providers register " + *provider +
+                 "' registers what it found");
         }
         ProviderRegistration done;
         try {
@@ -397,14 +398,15 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
 
         if (!config.has_value()) {
             if (flags->register_found) {
-                fail("no config file at " + config_path.string() +
-                     " -- run 'apogee config init' first, then register");
+                fail("no config file at " + config_path.string() + " -- run '" +
+                     harness::printed_program() + " config init' first, then register");
             }
             if (json) {
                 write_document(std::cout, document);
                 return;
             }
-            std::cout << "\nno config file yet -- 'apogee config init' writes one\n";
+            std::cout << "\nno config file yet -- '" + harness::printed_program() +
+                             " config init' writes one\n";
             return;
         }
         const RegistrationPlan plan =
@@ -424,8 +426,8 @@ void ProvidersCommand::bind(CLI::App& root, const RootContext& context) {
             }
             say(fetched);
             if (plan.registers() > 0) {
-                std::cout << "\nregister the detected ones as backends: apogee providers scan "
-                             "--register\n";
+                std::cout << "\nregister the detected ones as backends: " +
+                                 harness::printed_program() + " providers scan --register\n";
             }
             return;
         }

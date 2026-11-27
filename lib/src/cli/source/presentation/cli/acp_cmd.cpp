@@ -21,6 +21,7 @@
 #include "cli/helpers.h"
 #include "cli/tui_child.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/roles.h"
 #include "modelstore/mlx_info.h"
 #include "operations/acp_registration.h"
@@ -134,9 +135,9 @@ void run_acp(const RootContext& context, const SessionFlags& flags, const CLI::A
     acp::AgentSetup setup;
     setup.models = acp_models(config, flags.model);
     if (setup.models.empty()) {
-        fail(
-            "no backend is configured to chat with: add one (apogee config add-backend), or "
-            "register what this machine has (apogee providers scan --register)");
+        fail("no backend is configured to chat with: add one (" + harness::printed_program() +
+             " config add-backend), or register what this machine has (" +
+             harness::printed_program() + " providers scan --register)");
     }
     setup.model = setup.models.front().value;
     setup.mode = flags.permission_mode.empty() ? std::string{"manual"} : flags.permission_mode;

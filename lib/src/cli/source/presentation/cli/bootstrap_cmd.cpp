@@ -15,6 +15,7 @@
 #include "cli/tui_child.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "operations/code_exec_server.h"
 #include "platform/child_process.h"
@@ -26,9 +27,10 @@
 namespace apogee::commands {
 namespace {
 
-/// The command line a step runs, as a person would type it.
+/// The command line a step runs, as a person would type it -- begun with
+/// the build's own words (CLI-M49), the binary the step runs as.
 [[nodiscard]] std::string command_line(const std::vector<std::string>& words) {
-    std::string out = "apogee";
+    std::string out = harness::printed_program();
     for (const std::string& word : words) {
         out += " " + word;
     }
@@ -52,7 +54,10 @@ namespace {
     return {};
 }
 
-constexpr std::string_view kRerun = "'apogee bootstrap' runs it again any time";
+/// How the plan is run again, begun with the build's own words (CLI-M49).
+[[nodiscard]] std::string rerun() {
+    return "'" + harness::printed_program() + " bootstrap' runs it again any time";
+}
 
 /// The plan's facts, read once before the first step: the host's shape;
 /// whether the code-execution server is registered, from the config; and,
@@ -125,8 +130,8 @@ std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host) {
     if (host.code_exec_name_taken) {
         code.status = "skipped";
         code.reason = "an MCP server named '" + host.code_exec_registered_as +
-                      "' runs something else -- 'apogee mcp create <name> --from code-exec' "
-                      "registers it under another";
+                      "' runs something else -- '" + harness::printed_program() +
+                      " mcp create <name> --from code-exec' registers it under another";
     } else if (!host.code_exec_registered_as.empty()) {
         code.status = "skipped";
         code.reason = "registered already, as '" + host.code_exec_registered_as + "'";
@@ -142,11 +147,14 @@ std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host) {
     BootstrapStep ffmpeg{.name = "ffmpeg with captions"};
     ffmpeg.status = "skipped";
     if (!host.macos) {
-        ffmpeg.reason = "Homebrew's ffmpeg-full is macOS's -- 'apogee check' names this host's way";
+        ffmpeg.reason = "Homebrew's ffmpeg-full is macOS's -- '" + harness::printed_program() +
+                        " check' names this host's way";
     } else if (!host.brew) {
-        ffmpeg.reason = "Homebrew is not on PATH -- 'apogee check' names the commands";
+        ffmpeg.reason = "Homebrew is not on PATH -- '" + harness::printed_program() +
+                        " check' names the commands";
     } else if (!host.ffmpeg_subtitles.has_value()) {
-        ffmpeg.reason = "no ffmpeg answered on PATH -- 'apogee check' names the one to install";
+        ffmpeg.reason = "no ffmpeg answered on PATH -- '" + harness::printed_program() +
+                        " check' names the one to install";
     } else if (*host.ffmpeg_subtitles) {
         ffmpeg.reason = "this ffmpeg burns captions already (its subtitles filter is there)";
     } else {
@@ -167,9 +175,9 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
     if (!minimal_by.empty()) {
         result.minimal = true;
         result.minimal_by = minimal_by;
-        say("bootstrap skipped: a minimal install (" + minimal_by +
-            ") -- 'apogee bootstrap' installs the runtimes and registers what this machine "
-            "has, any time");
+        say("bootstrap skipped: a minimal install (" + minimal_by + ") -- '" +
+            harness::printed_program() +
+            " bootstrap' installs the runtimes and registers what this machine has, any time");
         return result;
     }
     result.steps = bootstrap_plan(seams.host);
@@ -222,7 +230,7 @@ BootstrapResult run_bootstrap(const BootstrapSeams& seams, const std::string& mi
         say("  skipped -- " + step.reason);
     }
     say("done: " + std::to_string(done) + " of " + std::to_string(count) + " steps, " +
-        std::to_string(count - done) + " skipped -- " + std::string{kRerun});
+        std::to_string(count - done) + " skipped -- " + rerun());
     return result;
 }
 

@@ -22,6 +22,7 @@
 #include "contracts/host.h"
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::harness {
@@ -249,11 +250,11 @@ std::string key_text(std::string_view line, std::size_t at, std::size_t colon) {
 /// a second key beside it, which the loader never reads.
 ConfigEditError key_spelling_refusal(std::string_view dotted, std::string_view written,
                                      std::string_view key) {
-    return ConfigEditError("the key " + std::string{dotted} + " is written '" +
-                           std::string{written} +
-                           "', and the editor finds a key only written bare, '" + std::string{key} +
-                           ":' -- rewrite it so, or carry the file to JSONC with 'apogee "
-                           "config migrate', whose every form the editor edits");
+    return ConfigEditError(
+        "the key " + std::string{dotted} + " is written '" + std::string{written} +
+        "', and the editor finds a key only written bare, '" + std::string{key} +
+        ":' -- rewrite it so, or carry the file to JSONC with '" + harness::printed_program() +
+        " config migrate', whose every form the editor edits");
 }
 
 /// Refuses `line_body` when it writes `key` at `indent` in a spelling other
@@ -314,8 +315,8 @@ ConfigEditError layout_refusal(std::string_view dotted, std::size_t measured,
         "the lines under " + std::string{dotted} + ": are indented " + spaces(measured) +
         ", where the editor writes " + std::to_string(expected) +
         " -- it edits the 2-space layout Apogee writes, each level 2 spaces in from its key; "
-        "re-indent the file so, or carry it to JSONC with 'apogee config migrate', whose every "
-        "form the editor edits");
+        "re-indent the file so, or carry it to JSONC with '" +
+        harness::printed_program() + " config migrate', whose every form the editor edits");
 }
 
 /// Half-open line range of a section's body, excluding its header.
@@ -450,7 +451,8 @@ ConfigEditError inline_value_refusal(std::string_view dotted, std::string_view k
         "the " + std::string{dotted} + ": line holds more than its key -- the editor edits the " +
         "block form, '" + std::string{key} +
         ":' alone with its fields under it; rewrite it so, or carry the file to JSONC with "
-        "'apogee config migrate', whose every form the editor edits");
+        "'" +
+        harness::printed_program() + " config migrate', whose every form the editor edits");
 }
 
 /// The name in a `  <name>:` entry line -- a comment after it allowed (57e:
@@ -970,7 +972,8 @@ ConfigEditError missing_entry(std::string_view noun, std::string_view section,
                               "' is not one both config formats can edit -- " +
                               std::string{kEntryNameRule};
         if (section == "backends") {
-            refusal += "; rename it with 'apogee config rename-backend'";
+            refusal +=
+                "; rename it with '" + harness::printed_program() + " config rename-backend'";
         }
         return ConfigEditError(refusal);
     }
@@ -996,9 +999,8 @@ std::string append_entry(std::string_view content, std::string_view section, std
                               "' is not one both config formats can edit -- " +
                               std::string{kEntryNameRule};
         if (section == "backends") {
-            refusal +=
-                "; a backend already named otherwise is reached by 'apogee config "
-                "rename-backend'";
+            refusal += "; a backend already named otherwise is reached by '" +
+                       harness::printed_program() + " config rename-backend'";
         }
         throw ConfigEditError(refusal);
     }
@@ -2340,9 +2342,9 @@ std::string flow_list_of_names(std::string_view field, std::string_view value) {
 std::string set_backend_field(std::string_view content, std::string_view name,
                               std::string_view field, std::string_view value) {
     if (field == "api_key") {
-        throw ConfigEditError(
-            "a key is never taken on the command line -- store it with 'apogee auth add' "
-            "(asked with echo off, or --stdin, or --from-env)");
+        throw ConfigEditError("a key is never taken on the command line -- store it with '" +
+                              harness::printed_program() +
+                              " auth add' (asked with echo off, or --stdin, or --from-env)");
     }
     const std::vector<std::string_view> fields = backend_editable_fields();
     if (std::ranges::find(fields, field) == fields.end()) {
@@ -3960,43 +3962,44 @@ std::string scalar_refusal(std::string_view key) {
         if (has_segment(key, secret)) {
             return named +
                    " holds a secret, and a secret never goes in the config file -- store it with "
-                   "'apogee auth add'";
+                   "'" +
+                   harness::printed_program() + " auth add'";
         }
     }
 
     struct Door {
         std::string_view prefix;
-        std::string_view door;
+        std::string door;
     };
 
-    static constexpr std::array<Door, 9> kDoors{{
-        {"backends",
-         "a backend's fields have their verb: 'apogee config set-backend <name> "
-         "--<field> <value>'"},
-        {"models",
-         "the role pointers have their verbs: 'apogee config set-default <backend>' "
-         "and the set-default-* beside it"},
-        {"suites",
-         "a suite has its verbs: 'apogee config add-suite' and 'apogee config "
-         "set-suite'"},
-        {"permissions",
-         "a tool's level has its verb: 'apogee config set-permission <tool> "
-         "<ask|allow|deny>'"},
-        {"tools.allowed_hosts",
-         "the websites have their verbs: 'apogee config "
-         "add-allowed-host <host>' and delete-allowed-host"},
-        {"mcp_servers",
-         "an MCP server has its verbs: 'apogee mcp create', 'apogee mcp "
-         "enable'/'disable' and 'apogee config delete-mcp-server'"},
-        {"embeddings", "a collection is made by 'apogee embed ingest' and kept by its verbs"},
-        {"graphs", "a named graph has its verbs: 'apogee config add-graph' and delete-graph"},
-        {"agents", "an agent has its verbs: 'apogee agents create', edit and delete"},
+    // Built at each call, never static: each door begins with the build's own
+    // words and the root flag of this run (CLI-M49).
+    const std::string program = harness::printed_program();
+    const std::array<Door, 9> doors{{
+        {"backends", "a backend's fields have their verb: '" + program +
+                         " config set-backend <name> --<field> <value>'"},
+        {"models", "the role pointers have their verbs: '" + program +
+                       " config set-default <backend>' and the set-default-* beside it"},
+        {"suites", "a suite has its verbs: '" + program + " config add-suite' and '" + program +
+                       " config set-suite'"},
+        {"permissions", "a tool's level has its verb: '" + program +
+                            " config set-permission <tool> <ask|allow|deny>'"},
+        {"tools.allowed_hosts", "the websites have their verbs: '" + program +
+                                    " config add-allowed-host <host>' and delete-allowed-host"},
+        {"mcp_servers", "an MCP server has its verbs: '" + program + " mcp create', '" + program +
+                            " mcp enable'/'disable' and '" + program +
+                            " config delete-mcp-server'"},
+        {"embeddings",
+         "a collection is made by '" + program + " embed ingest' and kept by its verbs"},
+        {"graphs",
+         "a named graph has its verbs: '" + program + " config add-graph' and delete-graph"},
+        {"agents", "an agent has its verbs: '" + program + " agents create', edit and delete"},
     }};
-    for (const Door& door : kDoors) {
+    for (const Door& door : doors) {
         if (key == door.prefix ||
             (key.starts_with(door.prefix) && key.size() > door.prefix.size() &&
              key[door.prefix.size()] == '.')) {
-            return named + " is not a key 'config set' moves -- " + std::string{door.door};
+            return named + " is not a key 'config set' moves -- " + door.door;
         }
     }
     return named + " is not a key 'config set' moves -- it moves: " + scalar_keys_list();
@@ -4085,8 +4088,8 @@ ConfigEditError not_landed(std::string_view content, std::string_view change,
     } else {
         message +=
             "the line editor does not see where this file writes it (a key written twice, or in "
-            "YAML's explicit '? key' form); carry the file to JSONC with 'apogee config "
-            "migrate', whose every form the editor edits";
+            "YAML's explicit '? key' form); carry the file to JSONC with '" +
+            harness::printed_program() + " config migrate', whose every form the editor edits";
     }
     return ConfigEditError(message);
 }
@@ -4255,8 +4258,8 @@ Config parse_edited_config(std::string_view text) {
 std::string read_config_file(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        throw ConfigError(path.string() +
-                          ": cannot open config file (run 'apogee config init' to create one)");
+        throw ConfigError(path.string() + ": cannot open config file (run '" +
+                          harness::printed_program() + " config init' to create one)");
     }
     std::ostringstream buffer;
     buffer << in.rdbuf();

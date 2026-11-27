@@ -13,6 +13,7 @@
 #include <system_error>
 
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "platform/child_process.h"
 #include "platform/platform.h"
 
@@ -867,7 +868,8 @@ std::string PythonEnv::create(const std::filesystem::path& base_python,
 
 std::string PythonEnv::install(RequirementSet set, const harness::CancellationToken& cancellation) {
     if (!exists()) {
-        return "no Python environment at " + dir_.string() + " -- run 'apogee train setup' first";
+        return "no Python environment at " + dir_.string() + " -- run '" +
+               harness::printed_program() + " train setup' first";
     }
     // Before pip (M19): a set its Python cannot run fails here with the way
     // out, not in pip's words after the download.
@@ -934,8 +936,8 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
             return "pip finished, and " + std::string{source->package} +
                    " is not at the commit this Apogee pins (" +
                    std::string{source->commit.substr(0, 12)} + "): " + names + " -- the '" +
-                   std::string{to_string(set)} +
-                   "' set is not recorded as installed; 'apogee check' shows what is there";
+                   std::string{to_string(set)} + "' set is not recorded as installed; '" +
+                   harness::printed_program() + " check' shows what is there";
         }
     }
     PythonEnvStatus current = status();

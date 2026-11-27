@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "contracts/suggested_command.h"
 #include "operations/training_reads.h"
 #include "training/manifest.h"
 
@@ -55,7 +56,8 @@ HttpResponse admin_training_cycle(const AdminConfigContext& /*context*/) {
         return error_response(500, "the cycle history is unreadable: " + error);
     }
     if (!document.has_value()) {
-        return error_response(404, "no cycle history yet ('apogee train cycle run' writes it)");
+        return error_response(404, "no cycle history yet ('" + harness::printed_program() +
+                                       " train cycle run' writes it)");
     }
     return json_response(200, std::move(*document));
 }

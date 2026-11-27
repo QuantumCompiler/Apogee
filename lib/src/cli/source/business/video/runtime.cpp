@@ -12,6 +12,7 @@
 
 #include "contracts/assets.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/pipeline_info.h"
 #include "modelstore/snapshot.h"
@@ -96,13 +97,29 @@ constexpr std::array<std::string_view, 3> kEngineNames{"auto", "torch", "mlx"};
 [[nodiscard]] std::string pull_of(std::string_view model) {
     const std::size_t separator = model.find("--");
     if (separator == std::string_view::npos) {
-        return "apogee models pull <owner>/<repo> --safetensors";
+        return harness::printed_program() + " models pull <owner>/<repo> --safetensors";
     }
     return "apogee models pull " + std::string{model.substr(0, separator)} + "/" +
            std::string{model.substr(separator + 2)} + " --safetensors";
 }
 
 }  // namespace
+
+std::string video_setup_remedy() {
+    return harness::printed_program() + " train setup --with video";
+}
+
+std::string voice_setup_remedy() {
+    return harness::printed_program() + " train setup --with voice";
+}
+
+std::string mlx_video_setup_remedy() {
+    return harness::printed_program() + " train setup --with mlx-video";
+}
+
+std::string mlx_audio_setup_remedy() {
+    return harness::printed_program() + " train setup --with mlx-audio";
+}
 
 std::string_view to_string(VideoEngine engine) noexcept {
     return engine == VideoEngine::Mlx ? "mlx" : "torch";
@@ -153,15 +170,17 @@ std::string choose_video_engine(std::string_view asked, VideoEngine directory,
     if (directory == VideoEngine::Mlx) {
         return "'" + std::string{name} +
                "' is an MLX video model, which runs on MLX (mlx-video), not PyTorch -- PyTorch "
-               "runs a diffusers pipeline: 'apogee models pull <owner>/<repo>' stores one "
-               "(Wan-AI's are its repositories ending -Diffusers), and 'apogee train setup "
-               "--with video' installs what runs it";
+               "runs a diffusers pipeline: '" +
+               harness::printed_program() +
+               " models pull <owner>/<repo>' stores one (Wan-AI's are its repositories ending "
+               "-Diffusers), and '" +
+               harness::printed_program() + " train setup --with video' installs what runs it";
     }
     return "'" + std::string{name} +
            "' is a diffusers pipeline, which runs on PyTorch, not MLX -- MLX runs an MLX video "
-           "model: Wan's original layout converted with 'apogee models convert <set> --mlx', "
-           "after '" +
-           std::string{kMlxVideoSetupRemedy} + "'";
+           "model: Wan's original layout converted with '" +
+           harness::printed_program() + " models convert <set> --mlx', after '" +
+           mlx_video_setup_remedy() + "'";
 }
 
 std::string_view to_string(VideoRefusal refusal) noexcept {
@@ -227,7 +246,7 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
     if (!probe_environment(
             host, "video generation runs diffusers",
             {{"torch", VideoRefusal::NoTorch}, {"diffusers", VideoRefusal::NoDiffusers}},
-            training::RequirementSet::Video, kVideoSetupRemedy, readiness)) {
+            training::RequirementSet::Video, video_setup_remedy(), readiness)) {
         return readiness;
     }
 
@@ -237,7 +256,8 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
         if (!std::filesystem::is_directory(pipeline, code)) {
             return refused(std::move(readiness), VideoRefusal::NoPipeline,
                            "there is no pipeline at " + pipeline.string(),
-                           "apogee models pull <owner>/<repo> (a diffusers repository)");
+                           harness::printed_program() +
+                               " models pull <owner>/<repo> (a diffusers repository)");
         }
         const models::PipelineInfo info = models::read_pipeline_info(pipeline);
         if (!info.complete) {
@@ -259,7 +279,7 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
     if (!std::filesystem::is_regular_file(host.driver, code)) {
         return refused(std::move(readiness), VideoRefusal::NoDriver,
                        "the video driver is missing: " + host.driver.string(),
-                       "apogee check --fix");
+                       harness::printed_program() + " check --fix");
     }
     readiness.driver = host.driver;
     if (host.ffmpeg.empty()) {
@@ -322,7 +342,8 @@ std::filesystem::path find_mlx_video_tokenizer(const models::StoreRoots& roots,
     if (!record.has_value() || record->ref.empty()) {
         reason = wanted + ", which " + dir.string() +
                  " does not carry, and its record names no Wan set it was converted from";
-        remedy = "convert its Wan set again: apogee models convert <set> --mlx";
+        remedy = "convert its Wan set again: " + harness::printed_program() +
+                 " models convert <set> --mlx";
         return {};
     }
     // The set it was converted from, by the handle its record names -- or,
@@ -404,8 +425,8 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
         return refused(std::move(readiness), VideoRefusal::NotAppleSilicon,
                        "MLX runs on Apple silicon alone, and this is " +
                            (host.target.empty() ? std::string{"another host"} : host.target),
-                       "a diffusers pipeline runs here on PyTorch: apogee models pull "
-                       "<owner>/<repo>");
+                       "a diffusers pipeline runs here on PyTorch: " + harness::printed_program() +
+                           " models pull <owner>/<repo>");
     }
     const training::PythonEnv env{host.venv};
     if (!env.exists()) {
@@ -413,7 +434,7 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
                        "there is no Python environment at " + host.venv.string() +
                            " -- video generation on MLX runs mlx-video there, never the system "
                            "Python",
-                       std::string{kMlxVideoSetupRemedy});
+                       mlx_video_setup_remedy());
     }
     readiness.interpreter = env.interpreter();
     if (training::find_mlx_video_generator(host.venv).empty()) {
@@ -422,7 +443,7 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
                            host.venv.string() + " (its Wan generator, " +
                            std::string{training::kMlxVideoGenerator} +
                            ", and the torch its set brings, read from their files)",
-                       std::string{kMlxVideoSetupRemedy});
+                       mlx_video_setup_remedy());
     }
     if (const std::filesystem::path package = training::find_site_package(host.venv, "mlx_video");
         !package.empty()) {
@@ -437,9 +458,10 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
         const std::string name = handle.empty() ? dir.string() : std::string{handle};
         std::error_code code;
         if (!std::filesystem::is_directory(dir, code)) {
-            return refused(std::move(readiness), VideoRefusal::NoPipeline,
-                           "there is no MLX video model at " + dir.string(),
-                           "apogee models convert <a Wan set> --mlx (mlx-video)");
+            return refused(
+                std::move(readiness), VideoRefusal::NoPipeline,
+                "there is no MLX video model at " + dir.string(),
+                harness::printed_program() + " models convert <a Wan set> --mlx (mlx-video)");
         }
         const models::MlxKind kind = models::read_mlx_kind(dir);
         if (kind.word != models::kMlxVideo) {
@@ -471,7 +493,7 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
     if (!std::filesystem::is_regular_file(host.mlx_driver, code)) {
         return refused(std::move(readiness), VideoRefusal::NoDriver,
                        "the MLX video driver is missing: " + host.mlx_driver.string(),
-                       "apogee check --fix");
+                       harness::printed_program() + " check --fix");
     }
     readiness.driver = host.mlx_driver;
     if (host.ffmpeg.empty()) {
@@ -494,7 +516,7 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
     VideoReadiness readiness;
     if (!probe_environment(host, "speech runs kokoro",
                            {{"torch", VideoRefusal::NoTorch}, {"kokoro", VideoRefusal::NoKokoro}},
-                           training::RequirementSet::Voice, kVoiceSetupRemedy, readiness)) {
+                           training::RequirementSet::Voice, voice_setup_remedy(), readiness)) {
         return readiness;
     }
 
@@ -504,7 +526,7 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
         if (!std::filesystem::is_directory(model, code)) {
             return refused(std::move(readiness), VideoRefusal::NoVoiceModel,
                            "there is no voice model at " + model.string(),
-                           "apogee models pull hexgrad/Kokoro-82M");
+                           harness::printed_program() + " models pull hexgrad/Kokoro-82M");
         }
         const models::VoiceInfo info = models::read_voice_info(model);
         if (!info.complete) {
@@ -519,7 +541,7 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
     if (!std::filesystem::is_regular_file(host.voice_driver, code)) {
         return refused(std::move(readiness), VideoRefusal::NoDriver,
                        "the voice driver is missing: " + host.voice_driver.string(),
-                       "apogee check --fix");
+                       harness::printed_program() + " check --fix");
     }
     readiness.driver = host.voice_driver;
     return readiness;
@@ -533,15 +555,15 @@ VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::pat
         return refused(std::move(readiness), VideoRefusal::NotAppleSilicon,
                        "MLX runs on Apple silicon alone, and this is " +
                            (host.target.empty() ? std::string{"another host"} : host.target),
-                       "a voice model as Kokoro publishes it speaks here on PyTorch: apogee "
-                       "models pull hexgrad/Kokoro-82M");
+                       "a voice model as Kokoro publishes it speaks here on PyTorch: " +
+                           harness::printed_program() + " models pull hexgrad/Kokoro-82M");
     }
     const training::PythonEnv env{host.venv};
     if (!env.exists()) {
         return refused(std::move(readiness), VideoRefusal::NoEnvironment,
                        "there is no Python environment at " + host.venv.string() +
                            " -- speech on MLX runs mlx-audio there, never the system Python",
-                       std::string{kMlxAudioSetupRemedy});
+                       mlx_audio_setup_remedy());
     }
     readiness.interpreter = env.interpreter();
     if (training::find_mlx_audio_kokoro(host.venv).empty()) {
@@ -550,7 +572,7 @@ VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::pat
                            host.venv.string() + " (its Kokoro, " +
                            std::string{training::kMlxAudioKokoro} +
                            ", and the misaki it reads text through, read from their files)",
-                       std::string{kMlxAudioSetupRemedy});
+                       mlx_audio_setup_remedy());
     }
     if (const std::filesystem::path package = training::find_site_package(host.venv, "mlx_audio");
         !package.empty()) {
@@ -565,9 +587,10 @@ VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::pat
         const std::string name = handle.empty() ? model.string() : std::string{handle};
         std::error_code code;
         if (!std::filesystem::is_directory(model, code)) {
-            return refused(std::move(readiness), VideoRefusal::NoVoiceModel,
-                           "there is no MLX voice model at " + model.string(),
-                           "apogee models convert <a voice model> --mlx (mlx-audio)");
+            return refused(
+                std::move(readiness), VideoRefusal::NoVoiceModel,
+                "there is no MLX voice model at " + model.string(),
+                harness::printed_program() + " models convert <a voice model> --mlx (mlx-audio)");
         }
         const models::MlxKind kind = models::read_mlx_kind(model);
         if (kind.word != models::kMlxVoice) {
@@ -592,7 +615,7 @@ VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::pat
     if (!std::filesystem::is_regular_file(host.voice_mlx_driver, code)) {
         return refused(std::move(readiness), VideoRefusal::NoDriver,
                        "the MLX voice driver is missing: " + host.voice_mlx_driver.string(),
-                       "apogee check --fix");
+                       harness::printed_program() + " check --fix");
     }
     readiness.driver = host.voice_mlx_driver;
     return readiness;

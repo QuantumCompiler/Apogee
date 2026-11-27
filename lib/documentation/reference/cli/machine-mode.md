@@ -1670,7 +1670,10 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   `runnable` says whether this machine can run it; when it cannot, `missing`
   says what is lacking and `remedy` the command that provides it. A
   registrable preset carries `register` (`apogee mcp create code --from
-  code-exec`), and `self` its `refusal` instead. Each carries `host_entry`,
+  code-exec`), and `self` its `refusal` instead. Since CLI-M49 a preset's
+  `remedy` begins with the binary and root that printed it: `apogee-dev`
+  from a dev build, `apogee --dev` or `apogee --custom <file>` from a run
+  given that flag; a release build with no flag prints `apogee`, as before. Each carries `host_entry`,
   `{"name", "server": {"command", "args"}}`: the entry another MCP host takes.
   Since 56d a third preset, `xcode` -- `xcrun mcpbridge`, `xcrun` by its
   absolute path, `runnable` on macOS only (`missing`: `Xcode runs on macOS
@@ -1713,7 +1716,12 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   does>`. Since CLI-M48 a door's words may be quoted as a POSIX shell reads
   them (PowerShell's spelling on Windows) -- `"my notes"`, `'$HOME'` -- and a
   dash-led name may follow `--`, so a host reads ` to ` and `, or ` outside
-  quotes. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
+  quotes. Since CLI-M49 a door names the binary and root that printed it --
+  `apogee-dev config migrate` from a dev build, `apogee --dev …` under
+  `--dev` -- so a host that runs a door through the binary strips the program
+  word it finds, not `apogee` alone. Until CLI-M61 moves the rest onto the
+  same renderer, a door completed by a name (`apogee models repair <name>`)
+  still begins `apogee` from every build, so a host meets both forms. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
   rows say each set's installed version against its floor, and two rows join
   them, `video` (mlx-video, its commit against its pin) and `voice`
   (mlx-audio) -- read from the environment's `*.dist-info` records, nothing

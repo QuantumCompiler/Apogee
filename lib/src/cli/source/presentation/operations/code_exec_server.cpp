@@ -59,9 +59,8 @@ CodeExecRegistration code_exec_registration(
         out.interpreter_source = "python3 on PATH";
         return out;
     }
-    out.missing =
-        "no Python to run it: no training environment ('apogee train setup') and no python3 on "
-        "PATH";
+    out.missing = "no Python to run it: no training environment ('" + harness::printed_program() +
+                  " train setup') and no python3 on PATH";
     return out;
 }
 

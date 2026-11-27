@@ -950,7 +950,12 @@ or non-integer parameter, a cap out of range, an `{id}` that is not a plain
 name, or a name **several nodes answer to** -- never picked:
 `error.candidates` lists them, each a node; `404` (`not_found_error`)
 when `{id}` names no graph or collection, the graph is not built, or a node
-matches nothing (`error.candidates` then holds the near matches).
+matches nothing (`error.candidates` then holds the near matches). A command
+a message names -- the graph not built says `run: apogee graph build
+<name>` -- names the binary and the root that serve it (CLI-M49): `serve`
+run from an `apogee-dev` build says `apogee-dev`, and `serve --dev` or
+`--custom <file>` puts that flag after the program word, so the line pasted
+on the server's machine acts on the root the server reads.
 
 ### `GET /v1/admin/graph/{id}/explain`
 

@@ -6,6 +6,7 @@
 
 #include "contracts/assets.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "training/script_runner.h"
 
 namespace apogee::training {
@@ -27,17 +28,19 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
                                   std::span<const std::string_view> retired) {
     if (!env.exists()) {
         return "the GGUF converter runs in Apogee's Python environment, which has not been "
-               "created yet -- run 'apogee train setup --with convert' (a one-time install of "
-               "torch and transformers)";
+               "created yet -- run '" +
+               harness::printed_program() +
+               " train setup --with convert' (a one-time install of torch and transformers)";
     }
     if (!env.status().has(RequirementSet::Convert)) {
         return "the GGUF converter needs the 'convert' requirement set in the Python environment "
-               "-- run 'apogee train setup --with convert'";
+               "-- run '" +
+               harness::printed_program() + " train setup --with convert'";
     }
     std::error_code code;
     if (!std::filesystem::is_regular_file(script, code)) {
-        return "the vendored converter is missing: " + script.string() +
-               " -- run 'apogee check --fix' to seed it";
+        return "the vendored converter is missing: " + script.string() + " -- run '" +
+               harness::printed_program() + " check --fix' to seed it";
     }
     // The rest of the tree too. The script finds its `gguf` package beside
     // it and, when that is gone, falls back to the PyPI one without a word --
@@ -51,7 +54,7 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
         path.make_preferred();
         if (!std::filesystem::is_regular_file(path, code)) {
             return "the vendored converter is incomplete: " + path.string() +
-                   " is missing -- run 'apogee check --fix' to seed it";
+                   " is missing -- run '" + harness::printed_program() + " check --fix' to seed it";
         }
     }
     // An earlier Apogee's copy, left by skip-if-present seeding: it would run
@@ -60,7 +63,8 @@ std::string converter_unavailable(const PythonEnv& env, const std::filesystem::p
     if (harness::inspect_converter_tree(script.parent_path(), retired).stale > 0) {
         return "the converter under " + script.parent_path().string() +
                " is from an earlier Apogee (an older llama.cpp than this build's) -- run "
-               "'apogee check --fix' to update it";
+               "'" +
+               harness::printed_program() + " check --fix' to update it";
     }
     return {};
 }

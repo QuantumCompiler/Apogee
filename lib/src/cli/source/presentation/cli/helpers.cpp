@@ -23,6 +23,7 @@
 #include "cli/command.h"
 #include "cli/embed.h"
 #include "cli/tool_vectors.h"
+#include "contracts/suggested_command.h"
 #include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
@@ -90,7 +91,9 @@ std::string known_suites(const harness::Config& config) {
         out += out.empty() ? "" : ", ";
         out += name;
     }
-    return out.empty() ? "none is configured -- 'apogee config add-suite'" : "configured: " + out;
+    return out.empty()
+               ? "none is configured -- '" + harness::printed_program() + " config add-suite'"
+               : "configured: " + out;
 }
 
 std::string select_suite(harness::Config& config, std::string_view suite) {

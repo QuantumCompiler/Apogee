@@ -709,6 +709,14 @@ add_test(NAME cli.one_key_resolver
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_key_resolver.cmake"
 )
 
+# A printed command goes through the renderer, so it names the binary and the
+# root that printed it (CLI-M49; CLI-M61 extends it). See the file.
+add_test(NAME cli.one_suggested_command
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_suggested_command.cmake"
+)
+
 # Provider probes run inside `check` and `providers scan` only, never on a
 # startup path (28a). See the file.
 add_test(NAME cli.no_provider_probes

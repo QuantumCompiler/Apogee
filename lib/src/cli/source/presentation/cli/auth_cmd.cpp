@@ -11,6 +11,7 @@
 
 #include "cli/helpers.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "operations/credential_views.h"
 #include "platform/platform.h"
@@ -101,7 +102,8 @@ std::string render_auth_listing(const AuthListing& listing) {
         out << "warning: " << listing.warning << "\n";
     }
     if (listing.stored.empty()) {
-        out << "no stored keys (add one with 'apogee auth add <provider>')\n";
+        out << "no stored keys (add one with '" + harness::printed_program() +
+                   " auth add <provider>')\n";
     } else {
         out << "stored keys:\n";
         for (const secrets::CredentialMetadata& entry : listing.stored) {

@@ -246,8 +246,12 @@ apogee_alone(claude)
 expect_contains("${alone_err}"
     "apogee complete: backend 'claude' is configured but could not be started: "
     "the backend asked for is refused with its own problem")
-expect_contains("${alone_err}" "(no backend started; 'apogee check' says why)"
-    "and says nothing started")
+# The run's root came from --custom, so the door names it, ahead of the verb
+# (CLI-M49): pasted, `check` reads the root that refused.
+expect_contains("${alone_err}" "(no backend started; 'apogee --custom "
+    "and says nothing started, naming the root the run was given")
+expect_contains("${alone_err}" " check' says why)"
+    "and says nothing started, naming the root the run was given")
 apogee_alone(nope)
 expect_contains("${alone_err}" "no backend named 'nope' (configured: claude)"
     "a name configured nowhere is a typo, nothing started or not")

@@ -243,7 +243,7 @@ void check_role_pointer(CheckReport& report, const harness::Config& config,
     if (backend == nullptr) {
         add(report, Status::Fail, "Config", std::string{what},
             "names a backend that is not configured: '" + value + "'",
-            "apogee config set-default <one of your configured backends>");
+            harness::printed_program() + " config set-default <one of your configured backends>");
         return;
     }
     if (medium.has_value()) {
@@ -434,7 +434,7 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         // A fresh install has no config yet. That is a state with an obvious
         // fix, not a broken installation.
         add(report, Status::Warn, "Config", file, "not found at " + inputs.config_path.string(),
-            "apogee config init");
+            harness::printed_program() + " config init");
         return;
     }
     if (!inputs.config_error.empty()) {
@@ -449,13 +449,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             "parses cleanly -- the older YAML format, still read, but migrate refuses it as it "
             "stands: " +
                 inputs.config_migrate_refusal,
-            "fix that in " + file + " by hand, then apogee config migrate");
+            "fix that in " + file + " by hand, then " + harness::printed_program() +
+                " config migrate");
     } else if (inputs.config_legacy) {
         // The compat read (28i): healthy, and on its way out.
         add(report, Status::Ok, "Config", file,
             "parses cleanly -- the older YAML format, still read; migrate converts it to " +
                 std::string{harness::kConfigFileName} + ", every comment kept",
-            "apogee config migrate");
+            harness::printed_program() + " config migrate");
     } else if (const std::size_t missing = inputs.config_missing_options.size(); missing > 0) {
         // Behind the template is healthy: the absent options have their
         // defaults. Said, so a newer release's options can be found.
@@ -463,7 +464,7 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
             "parses cleanly -- " + std::to_string(missing) +
                 (missing == 1 ? " option" : " options") +
                 " from this release's starter config not in the file (their defaults apply)",
-            "apogee config upgrade");
+            harness::printed_program() + " config upgrade");
     } else {
         add(report, Status::Ok, "Config", file, "parses cleanly");
     }
@@ -474,9 +475,9 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         // seeded before any key or model exists, like the models row's
         // "bundles none". The offer and the scan exist to move it along.
         add(report, Status::Skipped, "Config", "backends",
-            "none configured yet -- a chat needs one; 'apogee providers scan --register' finds "
-            "this machine's providers",
-            "apogee config add-backend <name> --type <type>");
+            "none configured yet -- a chat needs one; '" + harness::printed_program() +
+                " providers scan --register' finds this machine's providers",
+            harness::printed_program() + " config add-backend <name> --type <type>");
         return;
     }
 
@@ -507,8 +508,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 "unknown key '" + key + "' -- no backend reads it, so it does nothing";
             if (meant.empty()) {
                 add(report, Status::Warn, "Config", label, said,
-                    "remove it from " + file +
-                        " ('apogee config set-backend --help' lists a backend's fields)");
+                    "remove it from " + file + " ('" + harness::printed_program() +
+                        " config set-backend --help' lists a backend's fields)");
                 continue;
             }
             if (std::ranges::find(backend.written_keys, meant) != backend.written_keys.end()) {
@@ -773,8 +774,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         !config.auto_rag.empty() && !refused.empty()) {
         add(report, Status::Fail, "Config", "auto_rag",
             refused + " -- every turn that would read it is refused",
-            "edit auto_rag in " + inputs.config_path.string() +
-                " to a collection's name, as 'apogee embed list' shows it, or remove it");
+            "edit auto_rag in " + inputs.config_path.string() + " to a collection's name, as '" +
+                harness::printed_program() + " embed list' shows it, or remove it");
     }
 }
 
@@ -838,7 +839,7 @@ void check_providers(CheckReport& report, const CheckInputs& inputs) {
             std::string{backends::to_string(status.tier())} + ", not registered",
             facts->needs_model
                 ? "apogee config add-backend " + status.id + " --type " + type + " --model <model>"
-                : std::string{"apogee providers scan --register"});
+                : std::string{harness::printed_program() + " providers scan --register"});
     }
     if (cache.scanned()) {
         add(report, Status::Ok, "Providers", "scan", "last scanned " + cache.scanned_at);
@@ -846,7 +847,8 @@ void check_providers(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Providers", "scan",
             "not scanned yet -- versions, status-command logins and providers no backend "
             "reaches are unknown",
-            "apogee check --refresh-providers   (or apogee providers scan)");
+            harness::printed_program() + " check --refresh-providers   (or " +
+                harness::printed_program() + " providers scan)");
     }
 }
 
@@ -854,7 +856,7 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
     std::error_code code;
     if (!std::filesystem::exists(inputs.home, code)) {
         add(report, Status::Fail, "Filesystem", "data directory",
-            "does not exist: " + inputs.home.string(), "apogee check --fix");
+            "does not exist: " + inputs.home.string(), harness::printed_program() + " check --fix");
         return;
     }
     add(report, Status::Ok, "Filesystem", "data directory", inputs.home.string());
@@ -866,7 +868,8 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
 
         if (!std::filesystem::exists(path, code)) {
             add(report, Status::Fail, "Filesystem", label,
-                "missing -- " + std::string{entry.purpose}, "apogee check --fix");
+                "missing -- " + std::string{entry.purpose},
+                harness::printed_program() + " check --fix");
             continue;
         }
         if (!std::filesystem::is_directory(path, code)) {
@@ -894,7 +897,8 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
         if (leaks) {
             add(report, Status::Fail, "Filesystem", label,
                 "is readable by other users, and may hold conversation transcripts",
-                chmod_command("700", path.string()) + "   (or: apogee check --fix)");
+                chmod_command("700", path.string()) + "   (or: " + harness::printed_program() +
+                    " check --fix)");
         } else {
             add(report, Status::Ok, "Filesystem", label, std::string{entry.purpose} + " (private)");
         }
@@ -1024,7 +1028,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Warn, "Models", "old layout",
             std::to_string(legacy.ggufs.size() + legacy.snapshots.size()) +
                 " model(s) still in the flat layout, which nothing reads any more",
-            "apogee models migrate");
+            harness::printed_program() + " models migrate");
     }
 
     // What an interrupted pull, convert or quantize left: its whole staging
@@ -1041,7 +1045,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
             std::to_string(leftovers.size()) +
                 " staging folder(s) an interrupted pull, convert or quantize left behind, " +
                 format_progress_size(static_cast<std::int64_t>(bytes)),
-            "apogee check --fix");
+            harness::printed_program() + " check --fix");
     }
 
     // The prompt cache (26j): what the saved states take, against the cap
@@ -1060,7 +1064,8 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         // The fresh-install criterion in one row: no models is CORRECT.
         // Apogee bundles none and downloads none without being asked.
         add(report, Status::Ok, "Models", "models/",
-            "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
+            "no models installed -- Apogee bundles none; pull one with '" +
+                harness::printed_program() + " models pull'");
     }
 }
 
@@ -1331,7 +1336,7 @@ void check_secrets(CheckReport& report, const CheckInputs& inputs) {
     std::error_code code;
     if (!std::filesystem::exists(token, code)) {
         add(report, Status::Ok, "Secrets", label,
-            "not generated yet -- created at the first 'apogee serve'");
+            "not generated yet -- created at the first '" + harness::printed_program() + " serve'");
         return;
     }
     if (!harness::supports_private_modes()) {
@@ -1347,7 +1352,8 @@ void check_secrets(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Secrets", label,
             "is readable by other users, and it is the /v1/admin bearer",
-            chmod_command("600", token.string()) + "   (or: apogee check --fix)");
+            chmod_command("600", token.string()) + "   (or: " + harness::printed_program() +
+                " check --fix)");
         return;
     }
     add(report, Status::Ok, "Secrets", label, "present, private (0600)");
@@ -1362,7 +1368,8 @@ void check_credential_store(CheckReport& report, const CheckInputs& inputs) {
     const std::string label = "Credential store";
     std::error_code code;
     if (!std::filesystem::exists(file, code)) {
-        add(report, Status::Ok, "Secrets", label, "none -- 'apogee auth add' creates it");
+        add(report, Status::Ok, "Secrets", label,
+            "none -- '" + harness::printed_program() + " auth add' creates it");
         return;
     }
     if (!harness::supports_private_modes()) {
@@ -1378,7 +1385,8 @@ void check_credential_store(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Secrets", label,
             "is readable by other users, and it holds provider API keys",
-            chmod_command("600", file.string()) + "   (or: apogee check --fix)");
+            chmod_command("600", file.string()) + "   (or: " + harness::printed_program() +
+                " check --fix)");
         return;
     }
     const secrets::CredentialStore store{file};
@@ -1518,9 +1526,8 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
 /// A seeded driver an earlier Apogee wrote and nobody edited (27c): it runs,
 /// but as that Apogee shipped it, and the fix replaces it in place.
 [[nodiscard]] std::string stale_script_detail(const std::string& script) {
-    return script +
-           " is an earlier Apogee's copy, unedited -- 'apogee check --fix' brings it up to this "
-           "build's";
+    return script + " is an earlier Apogee's copy, unedited -- '" + harness::printed_program() +
+           " check --fix' brings it up to this build's";
 }
 
 /// The code-execution server (47b): the seeded script against the shipped
@@ -1537,11 +1544,11 @@ void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
         case harness::SeededScript::Missing:
             add(report, Status::Warn, "MCP", "code-exec",
                 script + " is missing from " + registration.script.parent_path().string(),
-                "apogee check --fix");
+                harness::printed_program() + " check --fix");
             return;
         case harness::SeededScript::Stale:
             add(report, Status::Warn, "MCP", "code-exec", stale_script_detail(script),
-                "apogee check --fix");
+                harness::printed_program() + " check --fix");
             return;
         case harness::SeededScript::Edited:
         case harness::SeededScript::Current:
@@ -1560,7 +1567,8 @@ void check_code_exec(CheckReport& report, const CheckInputs& inputs) {
     }
     if (registration.interpreter.empty()) {
         add(report, Status::Skipped, "MCP", "code-exec",
-            copy + "; not registered, and " + registration.missing, "apogee train setup");
+            copy + "; not registered, and " + registration.missing,
+            harness::printed_program() + " train setup");
         return;
     }
     add(report, Status::Skipped, "MCP", "code-exec",
@@ -1609,7 +1617,8 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
                 std::filesystem::status(command, code).permissions();
             if ((mode & std::filesystem::perms::owner_exec) == std::filesystem::perms::none) {
                 add(report, Status::Warn, "MCP", label, server.command + " is not executable",
-                    chmod_command("+x", server.command) + "   (or: apogee check --fix)");
+                    chmod_command("+x", server.command) + "   (or: " + harness::printed_program() +
+                        " check --fix)");
                 continue;
             }
         }
@@ -1687,8 +1696,8 @@ void check_xcode(CheckReport& report, const CheckInputs& inputs) {
                                            : operations::registered_xcode_server(inputs.config);
         row(Status::Ok, "mcpbridge",
             (registered.empty()
-                 ? std::string{"Xcode's tools for Apogee's agents: apogee mcp create xcode --from "
-                               "xcode"}
+                 ? std::string{"Xcode's tools for Apogee's agents: " + harness::printed_program() +
+                               " mcp create xcode --from xcode"}
                  : "Xcode's tools for Apogee's agents: registered as '" + registered + "'") +
                 " -- they answer while Xcode runs with the project open and its Settings › "
                 "Intelligence › Model Context Protocol › \"Allow External Agents to Use Xcode "
@@ -1704,8 +1713,8 @@ void check_xcode(CheckReport& report, const CheckInputs& inputs) {
     if (agents) {
         row(Status::Ok, "acp agents",
             "Xcode " + facts->version + " hosts ACP agents -- add Apogee in " +
-                std::string{operations::kAcpRegistrationWhere} +
-                ": apogee acp registration prints the fields");
+                std::string{operations::kAcpRegistrationWhere} + ": " + harness::printed_program() +
+                " acp registration prints the fields");
     } else {
         row(Status::Skipped, "acp agents",
             xcode + " hosts no ACP agents -- Apogee as Xcode's agent needs Xcode " +
@@ -1734,7 +1743,8 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
                 // Not a failure: the compiled-in text runs meanwhile. But an
                 // edit made to a file that is not there goes nowhere.
                 add(report, Status::Warn, "Agents", "bundled: " + relative,
-                    "not seeded -- the compiled-in text is used until it is", "apogee check --fix");
+                    "not seeded -- the compiled-in text is used until it is",
+                    harness::printed_program() + " check --fix");
             }
         }
     }
@@ -1794,7 +1804,8 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Fail, "Agents", label,
                 "collection: " + refused + " -- every run of the agent is refused",
                 "edit agents." + name + ".collection in " + inputs.config_path.string() +
-                    " to a collection's name, as 'apogee embed list' shows it");
+                    " to a collection's name, as '" + harness::printed_program() +
+                    " embed list' shows it");
             clean = false;
         } else if (!agent.collection.empty() &&
                    !std::filesystem::exists(collection_path(agent.collection), code)) {
@@ -1837,7 +1848,7 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
     const std::string label = "collection: " + db;
     if (!std::filesystem::exists(collection, code)) {
         add(report, Status::Ok, "Knowledge", label,
-            "no records yet -- 'apogee knowledge capture' creates it");
+            "no records yet -- '" + harness::printed_program() + " knowledge capture' creates it");
     } else {
         try {
             const knowledge::Store store{collection, {}};
@@ -1879,7 +1890,8 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Knowledge", archive,
             "is readable by other users, and it holds raw conversations",
-            chmod_command("700", raw.string()) + "   (or: apogee check --fix)");
+            chmod_command("700", raw.string()) + "   (or: " + harness::printed_program() +
+                " check --fix)");
         return;
     }
     std::size_t files = 0;
@@ -1942,8 +1954,8 @@ void check_media_readers(CheckReport& report, const CheckInputs& inputs, bool de
     const std::string no_ffmpeg = decoder ? "" : " -- but ffmpeg is not installed";
 
     std::string images = describer.empty()
-                             ? "nothing here reads them -- set a vision model with 'apogee config "
-                               "set-default-vision'"
+                             ? "nothing here reads them -- set a vision model with '" +
+                                   harness::printed_program() + " config set-default-vision'"
                              : "described by " + describer;
     if (sees) {
         images = chat + " sees them as they are; " + images;
@@ -1951,8 +1963,8 @@ void check_media_readers(CheckReport& report, const CheckInputs& inputs, bool de
     add(report, Status::Ok, "Attachments", "images", images);
 
     std::string audio = transcriber.empty()
-                            ? "nothing here hears it -- set a transcription model with 'apogee "
-                              "config set-default-transcription'"
+                            ? "nothing here hears it -- set a transcription model with '" +
+                                  harness::printed_program() + " config set-default-transcription'"
                             : "transcribed by " + transcriber;
     if (hears) {
         audio = chat + " hears up to a minute as it is; " + audio;
@@ -2384,12 +2396,12 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             "mlx-vlm is not installed in " + host.venv.string() + ", so " + sighted +
                 " cannot read images as they are -- the vision role describes them instead, "
                 "when one is set",
-            std::string{backends::kMlxVisionRemedy});
+            backends::mlx_vision_remedy());
     } else {
         add(report, Status::Skipped, "MLX", "vision",
             "not set up -- only an MLX vision model needs it (mlx-vlm is not installed in " +
                 host.venv.string() + ")",
-            std::string{backends::kMlxVisionRemedy});
+            backends::mlx_vision_remedy());
     }
 
     // The embedding dependency (53h): mlx-embeddings, which only an MLX
@@ -2413,13 +2425,13 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Warn, "MLX", "embeddings",
             "mlx-embeddings is not installed in " + host.venv.string() + ", so " + embedders +
                 " cannot embed",
-            std::string{backends::kMlxEmbeddingsRemedy});
+            backends::mlx_embeddings_remedy());
     } else {
         add(report, Status::Skipped, "MLX", "embeddings",
             "not set up -- only an MLX embedding model needs it (mlx-embeddings is not installed "
             "in " +
                 host.venv.string() + ")",
-            std::string{backends::kMlxEmbeddingsRemedy});
+            backends::mlx_embeddings_remedy());
     }
 
     // The opt-in sets (M23): mlx-video, built from its pinned commit (53k),
@@ -2468,20 +2480,21 @@ void check_mlx(CheckReport& report, const CheckInputs& inputs) {
             case harness::SeededScript::Missing:
                 add(report, Status::Warn, "MLX", label,
                     script + " is missing from " + file.parent_path().string(),
-                    "apogee check --fix");
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Current:
                 add(report, Status::Ok, "MLX", label, script + " matches the shipped copy");
                 break;
             case harness::SeededScript::Stale:
                 add(report, Status::Warn, "MLX", label, stale_script_detail(script),
-                    "apogee check --fix");
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Edited:
                 add(report, Status::Warn, "MLX", label,
                     script +
                         " differs from the shipped copy -- your edit is kept and runs; delete the "
-                        "file and run 'apogee check --fix' to restore the shipped one");
+                        "file and run '" +
+                        harness::printed_program() + " check --fix' to restore the shipped one");
                 break;
         }
     }
@@ -2618,20 +2631,21 @@ void check_video(CheckReport& report, const CheckInputs& inputs) {
             case harness::SeededScript::Missing:
                 add(report, Status::Warn, "Video", label,
                     script + " is missing from " + file.parent_path().string(),
-                    "apogee check --fix");
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Current:
                 add(report, Status::Ok, "Video", label, script + " matches the shipped copy");
                 break;
             case harness::SeededScript::Stale:
                 add(report, Status::Warn, "Video", label, stale_script_detail(script),
-                    "apogee check --fix");
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Edited:
                 add(report, Status::Warn, "Video", label,
                     script +
                         " differs from the shipped copy -- your edit is kept and runs; delete the "
-                        "file and run 'apogee check --fix' to restore the shipped one");
+                        "file and run '" +
+                        harness::printed_program() + " check --fix' to restore the shipped one");
                 break;
         }
     }
@@ -2655,11 +2669,11 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Skipped, "Training", "python env",
             "not set up -- only 'datasets prepare' and the trainers need it (never the system "
             "Python)",
-            "apogee train setup");
+            harness::printed_program() + " train setup");
     } else if (!status.error.empty()) {
         add(report, Status::Warn, "Training", "python env",
             "exists at " + env.dir().string() + " but its record is unreadable: " + status.error,
-            "apogee train setup");
+            harness::printed_program() + " train setup");
     } else {
         std::string sets;
         for (const std::string& set : status.sets) {
@@ -2682,19 +2696,22 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                 // A warning, not a failure: a fresh install passes, and the
                 // remedy is the doctor's own repair.
                 add(report, Status::Warn, "Training", label,
-                    "missing from " + path.parent_path().string(), "apogee check --fix");
+                    "missing from " + path.parent_path().string(),
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Current:
                 add(report, Status::Ok, "Training", label, "matches the shipped copy");
                 break;
             case harness::SeededScript::Stale:
                 add(report, Status::Warn, "Training", label,
-                    stale_script_detail(std::string{script.name}), "apogee check --fix");
+                    stale_script_detail(std::string{script.name}),
+                    harness::printed_program() + " check --fix");
                 break;
             case harness::SeededScript::Edited:
                 add(report, Status::Warn, "Training", label,
                     "differs from the shipped copy -- your edit is kept and runs; delete the file "
-                    "and run 'apogee check --fix' to restore the shipped one");
+                    "and run '" +
+                        harness::printed_program() + " check --fix' to restore the shipped one");
                 break;
         }
     }
@@ -2708,7 +2725,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         if (!std::filesystem::is_directory(converter, code)) {
             add(report, Status::Warn, "Training", "converter",
                 "convert_hf_to_gguf.py is not seeded under " + converter.string(),
-                "apogee check --fix");
+                harness::printed_program() + " check --fix");
         } else if (const harness::ConverterTreeState tree =
                        harness::inspect_converter_tree(converter);
                    tree.current()) {
@@ -2726,11 +2743,12 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                                 : std::to_string(tree.missing) + " of the vendored converter's " +
                                       std::to_string(files) + " files are missing") +
                     " under " + converter.string(),
-                "apogee check --fix");
+                harness::printed_program() + " check --fix");
         } else {
             add(report, Status::Warn, "Training", "converter",
                 "differs from the vendored copy under " + converter.string() +
-                    " -- delete the directory and run 'apogee check --fix' to restore it");
+                    " -- delete the directory and run '" + harness::printed_program() +
+                    " check --fix' to restore it");
         }
     }
 
@@ -2763,14 +2781,15 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
         } else {
             add(report, Status::Warn, "Training", "convert set",
                 "not installed -- 'train promote' needs it to convert to GGUF",
-                "apogee train setup --with convert");
+                harness::printed_program() + " train setup --with convert");
         }
     }
 
     const std::vector<training::KitSummary> kits = training::list_kits(training / "kits");
     if (kits.empty()) {
         add(report, Status::Warn, "Training", "kits",
-            "none installed under " + (training / "kits").string(), "apogee check --fix");
+            "none installed under " + (training / "kits").string(),
+            harness::printed_program() + " check --fix");
     }
     for (const training::KitSummary& kit : kits) {
         const std::string label = "kit: " + kit.name;
@@ -2908,7 +2927,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             detail += (detail.empty() ? "" : "; ") + problem;
         }
         add(report, Status::Warn, "Training", label, detail,
-            "apogee models pull <owner>/<repo> --safetensors, or apogee datasets list");
+            harness::printed_program() + " models pull <owner>/<repo> --safetensors, or " +
+                harness::printed_program() + " datasets list");
     }
 
     // The cycle: what it names must exist, a halted loop is reported with
@@ -2962,7 +2982,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", "cycle history",
                 "the cycle is HALTED: " + history.halt_reason + " (" +
                     std::to_string(history.consecutive_fails) + " consecutive failure(s))",
-                "apogee train cycle resume");
+                harness::printed_program() + " train cycle resume");
         } else {
             add(report, Status::Ok, "Training", "cycle history",
                 std::to_string(history.total_runs) + " run(s), " +
@@ -2979,9 +2999,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
     if (lock.stale()) {
         add(report, Status::Warn, "Training", "cycle lock",
             "stopped -- " + std::string{training::kLockFileName} + " is left by process " +
-                std::to_string(lock.pid) +
-                ", which is not running; every 'apogee train cycle run' refuses until it is "
-                "removed",
+                std::to_string(lock.pid) + ", which is not running; every '" +
+                harness::printed_program() + " train cycle run' refuses until it is removed",
             "remove " + lock.path.string() + " to run again");
     }
 }

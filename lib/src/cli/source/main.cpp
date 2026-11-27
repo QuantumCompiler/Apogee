@@ -24,6 +24,13 @@ static_assert(apogee::harness::parse_channel(APOGEE_CHANNEL).has_value(),
               "APOGEE_CHANNEL must be release, dev or test");
 constexpr apogee::harness::Channel kChannel =
     apogee::harness::parse_channel(APOGEE_CHANNEL).value_or(apogee::harness::Channel::Release);
+// And the name CMake builds it under (OUTPUT_NAME, stamped beside the
+// channel): the one every command it prints starts with (CLI-M49).
+#if !defined(APOGEE_PROGRAM)
+#error "APOGEE_PROGRAM is stamped by source/CMakeLists.txt (apogee_channel_executable)"
+#endif
+static_assert(apogee::harness::channel_program(kChannel) == APOGEE_PROGRAM,
+              "the channel's program must be the name CMake builds it under");
 
 int main(int argc, char** argv) {
     apogee::harness::set_baked_channel(kChannel);

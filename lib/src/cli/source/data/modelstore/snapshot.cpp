@@ -11,6 +11,7 @@
 #include <set>
 #include <system_error>
 
+#include "contracts/suggested_command.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
 
@@ -542,17 +543,16 @@ std::string describe_diffusion_model(const DiffusionModel& model) {
         out += std::string{"; "} + (wan.whole() ? "" : "once it is complete, ") +
                "mlx-video converts it to an MLX video model (--mlx)";
         if (model.mlx_video == false) {
-            out +=
-                ", and is not installed in Apogee's Python environment -- 'apogee train setup "
-                "--with mlx-video'";
+            out += ", and is not installed in Apogee's Python environment -- '" +
+                   harness::printed_program() + " train setup --with mlx-video'";
         }
     }
     // And what runs the model, on each of `video generate`'s engines (M24):
     // its MLX conversion said made where one converted from this set stands.
     out +=
         "; llama.cpp's converter takes no diffusion model -- it finds a model by its "
-        "architectures; what runs this model in 'apogee video generate' is " +
-        wan_engines(model) +
+        "architectures; what runs this model in '" +
+        harness::printed_program() + " video generate' is " + wan_engines(model) +
         (model.mlx_conversions.empty() ? std::string{", once made"}
                                        : ", made as " + said_together(model.mlx_conversions));
     return out;

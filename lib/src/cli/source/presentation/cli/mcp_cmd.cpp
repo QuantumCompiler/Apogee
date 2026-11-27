@@ -16,6 +16,7 @@
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "mcp/registry.h"
 #include "operations/mcp_presets.h"
@@ -174,7 +175,7 @@ void bind_list(CLI::App& parent, const RootContext& context) {
                 write_document(std::cout, operations::mcp_servers_document(config));
                 return;
             }
-            std::cout << operations::kNoMcpServers << "\n";
+            std::cout << operations::no_mcp_servers() << "\n";
             return;
         }
         if (json) {
@@ -270,7 +271,8 @@ void bind_test(CLI::App& parent, const RootContext& context) {
         const harness::Config config = load(config_path_for(context));
         const harness::McpServerConfig* entry = config.find_mcp_server(*server);
         if (entry == nullptr) {
-            fail("no MCP server named '" + *server + "' (see: apogee mcp list)");
+            fail("no MCP server named '" + *server + "' (see: " + harness::printed_program() +
+                 " mcp list)");
         }
         // Only the named server, force-enabled: a disabled one is testable.
         mcp::ServerSpec spec{*server, entry->command, entry->args, entry->env, true};

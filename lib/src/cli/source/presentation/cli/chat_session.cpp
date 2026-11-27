@@ -55,6 +55,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "contracts/utf8.h"
 #include "harness/context_windows.h"
 #include "harness/roles.h"
@@ -962,8 +963,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (flags->suite == harness::kSuiteOff) {
             fail_user(mode,
                       "--suite off names no suite, and execute opens a session with one or bare "
-                      "on a model -- leave --suite out, or 'apogee execute -m <backend>' opens "
-                      "it bare");
+                      "on a model -- leave --suite out, or '" +
+                          harness::printed_program() + " execute -m <backend>' opens it bare");
         }
         const bool suite = !flags->suite.empty() || !config.models.default_suite.empty();
         // What it would open on bare, asked of the one resolver: `-m`, else
@@ -2658,7 +2659,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                         asked.suite == harness::kSuiteOff) {
                         refused =
                             "execute runs under a suite -- /suite <name> switches to another; "
-                            "'apogee chat' is a session without one";
+                            "'" +
+                            harness::printed_program() + " chat' is a session without one";
                     }
                     if (refused.empty()) {
                         refused = select_suite(probe, asked.suite);
@@ -3272,20 +3274,20 @@ void remove_own_private_folders() {
 
 std::string execute_suite_refusal(const harness::Config& config) {
     // The suite half as it was (27s); the bare door (41a) after it.
-    const std::string bare =
-        " -- or open it bare on one model: apogee execute -m <backend>, or with a default "
-        "backend set (apogee config set-default <backend>)";
+    const std::string bare = " -- or open it bare on one model: " + harness::printed_program() +
+                             " execute -m <backend>, or with a default backend set (" +
+                             harness::printed_program() + " config set-default <backend>)";
     if (config.suite_names().empty()) {
-        return "execute opens a session with a suite, and none is configured -- add one: "
-               "apogee config add-suite <name> --chat <backend> [--utility <backend> ...], then "
-               "run it with --suite <name>, or make it the default: apogee config "
-               "set-default-suite <name>" +
-               bare;
+        return "execute opens a session with a suite, and none is configured -- add one: " +
+               harness::printed_program() +
+               " config add-suite <name> --chat <backend> [--utility <backend> ...], then run it "
+               "with --suite <name>, or make it the default: " +
+               harness::printed_program() + " config set-default-suite <name>" + bare;
     }
     return "execute opens a session with a suite, and none is named or the default -- run one "
            "with --suite <name> (" +
-           known_suites(config) +
-           "), or make one the default: apogee config set-default-suite <name>" + bare;
+           known_suites(config) + "), or make one the default: " + harness::printed_program() +
+           " config set-default-suite <name>" + bare;
 }
 
 std::string execute_orchestrate_refusal(const harness::Config& config) {
@@ -3293,7 +3295,8 @@ std::string execute_orchestrate_refusal(const harness::Config& config) {
         config.suite_names().empty() ? std::string{} : " (" + known_suites(config) + ")";
     return "--orchestrate offers a suite's symphonies to its chat model, and this session runs "
            "under none -- run one with --suite <name>" +
-           suites + ", or make one the default: apogee config set-default-suite <name>";
+           suites + ", or make one the default: " + harness::printed_program() +
+           " config set-default-suite <name>";
 }
 
 std::string orchestration_count(std::size_t offered) {

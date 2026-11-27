@@ -16,6 +16,7 @@
 #include "cli/tui_child.h"
 #include "cli/tui_common.h"
 #include "contracts/config.h"
+#include "contracts/suggested_command.h"
 #include "operations/credential_views.h"
 #include "operations/mcp_presets.h"
 #include "operations/read_views.h"
@@ -177,7 +178,7 @@ tui::ListOptions mcp_view_options(const RootContext& context, std::filesystem::p
         }
         std::vector<std::string> heading;
         if (rows.empty()) {
-            heading.emplace_back(operations::kNoMcpServers);
+            heading.emplace_back(operations::no_mcp_servers());
         }
         {
             const std::lock_guard lock{last->mutex};
@@ -260,9 +261,8 @@ tui::ListOptions auth_view_options(const RootContext& context) {
                               "): its key from " + field(backend, "source") +
                               (variable.empty() ? std::string{} : " (" + variable + ")"));
         }
-        heading.emplace_back(
-            "a key is stored at a real prompt -- 'apogee auth add <provider>' -- never in the "
-            "shell");
+        heading.emplace_back("a key is stored at a real prompt -- '" + harness::printed_program() +
+                             " auth add <provider>' -- never in the shell");
         return std::pair{std::move(heading), std::move(rows)};
     };
     return options;

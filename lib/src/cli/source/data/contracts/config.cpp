@@ -19,6 +19,7 @@
 #include "contracts/jsonc.h"
 #include "contracts/mcp_serve.h"
 #include "contracts/server_tools.h"
+#include "contracts/suggested_command.h"
 #include "contracts/symphony_walk.h"
 #include "platform/platform.h"
 
@@ -2302,7 +2303,8 @@ Config parse_config(std::string_view content, std::string_view origin) {
             listed += name;
         }
         fail(origin, "models.default_suite: no suite named '" + wanted + "' under suites:" +
-                         (known.empty() ? " (none is configured -- 'apogee config add-suite')"
+                         (known.empty() ? " (none is configured -- '" + harness::printed_program() +
+                                              " config add-suite')"
                                         : " (configured: " + listed + ")"));
     }
 
@@ -2534,8 +2536,8 @@ SymphonySpec parse_symphony_spec(std::string_view content, std::string_view orig
 Config load_config(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        throw ConfigError(path.string() +
-                          ": cannot open config file (run 'apogee config init' to create one)");
+        throw ConfigError(path.string() + ": cannot open config file (run '" +
+                          harness::printed_program() + " config init' to create one)");
     }
     std::ostringstream buffer;
     buffer << in.rdbuf();

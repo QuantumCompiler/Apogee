@@ -13,6 +13,7 @@
 #include "cli/check.h"
 #include "cli/helpers.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "secrets/store.h"
 
 namespace apogee::commands {
@@ -140,7 +141,8 @@ std::string describe_plan(const ResetPlan& plan) {
     out << describe_user_data(lines);
 
     out << "\nA kept row is left exactly as it is. Everything else is then recreated as a fresh "
-           "install has it ('apogee check --fix'), and checked.\n";
+           "install has it ('" +
+               harness::printed_program() + " check --fix'), and checked.\n";
     return out.str();
 }
 

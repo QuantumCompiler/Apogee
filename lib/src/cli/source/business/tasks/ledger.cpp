@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::tasks {
@@ -296,8 +297,9 @@ std::optional<TaskLock> TaskLock::acquire(const std::filesystem::path& root,
         return std::nullopt;
     }
     error = "task " + holder.label + " is running (process " + std::to_string(holder.pid) +
-            ") -- one task runs at a time. 'apogee task status " + holder.label +
-            "' shows it; 'apogee task halt' or 'apogee task cancel' stops it";
+            ") -- one task runs at a time. 'apogee task status " + holder.label + "' shows it; '" +
+            harness::printed_program() + " task halt' or '" + harness::printed_program() +
+            " task cancel' stops it";
     return std::nullopt;
 }
 

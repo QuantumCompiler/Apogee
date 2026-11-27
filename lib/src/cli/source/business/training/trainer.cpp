@@ -6,6 +6,7 @@
 #include <array>
 #include <system_error>
 
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 #include "training/script_runner.h"
 
@@ -88,8 +89,8 @@ TrainerChoice select_trainer(std::string_view requested, const HostShape& host) 
 std::string validate_student(const std::filesystem::path& dir) {
     std::error_code code;
     const std::string pull =
-        "only full-precision SafeTensors snapshots are trainable; pull one with 'apogee models "
-        "pull <owner>/<repo> --safetensors'";
+        "only full-precision SafeTensors snapshots are trainable; pull one with '" +
+        harness::printed_program() + " models pull <owner>/<repo> --safetensors'";
     if (dir.extension() == ".gguf") {
         return dir.string() + " is a GGUF -- an inference artifact, not a student. " + pull;
     }

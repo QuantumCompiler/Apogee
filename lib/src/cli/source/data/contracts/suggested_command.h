@@ -26,8 +26,15 @@
 /// otherwise it takes 53c's double quotes where every reader reads them back
 /// whole, and single quotes everywhere else (`shell_word`).
 ///
-/// Pure text: it includes nothing above the standard library, so every
-/// layer's printing site calls it directly.
+/// **Program.** A command begins with the words of the build that printed
+/// it and the root flag that chose its root (CLI-M49, `program_words()` in
+/// `contracts/paths.h`): `apogee-dev` on the dev channel, `apogee --dev`
+/// for a release binary run with `--dev`, so a pasted command acts on the
+/// install that printed it. A release build with no flag prints `apogee`.
+///
+/// Text in, text out: beside the standard library it reads only
+/// `contracts/paths.h`, the floor's own, so every layer's printing site
+/// calls it directly.
 namespace apogee::harness {
 
 /// Which shell a person pastes into: the POSIX shells, or PowerShell --
@@ -79,7 +86,9 @@ struct CommandPart {
 /// A command: its program, the literal words that name the verb (`graph`,
 /// `build`; `700` for chmod), then its parts in the order the site wrote.
 struct SuggestedCommand {
-    std::string program = "apogee";
+    /// A program the command names itself (`chmod`), printed as written;
+    /// empty for Apogee's own, which prints as `printed_program` says.
+    std::string program{};
     std::vector<std::string> verbs{};
     std::vector<CommandPart> parts{};
 };
@@ -98,6 +107,14 @@ struct SuggestedCommand {
 /// (`--model-path <an existing .gguf>`).
 [[nodiscard]] CommandPart option_placeholder(std::string_view flag, std::string_view text,
                                              bool greedy = false);
+
+/// The words an Apogee command a person copies starts with: this build's
+/// name, then the root flag in force (`program_words()`), each through
+/// `shell_word` -- `apogee`, `apogee-dev`, `apogee --dev`,
+/// `apogee --custom "/a b/config/config.json"`. What `render` prints before
+/// the verbs, and what a command whose every word is literal begins with.
+[[nodiscard]] std::string printed_program(CommandShell shell);
+[[nodiscard]] std::string printed_program();
 
 /// `command` as one line a person copies, by the order and word rules.
 [[nodiscard]] std::string render(const SuggestedCommand& command, CommandShell shell);

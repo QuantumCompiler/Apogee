@@ -36,7 +36,10 @@ constexpr std::size_t kStderrTailBytes = 8192;
 /// How long one read waits before the loop looks at the cancellation token.
 constexpr std::chrono::milliseconds kPoll{100};
 
-constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
+/// The fix that installs mlx-lm (27a), begun with the build's own words.
+[[nodiscard]] std::string setup_remedy() {
+    return harness::printed_program() + " train setup --with mlx";
+}
 
 [[nodiscard]] std::optional<std::string> read_file(const std::filesystem::path& path) {
     const std::ifstream in{path, std::ios::binary};
@@ -143,7 +146,7 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
         readiness.refusal = MlxRefusal::NoEnvironment;
         readiness.reason = "there is no Python environment at " + host.venv.string() +
                            " -- the mlx backend runs mlx-lm there, never the system Python";
-        readiness.remedy = std::string{kSetupRemedy};
+        readiness.remedy = setup_remedy();
         return readiness;
     }
     readiness.package = find_package(host.venv, "mlx_lm");
@@ -151,7 +154,7 @@ constexpr std::string_view kSetupRemedy = "apogee train setup --with mlx";
         readiness.refusal = MlxRefusal::NoMlxLm;
         readiness.reason =
             "mlx-lm is not installed in the Python environment at " + host.venv.string();
-        readiness.remedy = std::string{kSetupRemedy};
+        readiness.remedy = setup_remedy();
         return readiness;
     }
     readiness.version = declared_version(readiness.package, "_version.py");
@@ -163,7 +166,7 @@ void refuse_driver(MlxReadiness& readiness, const std::filesystem::path& driver)
     if (!std::filesystem::is_regular_file(driver, code)) {
         readiness.refusal = MlxRefusal::NoDriver;
         readiness.reason = "the MLX driver is missing: " + driver.string();
-        readiness.remedy = "apogee check --fix";
+        readiness.remedy = harness::printed_program() + " check --fix";
     }
 }
 
@@ -367,6 +370,14 @@ private:
 
 }  // namespace
 
+std::string mlx_vision_remedy() {
+    return harness::printed_program() + " train setup --with mlx-vlm";
+}
+
+std::string mlx_embeddings_remedy() {
+    return harness::printed_program() + " train setup --with mlx-embeddings";
+}
+
 // ---------------------------------------------------------------------------
 // The refusal ladder
 // ---------------------------------------------------------------------------
@@ -545,7 +556,7 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
                                "embedding), and mlx-embeddings is not installed in the Python "
                                "environment at " +
                                host.venv.string();
-            readiness.remedy = std::string{kMlxEmbeddingsRemedy};
+            readiness.remedy = mlx_embeddings_remedy();
             return readiness;
         }
         refuse_driver(readiness, host.embedder);
@@ -560,7 +571,7 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
                            "every turn, and mlx-vlm is not installed in the Python environment "
                            "at " +
                            host.venv.string();
-        readiness.remedy = std::string{kMlxVisionRemedy};
+        readiness.remedy = mlx_vision_remedy();
         return readiness;
     }
     // Its drafter, beside it (53i): the pairing and mlx-vlm's word on it.
@@ -667,10 +678,11 @@ MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
             // runs, whatever configuration came along with it.
             vision.reason =
                 info.kind.word == models::kMlxChat
-                    ? std::string{"its record says it is mlx-lm's build of its language model "
-                                  "alone (kind chat), its vision tower left out -- 'apogee "
-                                  "models convert <its SafeTensors set> --mlx' builds it through "
-                                  "mlx-vlm, the tower kept"}
+                    ? "its record says it is mlx-lm's build of its language model alone (kind "
+                      "chat), its vision tower left out -- '" +
+                          harness::printed_program() +
+                          " models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, "
+                          "the tower kept"
                     : "its record says it is kind " + info.kind.word + ", not a vision model";
             return vision;
         }
@@ -685,7 +697,7 @@ MlxVision probe_mlx_vision(const MlxModelInfo& info, const MlxHost& host) {
             "it is a vision model, but mlx-vlm is not installed in the Python "
             "environment at " +
             host.venv.string();
-        vision.remedy = std::string{kMlxVisionRemedy};
+        vision.remedy = mlx_vision_remedy();
     }
     return vision;
 }
@@ -754,7 +766,7 @@ MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view dra
             "a drafter runs through mlx-vlm's speculative path, and mlx-vlm is not installed in "
             "the Python environment at " +
             host.venv.string();
-        out.remedy = std::string{kMlxVisionRemedy};
+        out.remedy = mlx_vision_remedy();
         return out;
     }
     if (!mlx_vlm_drafts(out.vlm, type)) {
@@ -766,7 +778,7 @@ MlxDraft probe_mlx_draft(const std::filesystem::path& base, std::string_view dra
                                         " model -- its speculative path holds no drafter of that "
                                         "type (speculative/drafters/" +
                                         type + ")";
-        out.remedy = std::string{kMlxVisionRemedy};
+        out.remedy = mlx_vision_remedy();
     }
     return out;
 }
@@ -779,9 +791,9 @@ MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
     // mlx-lm's layout, as every turn of it is.
     if (!info.through_vlm) {
         audio.refusal = MlxAudioRefusal::NotMlxVlmBuild;
-        const std::string convert =
-            "'apogee models convert <its SafeTensors set> --mlx' builds it through mlx-vlm, the "
-            "towers kept";
+        const std::string convert = "'" + harness::printed_program() +
+                                    " models convert <its SafeTensors set> --mlx' builds it "
+                                    "through mlx-vlm, the towers kept";
         if (info.kind.source != models::MlxKindSource::Recorded) {
             audio.reason =
                 "no record says mlx-vlm built it (kind " + info.kind.word +
@@ -812,7 +824,7 @@ MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
         audio.reason =
             "it hears through mlx-vlm, which is not installed in the Python environment at " +
             host.venv.string();
-        audio.remedy = std::string{kMlxVisionRemedy};
+        audio.remedy = mlx_vision_remedy();
         return audio;
     }
     if (!mlx_vlm_has_module(audio.vlm, info.model_type)) {
@@ -824,7 +836,7 @@ MlxAudio probe_mlx_audio(const MlxModelInfo& info, const MlxHost& host) {
                                  " has no module to build it by"
                            : installed + " has no module for its type, " + info.model_type +
                                  ", so it cannot build the model to hear with";
-        audio.remedy = std::string{kMlxVisionRemedy};
+        audio.remedy = mlx_vision_remedy();
     }
     return audio;
 }
@@ -1183,29 +1195,31 @@ void MlxLocalProvider::ensure_child(const harness::StreamOptions& options, bool 
             "the MLX driver at " + options_.driver.string() +
                 (options_.info.through_vlm ? " does not load models through mlx-vlm"
                                            : " does not read images") +
-                " -- it is an older copy: 'apogee check --fix' brings an earlier Apogee's up to "
-                "this build's, and an edited one is kept, so delete it first");
+                " -- it is an older copy: '" + harness::printed_program() +
+                " check --fix' brings an earlier Apogee's up to this build's, and an edited one is "
+                "kept, so delete it first");
     }
     if (!options_.adapters.empty() && ready.adapter.empty()) {
         // A driver from before 53a: it ignores --adapter and loads the bare
         // base, which would answer as if the adapter were applied.
         drop_child();
-        throw harness::ProviderError(
-            options_.backend_name,
-            "the MLX driver at " + options_.driver.string() +
-                " does not apply adapters -- it is an older copy: 'apogee check --fix' brings "
-                "an earlier Apogee's up to this build's, and an edited one is kept, so delete "
-                "it first");
+        throw harness::ProviderError(options_.backend_name,
+                                     "the MLX driver at " + options_.driver.string() +
+                                         " does not apply adapters -- it is an older copy: '" +
+                                         harness::printed_program() +
+                                         " check --fix' brings an earlier Apogee's up to this "
+                                         "build's, and an edited one is kept, so delete it first");
     }
     if (drafting() && ready.draft.empty()) {
         // A driver from before 53i: it ignores --draft and answers from the
         // base alone, which would read as drafting that never happened.
         drop_child();
-        throw harness::ProviderError(
-            options_.backend_name,
-            "the MLX driver at " + options_.driver.string() +
-                " does not draft -- it is an older copy: 'apogee check --fix' brings an earlier "
-                "Apogee's up to this build's, and an edited one is kept, so delete it first");
+        throw harness::ProviderError(options_.backend_name,
+                                     "the MLX driver at " + options_.driver.string() +
+                                         " does not draft -- it is an older copy: '" +
+                                         harness::printed_program() +
+                                         " check --fix' brings an earlier Apogee's up to this "
+                                         "build's, and an edited one is kept, so delete it first");
     }
     say(options, harness::StatusEvent::Type::ModelReady, harness::StatusEvent::Phase::Done,
         "mlx-lm " + ready.mlx_lm_version + ", " +
@@ -1259,7 +1273,8 @@ void MlxLocalProvider::await_ready(const harness::CancellationToken& cancellatio
                 options_.backend_name,
                 "the MLX driver speaks protocol " + std::to_string(event->protocol) +
                     ", and this build speaks " + std::to_string(mlx::kProtocolVersion) +
-                    " -- delete it and run 'apogee check --fix' to restore the shipped one");
+                    " -- delete it and run '" + harness::printed_program() +
+                    " check --fix' to restore the shipped one");
         }
         ready_ = *event;
         return;
@@ -1552,8 +1567,9 @@ harness::ChatResponse MlxLocalProvider::run(const harness::ChatRequest& request,
         throw harness::ProviderError(
             options_.backend_name,
             "the MLX driver at " + options_.driver.string() +
-                " does not hand recordings to the model -- it is an older copy: 'apogee check "
-                "--fix' brings an earlier Apogee's up to this build's, and an edited one is "
+                " does not hand recordings to the model -- it is an older copy: '" +
+                harness::printed_program() +
+                " check --fix' brings an earlier Apogee's up to this build's, and an edited one is "
                 "kept, so delete it first");
     }
 

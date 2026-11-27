@@ -197,8 +197,8 @@ struct Providers {
         scripts / (name == "mlx" ? training::kMlxScriptName : training::kPeftScriptName);
     std::error_code code;
     if (!std::filesystem::is_regular_file(script, code)) {
-        fail_user("the shipped driver is missing: " + script.string() +
-                  " -- run 'apogee check --fix' to seed it");
+        fail_user("the shipped driver is missing: " + script.string() + " -- run '" +
+                  harness::printed_program() + " check --fix' to seed it");
     }
     if (name == "mlx") {
         return training::make_mlx_trainer(env.interpreter(), scripts);
@@ -320,7 +320,8 @@ struct Providers {
     const std::optional<training::RunManifest> manifest =
         training::read_manifest(store.run_dir(run_id), error);
     if (!manifest.has_value()) {
-        fail_user("no run '" + run_id + "': " + error + " ('apogee train status' lists the runs)");
+        fail_user("no run '" + run_id + "': " + error + " ('" + harness::printed_program() +
+                  " train status' lists the runs)");
     }
     return *manifest;
 }
@@ -587,7 +588,8 @@ struct PromoteChecks {
         if (!models::quantize_supported()) {
             checks.error =
                 "--quantize needs a build with llama.cpp compiled in (-DAPOGEE_ENABLE_LLAMA=ON). "
-                "Promote without it and run 'apogee models quantize' on the F16 GGUF";
+                "Promote without it and run '" +
+                harness::printed_program() + " models quantize' on the F16 GGUF";
             return checks;
         }
     }
@@ -1516,7 +1518,8 @@ void print_cycle_pass_line(const training::PipelineRunManifest& manifest) {
         return;
     }
     std::cout << "A cycle pass: its candidate was discarded, and no other verb resumes it -- "
-                 "'apogee train cycle run' runs the next pass\n";
+                 "'" +
+                     harness::printed_program() + " train cycle run' runs the next pass\n";
 }
 
 /// A run's outcome as its verb prints it -- with `config`, where its resume
@@ -1855,8 +1858,9 @@ StudentResolution resolve_student(const harness::Config& config,
                 "'" + std::string{name} + "' is a backend entry (" +
                 std::string{backend != nullptr ? harness::to_string(backend->type) : "?"} +
                 "), not a snapshot: a backend runs a GGUF, and only full-precision SafeTensors "
-                "snapshots are trainable. Pull one with 'apogee models pull <owner>/<repo> "
-                "--safetensors' and name it";
+                "snapshots are trainable. Pull one with '" +
+                harness::printed_program() +
+                " models pull <owner>/<repo> --safetensors' and name it";
             return resolution;
         }
     }
@@ -1874,7 +1878,9 @@ StudentResolution resolve_student(const harness::Config& config,
         } else {
             resolution.error = choice.error +
                                " -- only full-precision SafeTensors weights are trainable; pull "
-                               "them with 'apogee models pull <owner>/<repo> --safetensors'";
+                               "them with '" +
+                               harness::printed_program() +
+                               " models pull <owner>/<repo> --safetensors'";
         }
         return resolution;
     }
@@ -1906,8 +1912,8 @@ std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
             return store.path_for(name_or_path);
         }
     }
-    error = "no dataset named '" + std::string{name_or_path} +
-            "' and no such file -- 'apogee datasets list' shows the datasets";
+    error = "no dataset named '" + std::string{name_or_path} + "' and no such file -- '" +
+            harness::printed_program() + " datasets list' shows the datasets";
     return {};
 }
 
@@ -2044,7 +2050,8 @@ std::string train_status_text(const RootContext& context) {
         lock_said = true;
     } else if (config.training.cycle.configured()) {
         out << "Cycle: configured (pipeline '" << config.training.cycle.pipeline << "' -> "
-            << config.training.cycle.backend << "), no runs yet ('apogee train cycle run')\n";
+            << config.training.cycle.backend
+            << "), no runs yet ('" + harness::printed_program() + " train cycle run')\n";
     } else {
         out << "Cycle: not configured (training.cycle)\n";
     }
@@ -2057,7 +2064,8 @@ std::string train_status_text(const RootContext& context) {
         out << "Pipeline: " << active->id << " RUNNING (" << active->passed << "/" << active->stages
             << " stage(s) passed)\n";
     } else if (pipelines.empty()) {
-        out << "Pipeline: none yet ('apogee train pipeline run --pipeline <spec>')\n";
+        out << "Pipeline: none yet ('" + harness::printed_program() +
+                   " train pipeline run --pipeline <spec>')\n";
     } else {
         // Not the active one, so a `running` latest is a run no live process
         // holds (57g): stopped without saying so.
@@ -2076,7 +2084,8 @@ std::string train_status_text(const RootContext& context) {
         }
     }
     if (runs.empty()) {
-        out << "Runs: none yet ('apogee train run <snapshot> --dataset <name>')\n";
+        out << "Runs: none yet ('" + harness::printed_program() +
+                   " train run <snapshot> --dataset <name>')\n";
     } else {
         const std::size_t shown = std::min<std::size_t>(runs.size(), 5);
         out << "Runs: " << runs.size() << " (" << running << " running); recent " << shown << ":\n";
@@ -2149,10 +2158,10 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
         platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
     if (!interactive) {
         // Said on stderr and, when the run streams, as its `error` (M29).
-        const std::string refused =
-            "the Python environment has not been created yet. Run 'apogee train setup' first (it "
-            "creates " +
-            env.dir().string() + ", never touching the system Python)";
+        const std::string refused = "the Python environment has not been created yet. Run '" +
+                                    harness::printed_program() +
+                                    " train setup' first (it creates " + env.dir().string() +
+                                    ", never touching the system Python)";
         std::cerr << "apogee " << purpose << ": " << refused << "\n";
         tell_job_failure(refused);
         throw CLI::RuntimeError(kUserError);
@@ -2163,7 +2172,7 @@ training::PythonEnv require_python_env(const harness::Config& config, std::strin
     std::string answer;
     std::getline(std::cin, answer);
     if (answer != "y" && answer != "Y" && answer != "yes") {
-        fail_user("not created. Run 'apogee train setup' when ready");
+        fail_user("not created. Run '" + harness::printed_program() + " train setup' when ready");
     }
     const training::PythonChoice choice =
         training::choose_base_python(config.training.python, host_sets(training::detect_host()), {},
@@ -2240,8 +2249,8 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
                 platform::is_terminal(platform::StandardStream::In) && !stdin_is_piped();
             if (!interactive) {
                 fail_user("the environment at " + env.dir().string() +
-                          " is replaced only on your word -- rerun with --yes: apogee train "
-                          "setup --rebuild --yes");
+                          " is replaced only on your word -- rerun with --yes: " +
+                          harness::printed_program() + " train setup --rebuild --yes");
             }
             std::cerr << "Rebuild " << env.dir().string() << python_note(before.base_version)
                       << " on " << choice.path.string() << python_note(choice.version)
@@ -2295,11 +2304,16 @@ void run_train_setup(const harness::Config& config, const SetupRequest& request)
     std::cout << "\npython env: " << describe_status(env.status()) << "\n";
     if (sets.empty()) {
         std::cout << "\nNothing installed yet. Add a requirement set when a command needs it:\n"
-                  << "  apogee train setup --with prepare     # Parquet in 'datasets prepare'\n"
-                  << "  apogee train setup --trainer auto     # the trainer stack for this host\n"
-                  << "  apogee train setup --with convert     # the GGUF converter, for promote\n"
-                  << "  apogee train setup --with mlx-vlm     # images, for an mlx vision model\n"
-                  << "  apogee train setup --with video       # torch and diffusers, for video\n";
+                  << "  " + harness::printed_program() +
+                         " train setup --with prepare     # Parquet in 'datasets prepare'\n"
+                  << "  " + harness::printed_program() +
+                         " train setup --trainer auto     # the trainer stack for this host\n"
+                  << "  " + harness::printed_program() +
+                         " train setup --with convert     # the GGUF converter, for promote\n"
+                  << "  " + harness::printed_program() +
+                         " train setup --with mlx-vlm     # images, for an mlx vision model\n"
+                  << "  " + harness::printed_program() +
+                         " train setup --with video       # torch and diffusers, for video\n";
     }
 }
 
@@ -3234,8 +3248,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                 fail_user("the pipeline run is unreadable: " + unread);
             }
             if (!existing.has_value()) {
-                fail_user("no pipeline run '" + *resume_id +
-                          "' ('apogee train pipeline status' lists them)");
+                fail_user("no pipeline run '" + *resume_id + "' ('" + harness::printed_program() +
+                          " train pipeline status' lists them)");
             }
             // What no spec changes, before one is looked for (57h): a live
             // holder, a complete run, a cycle pass -- whose own spec would
@@ -3303,8 +3317,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         if (pipe_status_id->empty()) {
             const std::vector<training::PipelineSummary> pipelines = store.list_pipelines();
             if (pipelines.empty()) {
-                std::cout << "no pipeline runs yet ('apogee train pipeline run --pipeline "
-                             "<spec>')\n";
+                std::cout << "no pipeline runs yet ('" + harness::printed_program() +
+                                 " train pipeline run --pipeline <spec>')\n";
                 return;
             }
             std::cout << "  " << pad("PIPELINE", 30) << pad("SPEC", 16) << pad("STATUS", 10)
@@ -3351,7 +3365,9 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (config.training.pipelines.empty()) {
             std::cout << "no named pipelines -- add one under training.pipelines, or run a spec "
-                         "file with 'apogee train pipeline run --pipeline <file>'\n";
+                         "file with '" +
+                             harness::printed_program() +
+                             " train pipeline run --pipeline <file>'\n";
             return;
         }
         std::size_t width = 4;
@@ -3448,7 +3464,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             std::cerr << "[regime] skipped: " << problem << "\n";
         }
         if (book.regimes.empty()) {
-            std::cout << "no regimes -- 'apogee check --fix' seeds the shipped ones\n";
+            std::cout << "no regimes -- '" + harness::printed_program() +
+                             " check --fix' seeds the shipped ones\n";
             return;
         }
         std::size_t width = 4;
@@ -3758,7 +3775,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                     "training.cycle is not configured: it needs 'pipeline' (a training.pipelines "
                     "entry or a spec file), 'backend' (where a passing cycle promotes) and at "
                     "least one entry under 'sources' -- see the training block in the starter "
-                    "config (apogee config init)");
+                    "config (" +
+                    harness::printed_program() + " config init)");
             }
             const harness::PipelineSpec spec = resolve_pipeline_spec(config, settings.pipeline);
             // The datasets are the merged sources; only the suites are resolved.
@@ -3924,8 +3942,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                           << "\n  the candidate was discarded; nothing reached inference\n";
                 if (outcome.halted_now) {
                     std::cout << "  " << outcome.history.halt_reason
-                              << "\n  the loop is halted: fix the data or the suite, then 'apogee "
-                                 "train cycle resume'\n";
+                              << "\n  the loop is halted: fix the data or the suite, then '" +
+                                     harness::printed_program() + " train cycle resume'\n";
                 }
                 throw CLI::RuntimeError(kBackendError);
             }
@@ -3954,7 +3972,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                 fail_user("the cycle history is unreadable: " + error);
             }
             if (!document.has_value()) {
-                fail_user("no cycle history yet ('apogee train cycle run' writes it)");
+                fail_user("no cycle history yet ('" + harness::printed_program() +
+                          " train cycle run' writes it)");
             }
             write_document(std::cout, *document);
             return;
@@ -3970,7 +3989,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         if (!training::history_exists(cycle_dir)) {
             std::cout << "no cycle runs yet"
                       << (config.training.cycle.configured()
-                              ? " -- 'apogee train cycle run' performs one gated pass"
+                              ? " -- '" + harness::printed_program() +
+                                    " train cycle run' performs one gated pass"
                               : " -- configure training.cycle first")
                       << "\n";
             // A first pass killed before it wrote any history (57g).
@@ -4007,11 +4027,12 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (already) {
             std::cout << "already halted: " << reason
-                      << "\n  'apogee train cycle resume' clears it\n";
+                      << "\n  '" + harness::printed_program() + " train cycle resume' clears it\n";
             return;
         }
-        std::cout << "cycle halted -- 'apogee train cycle run' refuses until 'apogee train cycle "
-                     "resume'\n";
+        std::cout << "cycle halted -- '" + harness::printed_program() +
+                         " train cycle run' refuses until '" + harness::printed_program() +
+                         " train cycle resume'\n";
         // A pass is said only when one is running (57g); a dead one's lock
         // is said as what it is.
         if (const training::CycleLockState lock = training::cycle_lock_state(cycle_dir);

@@ -10,6 +10,7 @@
 #include "agentloop/retriever.h"
 #include "contracts/collection_name.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "tools/args.h"
 
@@ -206,7 +207,8 @@ void register_rag_tools(agent::ToolRegistry& registry, const harness::Harness* h
         std::erase_if(names,
                       [](const std::string& name) { return harness::name_leaves_folder(name); });
         if (names.empty()) {
-            return ok("No collections yet. Create one with 'apogee embed ingest <name> <path>'.");
+            return ok("No collections yet. Create one with '" + harness::printed_program() +
+                      " embed ingest <name> <path>'.");
         }
         std::string out;
         for (const std::string& name : names) {

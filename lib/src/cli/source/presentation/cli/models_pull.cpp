@@ -61,10 +61,14 @@ namespace apogee::commands {
 namespace {
 
 /// What installs mlx-video's Wan converter (53k): opt-in, never at install.
-constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-video";
+[[nodiscard]] std::string mlx_video_remedy() {
+    return harness::printed_program() + " train setup --with mlx-video";
+}
 
 /// What installs mlx-audio's converter and its Kokoro (53m): opt-in too.
-constexpr std::string_view kMlxAudioRemedy = "apogee train setup --with mlx-audio";
+[[nodiscard]] std::string mlx_audio_remedy() {
+    return harness::printed_program() + " train setup --with mlx-audio";
+}
 
 /// `apogee config delete-backend <name>`, by the one renderer (CLI-M48): a
 /// hand-written backend `a;b` is deleted as itself, never `a`.
@@ -290,7 +294,7 @@ void print_backend_hint(const std::filesystem::path& model_file,
                             : "\nUse it by adding a backend:\n")
               << "  " << harness::render(add) << "\n";
     if (embedding) {
-        std::cout << "  apogee config set-default-embedding <name>\n";
+        std::cout << "  " + harness::printed_program() + " config set-default-embedding <name>\n";
     }
 }
 
@@ -357,9 +361,8 @@ struct Stranded {
 /// What stops working when `reference` names nothing, said before (55d).
 [[nodiscard]] std::string stranded_warning(const StoreReference& reference) {
     if (reference.backend.empty()) {
-        return reference.where() +
-               " names this, and 'apogee video generate' without --model finds nothing until it "
-               "names another.";
+        return reference.where() + " names this, and '" + harness::printed_program() +
+               " video generate' without --model finds nothing until it names another.";
     }
     if (reference.field == "adapters") {
         return "backend '" + reference.backend + "' applies an adapter from this (" +
@@ -531,8 +534,8 @@ void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem:
         std::cout << "\nNo conversion takes these weights.\n";
         return;
     }
-    std::cout << "\nA full-weight snapshot: trainable with 'apogee train', not runnable -- make "
-                 "a GGUF of it with\n  apogee models convert "
+    std::cout << "\nA full-weight snapshot: trainable with '" + harness::printed_program() +
+                     " train', not runnable -- make a GGUF of it with\n  apogee models convert "
               << repo_id
               << "\nNext time one command pulls, converts and registers it:\n  apogee models "
                  "pull "
@@ -1040,8 +1043,8 @@ SnapshotChoice locate_snapshot(const models::StoreRoots& roots, std::string_view
     const std::optional<models::StoredSnapshot> newest =
         models::newest_snapshot(roots, target.model);
     if (!newest.has_value()) {
-        choice.error = "no SafeTensors weights for " + target.model +
-                       " -- pull them with 'apogee models pull <owner>/<repo> --safetensors'";
+        choice.error = "no SafeTensors weights for " + target.model + " -- pull them with '" +
+                       harness::printed_program() + " models pull <owner>/<repo> --safetensors'";
         return choice;
     }
     choice.path = newest->dir;
@@ -1250,7 +1253,7 @@ MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
                         ? std::string{"mlx-video is not installed in Apogee's Python environment"}
                         : "the set lacks " + missing;
         if (!installed) {
-            offer.remedy = std::string{kMlxVideoRemedy};
+            offer.remedy = mlx_video_remedy();
         }
         return offer;
     }
@@ -1267,7 +1270,7 @@ MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
                 (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
         } else {
             offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
-            offer.remedy = std::string{backends::kMlxVisionRemedy};
+            offer.remedy = backends::mlx_vision_remedy();
         }
         return offer;
     }
@@ -1305,7 +1308,7 @@ MlxOffer installed_mlx_offer(const std::filesystem::path& snapshot) {
                     (offer.type.empty() ? std::string{"model of its type"} : offer.type + " model");
     } else {
         offer.gap = "mlx-vlm is not installed in Apogee's Python environment";
-        offer.remedy = std::string{backends::kMlxVisionRemedy};
+        offer.remedy = backends::mlx_vision_remedy();
     }
     offer.text_only = lm == true || undecided;
     return offer;
@@ -2841,8 +2844,8 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
                          std::string_view format = models::kGgufFormat) {
     std::error_code code;
     if (!std::filesystem::exists(config_path, code)) {
-        fail("there is no config to register into at " + config_path.string() +
-             " -- run 'apogee config init' first");
+        fail("there is no config to register into at " + config_path.string() + " -- run '" +
+             harness::printed_program() + " config init' first");
     }
     harness::Config config;
     try {
@@ -3346,8 +3349,9 @@ void refuse_drafter_misuse(const models::StoreRoots& roots, const std::string& s
         fail(what +
              " -- its MLX build is a drafter, which no backend runs, so --register and "
              "--register-with do not apply: convert it with --mlx alone, then name it as its "
-             "base's mlx backend's draft: apogee config set-backend <that backend> --draft "
-             "<the drafter>");
+             "base's mlx backend's draft: " +
+             harness::printed_program() +
+             " config set-backend <that backend> --draft <the drafter>");
     }
     if (text_only) {
         fail(what +
@@ -3402,7 +3406,8 @@ void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::st
     if (registers) {
         fail(what +
              " -- no backend runs a voice model, so --register and --register-with do not "
-             "apply: convert it with --mlx alone, then speak with it: apogee voice say");
+             "apply: convert it with --mlx alone, then speak with it: " +
+             harness::printed_program() + " voice say");
     }
     if (text_only) {
         fail(what +
@@ -3441,8 +3446,7 @@ void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::st
     if (!installed_mlx_audio()) {
         fail(what + ", and mlx-audio is not installed in Apogee's Python environment (its " +
              std::string{training::kMlxAudioConverter} + ", its Kokoro and the torch its " +
-             "checkpoint is read through, read from their files) -- " +
-             std::string{kMlxAudioRemedy});
+             "checkpoint is read through, read from their files) -- " + mlx_audio_remedy());
     }
     if (runtime.refusal == backends::MlxRefusal::NoEnvironment) {
         fail("--mlx builds '" + name +
@@ -3451,8 +3455,8 @@ void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::st
     const std::filesystem::path script = training::mlx_converter_script();
     std::error_code code;
     if (!std::filesystem::is_regular_file(script, code)) {
-        fail("the MLX converter is missing: " + script.string() +
-             " -- run 'apogee check --fix' to seed it");
+        fail("the MLX converter is missing: " + script.string() + " -- run '" +
+             harness::printed_program() + " check --fix' to seed it");
     }
     const std::filesystem::path package = training::find_site_package(
         host.venv, training::mlx_converter_package(training::MlxConverterKind::MlxAudio));
@@ -3564,7 +3568,7 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
             " -- its MLX build is a drafter mlx-vlm makes, and ";
         if (!installed.installed()) {
             fail(what + "mlx-vlm is not installed in Apogee's Python environment -- " +
-                 std::string{backends::kMlxVisionRemedy});
+                 backends::mlx_vision_remedy());
         }
         if (!backends::mlx_vlm_drafts(installed, head->model_type)) {
             fail(what + "the mlx-vlm in Apogee's Python environment" +
@@ -3589,25 +3593,26 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
         if (route.drafter) {
             // mlx-vlm's set brings mlx-lm with it.
             fail("--mlx builds '" + name + "' through mlx-vlm, as a drafter: " + runtime.reason +
-                 " -- apogee train setup --with mlx-vlm");
+                 " -- " + harness::printed_program() + " train setup --with mlx-vlm");
         }
         if (route.embedding) {
             // mlx-embeddings' set brings mlx-lm with it, through mlx-vlm.
             fail("--mlx builds '" + name + "' through mlx-embeddings, an embedding model built " +
-                 "whole: " + runtime.reason + " -- " + std::string{backends::kMlxEmbeddingsRemedy});
+                 "whole: " + runtime.reason + " -- " + backends::mlx_embeddings_remedy());
         }
         if (vlm) {
             // mlx-vlm's set brings mlx-lm with it.
             fail("--mlx builds '" + name + "' through mlx-vlm, its towers kept (" + towers +
-                 "): " + runtime.reason + " -- apogee train setup --with mlx-vlm");
+                 "): " + runtime.reason + " -- " + harness::printed_program() +
+                 " train setup --with mlx-vlm");
         }
         fail("--mlx runs mlx-lm's converter: " + runtime.message());
     }
     const std::filesystem::path script = training::mlx_converter_script();
     std::error_code code;
     if (!std::filesystem::is_regular_file(script, code)) {
-        fail("the MLX converter is missing: " + script.string() +
-             " -- run 'apogee check --fix' to seed it");
+        fail("the MLX converter is missing: " + script.string() + " -- run '" +
+             harness::printed_program() + " check --fix' to seed it");
     }
     const std::filesystem::path package =
         training::find_site_package(host.venv, training::mlx_converter_package(route.converter));
@@ -3630,8 +3635,8 @@ void convert_to_mlx_command(const models::StoreRoots& roots, const std::string& 
     if (vlm && package.empty()) {
         fail("'" + name + "' declares towers (" + towers +
              "): its MLX build keeps them through mlx-vlm, which is not installed in Apogee's "
-             "Python environment -- apogee train setup --with mlx-vlm" +
-             other_route());
+             "Python environment -- " +
+             harness::printed_program() + " train setup --with mlx-vlm" + other_route());
     }
     // A type this converter builds no model for is refused here, by its own
     // files, rather than in it once Python has started (M21, the user's
@@ -4199,8 +4204,9 @@ void bind_model_mutations(CLI::App& models, const std::filesystem::path& models_
         if (quant_in->empty()) {
             fail(
                 "quantize needs a model, e.g.\n"
-                "  apogee models quantize Qwen/Qwen3-8B --type Q4_K_M\n"
-                "  apogee models quantize --types    (to see the choices)");
+                "  " +
+                harness::printed_program() + " models quantize Qwen/Qwen3-8B --type Q4_K_M\n  " +
+                harness::printed_program() + " models quantize --types    (to see the choices)");
         }
         run_quantize({.roots = store_roots(models_dir, context.config_path),
                       .model = *quant_in,

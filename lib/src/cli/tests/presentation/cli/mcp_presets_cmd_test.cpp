@@ -128,7 +128,7 @@ TEST_CASE("mcp list's empty state names the presets, and --from completes their 
     std::string out;
     std::string err;
     REQUIRE(home.run({"mcp", "list"}, &out, &err) == 0);
-    CHECK(out == std::string{apogee::operations::kNoMcpServers} + "\n");
+    CHECK(out == apogee::operations::no_mcp_servers() + "\n");
     REQUIRE(home.run({"__complete", "mcp", "create", "code", "--from", ""}, &out, &err) == 0);
     CHECK(out == "code-exec\nself\nxcode\n");
     REQUIRE(home.run({"__complete", "mcp", ""}, &out, &err) == 0);

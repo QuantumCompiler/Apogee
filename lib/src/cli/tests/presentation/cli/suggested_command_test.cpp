@@ -6,19 +6,25 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <optional>
 #include <random>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "cli/line_tokens.h"
+#include "cli/registry.h"
+#include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/paths.h"
 #include "embedstore/store.h"
 #include "platform/child_process.h"
+#include "support/channel_guard.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
@@ -452,4 +458,265 @@ TEST_CASE("every word comes back exactly through line_tokens, the Console's tabl
         apogee::harness::shell_word("it's$x", apogee::harness::CommandShell::PowerShell);
     CHECK(rare == "'it''s$x'");
     CHECK(apogee::commands::line_tokens(rare).words == std::vector<std::string>{"its$x"});
+}
+
+// --- CLI-M49: the binary and the root that printed it ----------------------
+//
+// A printed command begins with the build's name and the root flag that
+// chose the run's root, so pasted it acts on the install that printed it --
+// never a release binary over another root.
+
+namespace {
+
+using apogee::harness::Channel;
+
+/// The extractor every home here builds its graphs with: one entity, Fox.
+constexpr std::string_view kExtractorTurns =
+    R"({"turns": [{"text": "{\"entities\": [{\"name\": \"Fox\", \"type\": )"
+    R"(\"system\", \"description\": \"a fox\"}], \"relations\": []}"}]})";
+
+/// A throwaway home directory with `APOGEE_HOME` and `APOGEE_CONFIG` unset,
+/// so the root flags decide -- CliHome's `APOGEE_HOME` would refuse `--dev`
+/// -- and collection `plain` ingested into the release root and the dev
+/// root alike, each with a mock extractor as its default backend.
+struct FlaggedHome {
+    apogee::testing::TempDir home{"m49-home-" + std::to_string(std::random_device{}())};
+    apogee::testing::TempDir scratch{"m49-scratch-" + std::to_string(std::random_device{}())};
+    apogee::testing::EnvUnsetGuard no_override{"APOGEE_HOME"};
+    apogee::testing::EnvUnsetGuard no_config{"APOGEE_CONFIG"};
+    apogee::testing::EnvGuard user_home{"HOME", home.path().string()};
+    apogee::testing::EnvGuard profile{"USERPROFILE", home.path().string()};
+
+    FlaggedHome() {
+        std::ofstream{extractor(), std::ios::binary} << kExtractorTurns;
+        const fs::path docs = scratch.path() / "docs";
+        fs::create_directories(docs);
+        std::ofstream{docs / "a.txt", std::ios::binary} << "Fox runs in the forest.\n";
+        for (const std::vector<std::string>& flag :
+             {std::vector<std::string>{}, std::vector<std::string>{"--dev"}}) {
+            write_config(root(flag.empty() ? ".apogee" : ".apogee-dev"));
+            std::vector<std::string> ingest = flag;
+            ingest.insert(ingest.end(), {"embed", "ingest", "-q", "--retriever", "lexical", "plain",
+                                         docs.string()});
+            std::string out;
+            std::string err;
+            INFO(err);
+            REQUIRE(run(ingest, &out, &err) == 0);
+        }
+    }
+
+    [[nodiscard]] fs::path extractor() const {
+        return scratch.path() / "extractor.json";
+    }
+
+    [[nodiscard]] fs::path root(std::string_view directory) const {
+        return home.path() / directory;
+    }
+
+    /// A config at `<root>/config/config.json` naming the extractor.
+    void write_config(const fs::path& at) const {
+        fs::create_directories(at / "config");
+        const nlohmann::json config{
+            {"models", {{"default", "extractor"}}},
+            {"backends",
+             {{"extractor", {{"type", "mock"}, {"model_path", extractor().string()}}}}}};
+        std::ofstream{at / "config" / "config.json", std::ios::binary} << config.dump(2) << "\n";
+    }
+
+    /// The real command tree over `args`, with no `--config`: the run finds
+    /// its root by the chain, the flag first.
+    int run(const std::vector<std::string>& args, std::string* out, std::string* err) const {
+        const std::ostringstream captured;
+        const std::ostringstream errors;
+        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
+        std::streambuf* old_err = std::cerr.rdbuf(errors.rdbuf());
+        int code = -1;
+        try {
+            apogee::commands::RootCommand command{apogee::commands::default_registry()};
+            std::vector<const char*> argv{"apogee"};
+            for (const std::string& arg : args) {
+                argv.push_back(arg.c_str());
+            }
+            code = command.run(static_cast<int>(argv.size()), argv.data());
+        } catch (...) {
+            std::cout.rdbuf(old_out);
+            std::cerr.rdbuf(old_err);
+            throw;
+        }
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+        *out = captured.str();
+        *err = errors.str();
+        return code;
+    }
+
+    /// `command`, read by /bin/sh, its program word dropped, run here.
+    int paste(const std::string& command, std::vector<std::string>* words, std::string* out,
+              std::string* err) const {
+        *words = argv_of({"/bin/sh"}, command, scratch.path());
+        REQUIRE_FALSE(words->empty());
+        return run(std::vector<std::string>(words->begin() + 1, words->end()), out, err);
+    }
+};
+
+[[nodiscard]] bool built_in(const fs::path& root, const std::string& name) {
+    return apogee::embedstore::Store{root / "embeddings" / (name + ".db")}.graph_stats().built();
+}
+
+/// Every line of `text` begins `prefix`.
+[[nodiscard]] bool every_line_begins(const std::string& text, std::string_view prefix) {
+    std::istringstream lines{text};
+    for (std::string line; std::getline(lines, line);) {
+        if (!line.starts_with(prefix)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// The doors `check` still joins by hand, whose program word comes with
+/// them onto the renderer in CLI-M61 (its sites, not this item's): the set
+/// remedy `setup_remedy` builds from the set's name. CLI-M61 empties this.
+[[nodiscard]] bool moved_by_m61(const std::string& door) {
+    return door.starts_with("apogee train setup --with ") ||
+           door.starts_with("apogee train setup --rebuild --with ");
+}
+
+[[nodiscard]] bool child_shell_here() {
+    return apogee::platform::supports_child_processes() && fs::exists("/bin/sh") &&
+           fs::exists("/usr/bin/env");
+}
+
+}  // namespace
+
+TEST_CASE("a remedy printed under --dev names --dev, and pasted it builds the dev root's graph",
+          "[commands][suggested-command][M49]") {
+    if (!child_shell_here()) {
+        SKIP("no child processes or no /bin/sh here: no shell can read a pasted line");
+    }
+    const FlaggedHome flagged;
+    std::string out;
+    std::string err;
+
+    // The hint on stdout, then the refusal on stderr, each naming --dev.
+    REQUIRE(flagged.run({"--dev", "graph", "stats", "plain"}, &out, &err) == 0);
+    CHECK(out.find("No graph built for \"plain\". Run: apogee --dev graph build plain\n") !=
+          std::string::npos);
+    REQUIRE(flagged.run({"--dev", "graph", "show", "plain", "Fox"}, &out, &err) == 1);
+    // The house voice: one stderr line, `apogee graph: `, as before.
+    CHECK(every_line_begins(err, "apogee graph: "));
+    CHECK(err ==
+          "apogee graph: no graph built for 'plain' -- run: apogee --dev graph build plain\n");
+
+    // Pasted: the dev root's graph is built, the release root's left alone.
+    std::vector<std::string> words;
+    INFO(err);
+    REQUIRE(flagged.paste(after(err, " -- run: "), &words, &out, &err) == 0);
+    CHECK(words == std::vector<std::string>{"apogee", "--dev", "graph", "build", "plain"});
+    CHECK(out.find("Run `apogee --dev graph stats plain` for the graph's shape.") !=
+          std::string::npos);
+    CHECK(built_in(flagged.root(".apogee-dev"), "plain"));
+    CHECK_FALSE(built_in(flagged.root(".apogee"), "plain"));
+    REQUIRE(flagged.run({"--dev", "graph", "stats", "plain"}, &out, &err) == 0);
+    CHECK(out.find("Nodes:") != std::string::npos);
+    REQUIRE(flagged.run({"graph", "stats", "plain"}, &out, &err) == 0);
+    CHECK(out.find("No graph built for \"plain\". Run: apogee graph build plain\n") !=
+          std::string::npos);
+
+    // `version`'s first word stays the product's.
+    REQUIRE(flagged.run({"--dev", "version"}, &out, &err) == 0);
+    CHECK(out.starts_with("apogee "));
+}
+
+TEST_CASE("a remedy printed under --custom names its file, absolute and quoted, and runs there",
+          "[commands][suggested-command][M49]") {
+    if (!child_shell_here()) {
+        SKIP("no child processes or no /bin/sh here: no shell can read a pasted line");
+    }
+    const FlaggedHome flagged;
+    const fs::path custom = flagged.scratch.path() / "a b";
+    flagged.write_config(custom);
+    const std::string file = (custom / "config" / "config.json").lexically_normal().string();
+    std::string out;
+    std::string err;
+    INFO(err);
+    REQUIRE(flagged.run({"--custom", file, "embed", "ingest", "-q", "--retriever", "lexical",
+                         "plain", (flagged.scratch.path() / "docs").string()},
+                        &out, &err) == 0);
+
+    REQUIRE(flagged.run({"--custom", file, "graph", "show", "plain", "Fox"}, &out, &err) == 1);
+    const std::string remedy = after(err, " -- run: ");
+    CHECK(remedy == "apogee --custom \"" + file + "\" graph build plain");
+    std::vector<std::string> words;
+    REQUIRE(flagged.paste(remedy, &words, &out, &err) == 0);
+    CHECK(words == std::vector<std::string>{"apogee", "--custom", file, "graph", "build", "plain"});
+    CHECK(built_in(custom, "plain"));
+    CHECK_FALSE(built_in(flagged.root(".apogee"), "plain"));
+    CHECK_FALSE(built_in(flagged.root(".apogee-dev"), "plain"));
+}
+
+TEST_CASE("a dev or test build names itself in every command it prints, and the voice stays",
+          "[commands][suggested-command][M49]") {
+    for (const Channel channel : apogee::harness::kChannels) {
+        const std::string program{apogee::harness::channel_program(channel)};
+        INFO(program << " build");
+        const apogee::testing::BakedChannelGuard baked{channel};
+        // A YAML config: check's Config row names `config migrate`.
+        const CliHome home{""};
+        const fs::path docs = home.home() / "docs";
+        fs::create_directories(docs);
+        std::ofstream{docs / "a.txt", std::ios::binary} << "Fox runs in the forest.\n";
+        std::string out;
+        std::string err;
+        REQUIRE(
+            home.run({"embed", "ingest", "-q", "--retriever", "lexical", "plain", docs.string()},
+                     &out, &err) == 0);
+
+        // graph show's remedy, after the house voice.
+        REQUIRE(home.run({"graph", "show", "plain", "Fox"}, &out, &err) == 1);
+        CHECK(err == "apogee graph: no graph built for 'plain' -- run: " + program +
+                         " graph build plain\n");
+
+        // A preset's refusal ends with its door, named the same way.
+        REQUIRE(home.run({"mcp", "create", "mine", "--from", "self"}, &out, &err) != 0);
+        CHECK(err.find("(" + program + " mcp presets)") != std::string::npos);
+
+        // check's text and its JSON remedies: an Apogee command begins with
+        // this build's name, and the chmod rows keep `chmod`.
+        const bool modes = apogee::harness::supports_private_modes();
+        if (modes) {
+            fs::permissions(home.home() / "config",
+                            fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                                fs::perms::others_read | fs::perms::others_exec);
+        }
+        (void)home.run({"check", "--no-color"}, &out, &err);
+        CHECK(out.find(program + " config migrate") != std::string::npos);
+        (void)home.run({"check", "--output-format", "json"}, &out, &err);
+        const nlohmann::json rows = nlohmann::json::parse(out).at("rows");
+        bool migrate = false;
+        bool chmod = false;
+        for (const nlohmann::json& row : rows) {
+            const std::string remedy = row.value("remedy", "");
+            if (remedy.empty()) {
+                continue;
+            }
+            INFO("row " << row.at("name") << ": " << remedy);
+            for (const std::string& door : apogee::testing::remedy_doors(remedy)) {
+                if (door.starts_with("apogee") && !moved_by_m61(door)) {
+                    CHECK(door.starts_with(program + " "));
+                }
+            }
+            migrate = migrate || remedy == program + " config migrate";
+            if (remedy.starts_with("chmod")) {
+                chmod = true;
+                CHECK(remedy.ends_with("   (or: " + program + " check --fix)"));
+            }
+        }
+        CHECK(migrate);
+        CHECK(chmod == modes);
+
+        // `version`'s first word stays the product's.
+        REQUIRE(home.run({"version"}, &out, &err) == 0);
+        CHECK(out.starts_with("apogee "));
+    }
 }

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "platform/pid_lock.h"
 
 namespace apogee::training {
@@ -258,13 +259,14 @@ std::string check_circuit_breaker(const CycleHistory& history, int k) {
         return "the cycle is halted: " +
                (history.halt_reason.empty() ? std::string{"'apogee train cycle halt' was run"}
                                             : history.halt_reason) +
-               ". Review the data and the suite, then 'apogee train cycle resume'";
+               ". Review the data and the suite, then '" + harness::printed_program() +
+               " train cycle resume'";
     }
     if (k > 0 && history.consecutive_fails >= k) {
         return "circuit breaker: " + std::to_string(history.consecutive_fails) +
                " consecutive failed cycle(s) (circuit_breaker_k " + std::to_string(k) +
-               "). Review the data source and the eval suite, then 'apogee train cycle "
-               "resume'";
+               "). Review the data source and the eval suite, then '" + harness::printed_program() +
+               " train cycle resume'";
     }
     return {};
 }
@@ -286,8 +288,9 @@ std::string halt_kept_notice(const CycleHistory& history) {
     return "[cycle] halted while this pass ran (" +
            (history.halt_reason.empty() ? std::string{"'apogee train cycle halt' was run"}
                                         : history.halt_reason) +
-           ") -- the halt is kept: 'apogee train cycle run' refuses until 'apogee train cycle "
-           "resume'";
+           ") -- the halt is kept: '" + harness::printed_program() +
+           " train cycle run' refuses until '" + harness::printed_program() +
+           " train cycle resume'";
 }
 
 // --- the sources ----------------------------------------------------------------
@@ -661,10 +664,10 @@ CycleOutcome run_cycle(const CycleRequest& request) {
     // pass, which is how a cycle retries.
     const std::string retried =
         queues.empty()
-            ? std::string{"the candidate is discarded; the next 'apogee train cycle run' takes "
-                          "the same sessions again"}
-            : std::string{"the candidate is discarded; the queue keeps its files for the next "
-                          "'apogee train cycle run'"};
+            ? std::string{"the candidate is discarded; the next '" + harness::printed_program() +
+                          " train cycle run' takes the same sessions again"}
+            : std::string{"the candidate is discarded; the queue keeps its files for the next '" +
+                          harness::printed_program() + " train cycle run'"};
     auto fail = [&](std::string reason) {
         record.gate = std::string{kGateFail};
         record.gate_reason = std::move(reason);
@@ -681,9 +684,9 @@ CycleOutcome run_cycle(const CycleRequest& request) {
         });
         say(kPassFailed, "[cycle] FAILED -- " + history.runs.back().gate_reason + " -- " + retried);
         if (outcome.halted_now) {
-            say(kPassHalted, "[cycle] " + history.halt_reason +
-                                 " -- the loop is halted; 'apogee train cycle "
-                                 "resume' after fixing the data or the suite");
+            say(kPassHalted, "[cycle] " + history.halt_reason + " -- the loop is halted; '" +
+                                 harness::printed_program() +
+                                 " train cycle resume' after fixing the data or the suite");
         }
         outcome.ok = true;
         outcome.record = history.runs.back();

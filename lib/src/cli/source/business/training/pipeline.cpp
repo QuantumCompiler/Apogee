@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 
 namespace apogee::training {
 namespace {
@@ -650,8 +651,8 @@ std::string resume_refusal(const PipelineRunManifest& existing) {
     // the cycle promoted, so its candidate was discarded (57h).
     if (is_cycle_pass(existing.pipeline_run_id)) {
         return "pipeline " + existing.pipeline_run_id +
-               " is a cycle pass, and its candidate was discarded -- 'apogee train cycle run' "
-               "runs the next pass";
+               " is a cycle pass, and its candidate was discarded -- '" +
+               harness::printed_program() + " train cycle run' runs the next pass";
     }
     return {};
 }

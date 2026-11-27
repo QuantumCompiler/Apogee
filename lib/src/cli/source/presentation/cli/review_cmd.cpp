@@ -21,6 +21,7 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "contracts/review_skill.h"
+#include "contracts/suggested_command.h"
 #include "forge/gh_transport.h"
 #include "forge/glab_transport.h"
 #include "harness/harness.h"
@@ -81,7 +82,8 @@ void list_skills(ReadFormat format) {
         std::cerr << "[review] skipped: " << problem << "\n";
     }
     if (book.skills.empty()) {
-        std::cout << "no review skills -- 'apogee check --fix' seeds the shipped ones\n";
+        std::cout << "no review skills -- '" + harness::printed_program() +
+                         " check --fix' seeds the shipped ones\n";
         return;
     }
     std::size_t width = 4;
@@ -256,7 +258,8 @@ void review_mr(const RootContext& context, const MrFlags& flags) {
     }
     const std::string model = harness::resolve_chat_backend(config, flags.model);
     if (model.empty()) {
-        fail("no backend is configured to review with (add one with 'apogee config add-backend')");
+        fail("no backend is configured to review with (add one with '" +
+             harness::printed_program() + " config add-backend')");
     }
     harness::Harness harness{config};
     backends::BuildOptions build_options;
@@ -403,8 +406,8 @@ void list_targets(const RootContext& context, ReadFormat format) {
         return;
     }
     if (config.review_targets.empty()) {
-        std::cout << "no review targets -- add one: apogee review targets add <name> --repo "
-                     "owner/repo\n";
+        std::cout << "no review targets -- add one: " + harness::printed_program() +
+                         " review targets add <name> --repo owner/repo\n";
         return;
     }
     for (const auto& [name, target] : config.review_targets) {
@@ -454,7 +457,7 @@ void add_target(const RootContext& context, const TargetFlags& flags) {
         fail(e.what());
     }
     std::cout << "added review target '" << flags.name << "' to " << path.string() << "\n"
-              << "It is swept by: apogee review sweep"
+              << "It is swept by: " + harness::printed_program() + " review sweep"
               << (flags.post ? "" : " (it posts only under --allow-post: post is not granted)")
               << "\n";
 }
@@ -493,9 +496,8 @@ void review_sweep(const RootContext& context, const SweepFlags& flags) {
         targets.push_back(review::SweepTarget{.name = name, .config = target});
     }
     if (targets.empty()) {
-        fail(
-            "no review targets to sweep -- add one: apogee review targets add <name> --repo "
-            "owner/repo");
+        fail("no review targets to sweep -- add one: " + harness::printed_program() +
+             " review targets add <name> --repo owner/repo");
     }
     // One sweep at a time: a second refuses, saying who holds the lock; one
     // a killed sweep left is taken over.

@@ -179,8 +179,9 @@ struct VideoReadiness {
                                          const std::filesystem::path& pipeline = {},
                                          std::string_view handle = {});
 
-/// The fix every package rung names.
-inline constexpr std::string_view kVideoSetupRemedy = "apogee train setup --with video";
+/// The fix every package rung names: `apogee train setup --with video`,
+/// begun with the build's own words (CLI-M49).
+[[nodiscard]] std::string video_setup_remedy();
 
 /// The LoRA file `given` names (49e), from file facts alone -- Apogee never
 /// reads a LoRA's weights: a `.safetensors` file, or a directory holding
@@ -196,12 +197,13 @@ inline constexpr std::string_view kVideoSetupRemedy = "apogee train setup --with
                                          const std::filesystem::path& model = {},
                                          std::string_view handle = {});
 
-/// The fix the voice package rungs name.
-inline constexpr std::string_view kVoiceSetupRemedy = "apogee train setup --with voice";
+/// The fix the voice package rungs name: `apogee train setup --with voice`.
+[[nodiscard]] std::string voice_setup_remedy();
 
 /// The fix the MLX engine's package rungs name (53l): mlx-video is opt-in
-/// (53k), installed on the person's word alone, never asked about here.
-inline constexpr std::string_view kMlxVideoSetupRemedy = "apogee train setup --with mlx-video";
+/// (53k), installed on the person's word alone, never asked about here:
+/// `apogee train setup --with mlx-video`.
+[[nodiscard]] std::string mlx_video_setup_remedy();
 
 /// The target MLX runs on.
 inline constexpr std::string_view kVideoMlxTarget = "macos-arm64";
@@ -238,7 +240,7 @@ inline constexpr std::string_view kMlxVideoTokenizer = "google/umt5-xxl";
 /// model read whole by 53k's rule (`read_mlx_info`, its kind `video`) and
 /// the T5 tokenizer its source stores (`find_mlx_video_tokenizer`), then the
 /// MLX driver and ffmpeg. No consent is asked: mlx-video is opt-in, and every
-/// package rung names `kMlxVideoSetupRemedy`.
+/// package rung names `mlx_video_setup_remedy()`.
 [[nodiscard]] VideoReadiness probe_video_mlx(const VideoHost& host,
                                              const std::filesystem::path& dir = {},
                                              std::string_view handle = {});
@@ -250,8 +252,9 @@ inline constexpr std::string_view kMlxVideoTokenizer = "google/umt5-xxl";
                                                 std::string_view handle = {});
 
 /// The fix the MLX speech engine's package rungs name (53m): mlx-audio is
-/// opt-in, installed on the person's word alone, never asked about here.
-inline constexpr std::string_view kMlxAudioSetupRemedy = "apogee train setup --with mlx-audio";
+/// opt-in, installed on the person's word alone, never asked about here:
+/// `apogee train setup --with mlx-audio`.
+[[nodiscard]] std::string mlx_audio_setup_remedy();
 
 /// The MLX speech engine's ladder (53m), in order: Apple silicon, the
 /// environment, mlx-audio's Kokoro with the misaki it reads text through
@@ -259,7 +262,7 @@ inline constexpr std::string_view kMlxAudioSetupRemedy = "apogee train setup --w
 /// MLX voice model read whole by its kind's rule (`read_mlx_info`, its kind
 /// `voice`), then the MLX speech driver. No ffmpeg, as on PyTorch, and no
 /// consent asked: mlx-audio is opt-in, and every package rung names
-/// `kMlxAudioSetupRemedy`.
+/// `mlx_audio_setup_remedy()`.
 [[nodiscard]] VideoReadiness probe_voice_mlx(const VideoHost& host,
                                              const std::filesystem::path& model = {},
                                              std::string_view handle = {});

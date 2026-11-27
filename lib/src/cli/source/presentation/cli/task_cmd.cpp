@@ -34,6 +34,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "contracts/utf8.h"
 #include "harness/harness.h"
 #include "harness/roles.h"
@@ -356,7 +357,8 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
     if (chosen.empty()) {
         const std::vector<tasks::Task> all = tasks::list_tasks(root);
         if (all.empty()) {
-            throw std::runtime_error{"no tasks yet -- 'apogee task run \"<goal>\"' starts one"};
+            throw std::runtime_error{"no tasks yet -- '" + harness::printed_program() +
+                                     " task run \"<goal>\"' starts one"};
         }
         return all.front();
     }
@@ -459,7 +461,7 @@ void print_status(std::ostream& out, const tasks::Task& task, const tasks::TaskV
     if (entry == nullptr) {
         fail_user("no recipe named '" + flags.recipe + "'" +
                   (book.recipes.empty() ? std::string{} : " (there are: " + book.names() + ")") +
-                  " -- 'apogee task recipes' lists them");
+                  " -- '" + harness::printed_program() + " task recipes' lists them");
     }
     const tasks::Recipe& recipe = entry->recipe;
     std::string error;
@@ -557,8 +559,8 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
         policy = what.existing->policy;
     } else {
         if (flags.goal.empty()) {
-            fail_user(
-                "a task needs a goal: apogee task run \"<goal>\", or a recipe's: --recipe <name>");
+            fail_user("a task needs a goal: " + harness::printed_program() +
+                      " task run \"<goal>\", or a recipe's: --recipe <name>");
         }
         for (const std::string& text : flags.require) {
             if (text.empty()) {
@@ -1098,7 +1100,8 @@ void list_recipes(const TaskFlags& flags) {
         std::cerr << "[recipe] skipped: " << problem << "\n";
     }
     if (book.recipes.empty()) {
-        std::cout << "no recipes -- 'apogee check --fix' seeds the shipped ones\n";
+        std::cout << "no recipes -- '" + harness::printed_program() +
+                         " check --fix' seeds the shipped ones\n";
         return;
     }
     std::size_t width = 4;
@@ -1405,7 +1408,8 @@ void TaskCommand::bind(CLI::App& root, const RootContext& context) {
             return;
         }
         if (listed.total == 0) {
-            std::cout << "no tasks yet -- 'apogee task run \"<goal>\"' starts one\n";
+            std::cout << "no tasks yet -- '" + harness::printed_program() +
+                             " task run \"<goal>\"' starts one\n";
             return;
         }
         for (const tasks::TaskSummary& row : listed.shown) {

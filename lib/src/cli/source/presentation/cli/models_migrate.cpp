@@ -16,6 +16,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "models/migrate.h"
 #include "modelstore/gguf_inspect.h"
@@ -394,7 +395,8 @@ void apply_plan(const Plan& plan, const std::filesystem::path& config_path) {
     if (!repaired) {
         fail(
             "every model moved, but a damaged snapshot could not be repaired -- re-run "
-            "'apogee models repair' on it when the network is back");
+            "'" +
+            harness::printed_program() + " models repair' on it when the network is back");
     }
 }
 

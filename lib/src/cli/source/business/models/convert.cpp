@@ -8,6 +8,7 @@
 #include <optional>
 #include <system_error>
 
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
 #include "modelstore/voice_info.h"
@@ -114,8 +115,8 @@ std::string conversion_refusal(const std::filesystem::path& snapshot,
     if (!is_snapshot_dir(snapshot)) {
         return snapshot.string() +
                " is not a SafeTensors snapshot (a directory holding config.json and at least one "
-               "*.safetensors file). Pull one with 'apogee models pull <owner>/<repo> "
-               "--safetensors'";
+               "*.safetensors file). Pull one with '" +
+               harness::printed_program() + " models pull <owner>/<repo> --safetensors'";
     }
     if (std::string damaged = damaged_snapshot_error(snapshot); !damaged.empty()) {
         return damaged;
@@ -216,8 +217,8 @@ std::string mlx_conversion_refusal(const std::filesystem::path& snapshot,
     if (!is_snapshot_dir(snapshot)) {
         return snapshot.string() +
                " is not a SafeTensors snapshot (a directory holding config.json and at least one "
-               "*.safetensors file). Pull one with 'apogee models pull <owner>/<repo> "
-               "--safetensors'";
+               "*.safetensors file). Pull one with '" +
+               harness::printed_program() + " models pull <owner>/<repo> --safetensors'";
     }
     if (std::string damaged = damaged_snapshot_error(snapshot); !damaged.empty()) {
         return damaged;

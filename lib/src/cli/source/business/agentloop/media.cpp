@@ -15,6 +15,7 @@
 
 #include "contracts/errors.h"
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "harness/roles.h"
 #include "platform/ffmpeg.h"
 
@@ -412,7 +413,8 @@ struct Transcript {
     } else if (info->video) {
         out.notes.push_back(name +
                             ": its frames were not described -- no model here reads images; set "
-                            "one with 'apogee config set-default-vision'");
+                            "one with '" +
+                            harness::printed_program() + " config set-default-vision'");
     }
 
     // What was said.
@@ -427,7 +429,8 @@ struct Transcript {
     } else if (info->audio) {
         out.notes.push_back(name +
                             ": its sound was not transcribed -- no model here hears audio; set "
-                            "one with 'apogee config set-default-transcription'");
+                            "one with '" +
+                            harness::printed_program() + " config set-default-transcription'");
     }
 
     if (screens.empty() && said.empty()) {

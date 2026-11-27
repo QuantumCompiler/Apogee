@@ -14,7 +14,9 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/paths.h"
 #include "platform/child_process.h"
+#include "support/channel_guard.h"
 #include "support/env_guard.h"
 
 /// CLI-M48: one renderer of a command a person copies. Each word is read
@@ -246,6 +248,56 @@ TEST_CASE("a command keeps today's order, and moves a dash-led operand past --",
     CHECK(render_all({SuggestedCommand{.verbs = {"train", "eval"}, .parts = {operand("r1")}},
                       SuggestedCommand{.verbs = {"train", "promote"}, .parts = {operand("r1")}}},
                      " && ") == "apogee train eval r1 && apogee train promote r1");
+}
+
+TEST_CASE("a command names the build that printed it, and the root flag in force",
+          "[contracts][suggested-command][M49]") {
+    using apogee::harness::Channel;
+    using apogee::harness::RootFlag;
+    using apogee::harness::RootFlagScope;
+    const auto build = [] {
+        return render(SuggestedCommand{.verbs = {"graph", "build"}, .parts = {operand("-x")}},
+                      CommandShell::Posix);
+    };
+    const auto chmod = [] {
+        return render(
+            SuggestedCommand{.program = "chmod", .verbs = {"700"}, .parts = {operand("/h")}},
+            CommandShell::Posix);
+    };
+    // A release build with no flag: today's bytes.
+    CHECK(build() == "apogee graph build -- -x");
+    {
+        const apogee::testing::BakedChannelGuard dev{Channel::Dev};
+        CHECK(build() == "apogee-dev graph build -- -x");
+        CHECK(chmod() == "chmod 700 /h");
+    }
+    {
+        const apogee::testing::BakedChannelGuard test{Channel::Test};
+        CHECK(build() == "apogee-test graph build -- -x");
+        CHECK(chmod() == "chmod 700 /h");
+    }
+    {
+        const RootFlagScope flag{RootFlag{.channel = Channel::Dev, .custom_config = {}}};
+        CHECK(build() == "apogee --dev graph build -- -x");
+        CHECK(chmod() == "chmod 700 /h");
+        // A literal command starts with the same words.
+        CHECK(apogee::harness::printed_program(CommandShell::Posix) == "apogee --dev");
+    }
+    {
+        // `--custom`'s file is one word, quoted by the rule like any other.
+        const apogee::testing::TempDir folder{"suggested-custom-" +
+                                              std::to_string(std::random_device{}())};
+        const std::filesystem::path file = folder.path() / "a b" / "config" / "config.json";
+        const RootFlagScope flag{RootFlag{.channel = std::nullopt, .custom_config = file}};
+        CHECK(build() ==
+              "apogee --custom \"" + file.lexically_normal().string() + "\" graph build -- -x");
+        CHECK(chmod() == "chmod 700 /h");
+    }
+    // After each case, the channel and the flag are the ones before it.
+    CHECK(apogee::harness::baked_channel() == Channel::Release);
+    CHECK_FALSE(apogee::harness::root_flag().has_value());
+    CHECK(build() == "apogee graph build -- -x");
+    CHECK(apogee::harness::printed_program(CommandShell::Posix) == "apogee");
 }
 
 TEST_CASE("PowerShell's rendering quotes a comma and a leading @, and doubles a single quote",
