@@ -9,7 +9,7 @@
 | **Component** | Tab completion › the four stubs (`completions/_apogee`, `apogee.bash`, `apogee.fish`, `apogee.ps1`) |
 | **Labels** | `completion` `bash` `zsh` `fish` `powershell` `quoting` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M37](powershell-completes-the-word-at-the-cursor.md), [M41](bash-3-2-completes-every-word.md) |
+| **Blocked by** | [M41](bash-3-2-completes-every-word.md) |
 | **Blocks** | — |
 | **Reporter** | CLI-M37's probes (2026-11-22), then a sandboxed investigation and a skeptic's re-run the same day |
 | **Created** | 2026-11-22 |
@@ -123,7 +123,7 @@ Paths under `lib/src/cli/`.
 | `completions/_apogee` | `:10`: send `"${(@Q)words[2,CURRENT-1]}"` plus the current word `${(Q)${:-$q$PREFIX$SUFFIX${q#\$}}}`, with `q=$compstate[quote]`. Rewrapping is needed because `(Q)` leaves an unbalanced `'cl` as it is. The current word stays whole (`PREFIX` and `SUFFIX`), as today. `compadd -- $lines` stays, with no `-Q`. A comment says why: compsys' words are the line's syntax, and `PREFIX` and `compstate` hold the value. |
 | `completions/apogee.bash` | An eval-free `__apogee_words` tokenizer over `COMP_LINE[0:COMP_POINT]`, in place of `read -r -a` (`:15-19`). Unquoted blanks split words; `'…'` is literal; `"…"` unescapes `\"`, `\\`, `\$` and `` \` ``; a backslash outside quotes takes the next character; the last word is the one under the cursor (empty after a blank), and its open quote is recorded. `$'…'` opens a quote that ends at `'`, honouring `\'` and `\\`, with other escapes kept. Words are built by appending, never by a quoted slice. Each candidate is quoted for where it lands: inside `'`, `'` becomes `'\''`; inside `"`, `\`, `"`, `$` and `` ` `` are escaped; bare, `printf -v c %q` only when it holds a character outside `[A-Za-z0-9._/:=,@%+-]` (`%q` escapes `,`, which `vision,utility` must keep). The `:` trim (`:43-46`) removes from each candidate what the typed word holds before readline's `$2`, keyed on `$2`, never on the quote state. |
 | `completions/apogee.fish` | `:6`: the current token unescaped (`commandline -ot`, with `""` for a fresh word), in the `__complete` call and in the `:files` branch (`:17`). `commandline -opc` stays for the context. Candidates stay raw, since fish quotes them on insertion. If `-ot` fails on fish 3.x or 4.x, use `commandline -ct \| string unescape` with the closing quote appended first. |
-| `completions/apogee.ps1` | On CLI-M37's element walk: each element sends `.Value` when it is a `StringConstantExpressionAst` or an `ExpandableStringExpressionAst` (no variables replaced, in the 5.1 and 7.x SDKs), else `Extent.Text`. The element at the cursor, after M37's cut, drops an opening `'` or `"` and undoubles `''`. CompletionText is `'…'` with `'` doubled when the candidate holds whitespace or `` ` $ & ; , ( ) { } @ # \| < > ' " ``, or when the typed word opened a quote. ListItemText stays the bare name. |
+| `completions/apogee.ps1` | On CLI-M37's element walk: each element sends `.Value` when it is a `StringConstantExpressionAst` or an `ExpandableStringExpressionAst` (no variables replaced, in the 5.1 and 7.x SDKs), else `Extent.Text`. The element at the cursor, after M37's cut, drops an opening `'` or `"` and undoubles `''`. M37's comma trim skips that element when it is a string, which PowerShell replaces whole; the guard stays, and M37's `quoted` row (`'vision,ut'`, answered `'vision,utility`) changes with this contract. CompletionText is `'…'` with `'` doubled when the candidate holds whitespace or `` ` $ & ; , ( ) { } @ # \| < > ' " ``, or when the typed word opened a quote. ListItemText stays the bare name. |
 | `tests/scripts/sh/shell_completion_check.sh` | A real-line-editor section (see Testing). The zsh stand-in (`:152-171`) gains `PREFIX=$words[CURRENT] SUFFIX=` and `typeset -A compstate`, and each partial-word row also checks that the partial was honoured (`local` absent), not only that the needle is present. The fish section gains the quoted rows. |
 | `tests/presentation/cli/lifecycle_test.cpp` | CLI-M37's `pwsh`-gated `TabExpansion2` case gains the quoted rows. With the fake `apogee` answering `my notes`, the CompletionText is `'my notes'`, and with `it's` it is `'it''s'`. A table case runs one list of closed lines through `line_tokens` and through the bash tokenizer (sourced in bash) and compares the words. It SKIPs where no bash is found or no child can start. |
 
@@ -184,6 +184,7 @@ The bug becomes a quoted-line table, run through the real line editors so the ar
 | 2026-11-22 | Specced from CLI-M37's probes, a sandboxed investigation and a skeptic's re-run (Evidence). Placed in **Maintenance** as M42. | the spec |
 | 2026-11-22 | **The fix lives in the stubs, and the protocol stays literal.** Only a stub knows its shell's grammar. The binary's `line_tokens` refuses an open quote, and a new line-mode argument would break older binaries (ADR 0006). | the spec |
 | 2026-11-22 | **Gated on CLI-M41 and CLI-M37.** M41 rewrites bash's `:8` and `:26`, and this item's bash tokenizer builds on them and must pass M41's `/bin/bash` lane. M37 rewrites PowerShell's element loop and builds the `pwsh` harness this item extends. | the spec |
+| 2026-11-27 | **CLI-M37 shipped**, so this item waits on CLI-M41 alone. Its walk records the element at the cursor (`$typing`), and its comma trim skips a string element, which PowerShell replaces whole: this item keeps that guard when it strips the quote. Its `[powershell]` case in `lifecycle_test.cpp` is the harness this item extends. | CLI-M37's ship |
 | 2026-11-22 | **The bash `:` trim is keyed on readline's `$2`**, after the skeptic measured that a quote-keyed trim destroys `llama3.2\:` (Evidence 5). | the spec |
 
 ## Out of scope
@@ -191,11 +192,11 @@ The bug becomes a quoted-line table, run through the real line editors so the ar
 - **Offering chat names with a space** (`complete_sources.cpp:401-402`). That is a follow-up once all four stubs quote. Until then, a spaced name would still break in any stub not yet fixed.
 - **The half-made spaced collection.** `embed ingest "my notes" <file>` writes and offers `embeddings/my notes.db`, refuses to register `my notes` in the config, and exits 0: [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), with the read side's rule in [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md).
 - **macOS bash 3.2's one-word argv**: [CLI-M41](bash-3-2-completes-every-word.md).
-- **PowerShell's cursor**: [CLI-M37](powershell-completes-the-word-at-the-cursor.md).
+- **PowerShell's cursor**: [CLI-M37](../../../assistant/cli/MILESTONES.md#2026-11-27--powershell-completes-the-word-at-the-cursor-maintenance-item-m37-a-tab-completes-the-word-at-the-cursor-on-every-powershell), shipped 2026-11-27.
 
 ## Links
 
-- **Blocked by:** [CLI-M37](powershell-completes-the-word-at-the-cursor.md), [CLI-M41](bash-3-2-completes-every-word.md) · **Blocks:** —
+- **Blocked by:** [CLI-M41](bash-3-2-completes-every-word.md) · **Blocks:** —
 - **Relates to:**
   - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its rule that "the line is read up to the cursor" gains "and read as the shell reads it". It does not depend on this item.
   - [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md): `delete-allowed-host` offers entries as written, and this item's bash quoting is what makes inserting `*.example.com` or a raw URL safe there (zsh already is).

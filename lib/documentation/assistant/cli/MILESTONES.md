@@ -4172,6 +4172,52 @@ The user's four Assistant snapshots (12B, 26B, E2B, E4B) are all draft heads, ea
 - **`--deny` and `/deny` leave out a listed tool-shaped host** (`my_host`, `side_door.`) until CLI-M39 makes every listed host deniable. `delete-allowed-host` leaves out a malformed entry until CLI-M40.
 - **The in-chat sources read the session's answers unlocked**, as `/revoke`'s source did before. The shell asks for suggestions on its UI thread while a turn may record an answer, so a lock in `SessionApprovals` would be an item of its own.
 
+### 2026-11-27 — `powershell-completes-the-word-at-the-cursor` (maintenance item M37): a Tab completes the word at the cursor, on every PowerShell
+
+**Why.** CLI-M36's probes (2026-11-22) measured what each stub sends `apogee __complete`, and the PowerShell stub sent the whole line. It had been unchanged since v0.1.0. It ignored `$cursorPosition`, so a Tab moved back into the line completed the line's last word and put the answer at the cursor. On 9 of 10 probed lines it sent a different argv from zsh, and 8 of those got wrong answers: `chat -m ▮ --tools` got chat's flags as `-m`'s value, and `chat -m cl▮ --tools` replaced `cl` with `--tools`. And Windows PowerShell 5.1, which a stock Windows install runs, drops an empty argument to a program, so `apogee models <TAB>` arrived as "still typing `models`" and offered `models` again. The protocol answered every cut argv correctly, so the fix is the stub alone ([ADR 0007](../../adrs/cli/tab-completion.md)'s stubs that know nothing), on the bare protocol of 2026-09-24.
+
+**What was built**
+
+- [x] **The words up to the cursor** (`completions/apogee.ps1`). The stub walks `$commandAst.CommandElements` after the command name. An element starting at or after `$cursorPosition` ends the walk. The one the cursor is in or touches (`EndOffset -ge $cursorPosition`, PowerShell's own token-at-cursor rule) is the word being typed, cut at the cursor; a gap is the empty word. This is what the bash stub sends at `COMP_POINT`, and what zsh sends with a mid-word cursor taken up to the cursor. The cut uses the elements' extents, which share the cursor's offsets, never a `Substring` of a joined string, so `cd x; apogee models ▮` and doubled spaces stay right. Each element still sends its `Extent.Text`, as before.
+- [x] **The empty word survives Legacy passing.** Windows PowerShell 5.1, pwsh 7.0–7.2 (unless 7.2's experimental `PSNativeCommandArgumentPassing` is on) and `$PSNativeCommandArgumentPassing = 'Legacy'` drop `''` on the way to a program. There the stub sends `""`, which the program's argument parser reads as one empty word, by cobra's three-way check. Everywhere else it sends `''`.
+- [x] **A comma list keeps its head.** In a bare word a comma separates array elements, and PowerShell replaces only what follows the last one. So when the word being typed holds a comma, each candidate starting with the typed head up to its last comma is trimmed to the rest: `--consultable vision,ut▮` offers `utility`, and the line reads `vision,utility`. This is `apogee.bash`'s `:` trim, for PowerShell's tokenizer. A string element (quoted, or with an escaped comma) is one token, which PowerShell replaces whole, so its candidates go back as sent. An empty candidate is skipped: `CompletionResult` refuses empty text, and one refusal would drop the whole answer to file names.
+- [x] **The bare protocol, unchanged.** The stub sets no `APOGEE_COMPLETION_PROTOCOL`. Names come back as `CompletionResult` `ParameterValue`s, and an empty answer still leaves PowerShell's path completion. An old binary with the new stub, and the reverse, still work ([ADR 0006](../../adrs/cli/backwards-compatibility.md)).
+- [x] **The stub run for real where pwsh exists** (`tests/presentation/cli/lifecycle_test.cpp`, `[powershell]`). It skips without child processes (the Windows rows) or without `pwsh` on PATH, saying which. The case writes a fake `apogee` (`/bin/sh`, saying each word it was sent as `[word]`, or answering what the case sets in `APOGEE_FAKE_ANSWER`). It dot-sources the real stub into `pwsh -NoProfile -NonInteractive`, its home, caches and .NET diagnostics kept inside the test's folder. Then it Tabs each line through `TabExpansion2`, PowerShell's own completion entry point, and reads each offer's text, its type and the line once the offer is chosen, by PowerShell's own replacement range. It checks:
+  - 14 lines, under Standard and then Legacy passing, each held to the argv the cut must send. They are Evidence 4's five mid-line lines, the cursor touching a flag and touching a word's start, `cd x;`, doubled spaces, a fresh word below the top level and at it, a partial word at the end, and a comma list mid-word and after its comma.
+  - Three answered lines. The comma list mid-word and after its comma each offer `utility` and read `vision,utility` once it is chosen. The quoted `'vision,ut'` offers the answer whole.
+  - An empty answer completing the folder's file.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - PowerShell keeps the bare protocol. A switch to protocol 2 would be its own small item, accepting an older binary that answers bare.
+  - CI's Windows rows do not run the stub under `powershell.exe` 5.1, by the 2026-09-19 and 2026-09-22 decisions. The `pwsh` case under Legacy passing pins the logic, and 5.1 is covered by its documented argument rules.
+  - A cursor inside a word sends the word up to the cursor, as bash does. PowerShell then replaces the whole token.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **The optional pwsh section of `shell_completion_check.sh` was not added.** No host that runs ctest carries pwsh: the dev Mac has none, and CI never runs ctest. It would be shell code nothing runs. The Catch2 case pins the stub wherever a unit-test row has pwsh.
+  - **The stub skips an empty candidate**, since one `CompletionResult` refused would throw away the whole answer.
+  - **The trim strips the head only from a candidate that starts with it, compared ordinally**, as bash's `${COMPREPLY[@]#"$kept"}` does.
+  - **A string is never trimmed at its comma** (from the review). Trimming it would have turned `--consultable 'vision,ut` into `--consultable utility`, which the old stub got right at the end of a line. [CLI-M42](../../backlog/cli/maintenance/stubs-read-the-words-as-the-shell-does.md), which strips the quote after this cut, keeps the guard.
+
+**Verified.**
+- **No PowerShell on this Mac**, and none was installed. The case compiles here and skips, naming why. PowerShell's own source settled the behaviours it rests on (read 2026-11-27, `CompletionAnalysis.cs`, `CompletionCompleters.cs`, `NativeCommandParameterBinder.cs`):
+  - the token at the cursor, and the whole token as the replacement;
+  - the AST search moved to the token before a gap;
+  - the native completer called with `context.CursorPosition.Offset`, its output kept in order;
+  - an empty answer falling back to file names;
+  - a trailing comma reaching the completer with an insertion after it;
+  - Legacy passing dropping `''` and passing `""` through as one empty argument.
+- **The harness, proven against stand-ins.** A scratch `pwsh` on PATH ran a model of PowerShell's tokens over the test's own driver and fake `apogee`.
+  - Modelling the old stub, it failed 23 checks, matching Evidence 4–6: `[chat][-m][--tools][]` for the gap, `[models]` under Legacy, `vision,utility` untrimmed.
+  - Modelling this stub without the string guard, it failed only the quoted row (`--consultable utility`).
+  - Modelling this stub, it passed all 97 assertions.
+- **An independent review** (a reviewer reading PowerShell's source) found the regression the string guard now fixes. It also asked for the after-comma row, the diagnostics switch, `working_directory` over `Set-Location` and the run's error in the failure message. Each went in, and a second pass on that change found no further issues.
+- **No warning:** MinGW g++ 16.2 and Homebrew clang 22, `-fsyntax-only -Wall -Wextra` with the macos-arm64 tree's flags, gave no diagnostic on `lifecycle_test.cpp`. clang-format 22 leaves it as it is.
+- **The gate**, `lib/scripts/cicd.sh --test` on the final code, with nothing else running: exit 0. **4,585 ctest cases**, 100% passed: the run's baseline of 4,575, M36's nine and this item's one. Three were skipped: the `pdftotext` case and the extended-attribute write guard's, as at the baseline, and this item's `[powershell]` case, with no pwsh here. The suite ran in 659 s, with no compiler warning in the log. The macOS app built and passed its 1,400 cases (the result bundle's `totalTestCount`), none failed or skipped.
+
+**Not done:**
+- **The case has not yet run under a real PowerShell.** Its first run is CI's: the Linux rows (`ubuntu-24.04` carries pwsh 7.6) and the macOS row (`macos-latest` carries pwsh), after the user's push. A failure there is the stub's or the harness's to fix in a follow-up. Windows PowerShell 5.1 and pwsh 7.0–7.2 are reviewed by reading only.
+- **Quote characters in every stub** are [CLI-M42](../../backlog/cli/maintenance/stubs-read-the-words-as-the-shell-does.md)'s, now gated on [CLI-M41](../../backlog/cli/maintenance/bash-3-2-completes-every-word.md) alone. Protocol 2 for PowerShell would be its own item.
+
 ## Milestone O — Local multimodal
 
 **Goal.** Make `VisionCapable` tell the truth on the local backend: wire llama.cpp's `mtmd`, add `mmproj_path`, and close the cross-surface guard gap that let one surface accept a picture the other refused.

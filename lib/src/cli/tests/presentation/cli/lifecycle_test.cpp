@@ -2,16 +2,21 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "backends/model_roster.h"
@@ -24,6 +29,7 @@
 #include "contracts/layout.h"
 #include "contracts/paths.h"
 #include "operations/backend_names.h"
+#include "platform/child_process.h"
 #include "platform/platform.h"
 #include "support/channel_guard.h"
 #include "support/env_guard.h"
@@ -1642,4 +1648,260 @@ backends:
     CHECK(apogee::commands::render_completion(
               apogee::commands::complete_words(request, config, commands()), true) ==
           ":values\nclaude\ncodex\nglm\nLlama\nwork\nclaude:\ncodex:\nwork:\n");
+}
+
+namespace {
+
+/// One line typed at a PowerShell prompt, `^` where the cursor is, and the
+/// words the stub must send `apogee __complete` for a Tab there (CLI-M37):
+/// the words before the cursor, then the word under it cut at the cursor --
+/// what the zsh stub sends, the word cut as bash cuts it -- each in brackets,
+/// so an empty word shows as `[]`.
+struct PowerShellLine {
+    std::string_view typed;
+    std::string_view sent;
+};
+
+constexpr std::array kPowerShellLines{
+    // A mid-line Tab completes the word at the cursor, never the line's last.
+    PowerShellLine{.typed = "apogee chat -m ^ --tools", .sent = "[chat][-m][]"},
+    PowerShellLine{.typed = "apogee chat -m cl^ --tools", .sent = "[chat][-m][cl]"},
+    PowerShellLine{.typed = "apogee chat -m cl^audy --tools", .sent = "[chat][-m][cl]"},
+    PowerShellLine{.typed = "apogee models delete org^ --yes", .sent = "[models][delete][org]"},
+    PowerShellLine{.typed = "apogee config add-backend x --type ^ --model m",
+                   .sent = "[config][add-backend][x][--type][]"},
+    // A cursor right after a flag types the flag, and the next word is no value.
+    PowerShellLine{.typed = "apogee chat -m^ --tools", .sent = "[chat][-m]"},
+    // A cursor touching a word's start is a fresh word, as bash sends it.
+    PowerShellLine{.typed = "apogee chat -m ^cl --tools", .sent = "[chat][-m][]"},
+    // Offsets are the elements', so text before the command shifts nothing.
+    PowerShellLine{.typed = "cd x; apogee models ^", .sent = "[models][]"},
+    PowerShellLine{.typed = "apogee models ^", .sent = "[models][]"},
+    PowerShellLine{.typed = "apogee  chat   -m  ^", .sent = "[chat][-m][]"},
+    PowerShellLine{.typed = "apogee ^", .sent = "[]"},
+    PowerShellLine{.typed = "apogee mod^", .sent = "[mod]"},
+    PowerShellLine{.typed = "apogee config add-suite s --consultable vision,ut^",
+                   .sent = "[config][add-suite][s][--consultable][vision,ut]"},
+    PowerShellLine{.typed = "apogee config add-suite s --consultable vision,^",
+                   .sent = "[config][add-suite][s][--consultable][vision,]"},
+};
+
+/// A line the fake `apogee` answers with `answer`, and what PowerShell then
+/// offers and makes of the line once the first offer is chosen.
+struct PowerShellAnswer {
+    std::string_view label;
+    std::string_view typed;
+    std::string_view answer;
+    std::string_view offered;
+    std::string_view chosen;
+};
+
+constexpr std::array kPowerShellAnswers{
+    // A comma list: the protocol answers the whole word, and PowerShell
+    // replaces only what follows the last comma, so the head is trimmed off.
+    PowerShellAnswer{.label = "comma",
+                     .typed = "apogee config add-suite s --consultable vision,ut^",
+                     .answer = "vision,utility",
+                     .offered = "utility",
+                     .chosen = "apogee config add-suite s --consultable vision,utility"},
+    PowerShellAnswer{.label = "after a comma",
+                     .typed = "apogee config add-suite s --consultable vision,^",
+                     .answer = "vision,utility",
+                     .offered = "utility",
+                     .chosen = "apogee config add-suite s --consultable vision,utility"},
+    // A quoted word is one token, which PowerShell replaces whole: no trim.
+    PowerShellAnswer{.label = "quoted",
+                     .typed = "apogee config add-suite s --consultable 'vision,ut'^",
+                     .answer = "'vision,utility",
+                     .offered = "'vision,utility",
+                     .chosen = "apogee config add-suite s --consultable 'vision,utility"},
+};
+
+/// `typed` without its `^`, and the column the `^` marked.
+[[nodiscard]] std::pair<std::string, std::size_t> at_cursor(std::string_view typed) {
+    std::string line{typed};
+    const std::size_t cursor = line.find('^');
+    line.erase(cursor, 1);
+    return {line, cursor};
+}
+
+/// `text` as a PowerShell single-quoted string.
+[[nodiscard]] std::string powershell_literal(std::string_view text) {
+    std::string quoted = "'";
+    for (const char c : text) {
+        quoted += c;
+        if (c == '\'') {
+            quoted += '\'';
+        }
+    }
+    return quoted + "'";
+}
+
+/// What one Tab offered: the texts in order, the first one's type, and the
+/// line once the first is chosen -- PowerShell's own replacement range applied.
+struct TabOffer {
+    std::string texts;
+    std::string type;
+    std::string chosen;
+};
+
+/// The driver's lines, `<label>\t<texts>\t<type>\t<chosen>`, by label.
+[[nodiscard]] std::map<std::string, TabOffer, std::less<>> tab_offers(const std::string& out) {
+    std::map<std::string, TabOffer, std::less<>> offers;
+    std::istringstream lines{out};
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        std::vector<std::string> fields;
+        for (std::size_t start = 0;;) {
+            const std::size_t tab = line.find('\t', start);
+            fields.push_back(line.substr(start, tab - start));
+            if (tab == std::string::npos) {
+                break;
+            }
+            start = tab + 1;
+        }
+        if (fields.size() == 4) {
+            offers[fields[0]] =
+                TabOffer{.texts = fields[1], .type = fields[2], .chosen = fields[3]};
+        }
+    }
+    return offers;
+}
+
+}  // namespace
+
+TEST_CASE("the PowerShell stub completes the word at the cursor, under either argument passing",
+          "[commands][completion][powershell]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("no child processes on this platform");
+    }
+    const std::string pwsh = apogee::platform::find_on_path("pwsh");
+    if (pwsh.empty()) {
+        SKIP("no pwsh on PATH: the PowerShell stub cannot run here");
+    }
+
+    // The stub itself, dot-sourced into `pwsh -NoProfile`, with an `apogee`
+    // that answers by saying the words it was sent -- or, for a case that asks
+    // through APOGEE_FAKE_ANSWER, a candidate of its own, or (`none`) nothing.
+    const apogee::testing::TempDir work{"lifecycle-pwsh-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path bin = work.path() / "bin";
+    std::filesystem::create_directories(bin);
+    const std::filesystem::path fake = bin / "apogee";
+    std::ofstream{fake, std::ios::binary} << R"(#!/bin/sh
+case "${APOGEE_FAKE_ANSWER-}" in
+'') ;;
+none) exit 0 ;;
+*) printf '%s\n' "$APOGEE_FAKE_ANSWER"; exit 0 ;;
+esac
+line=
+for word in "$@"; do line="$line[$word]"; done
+printf '%s\n' "$line"
+)";
+    std::filesystem::permissions(fake, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::add);
+    std::ofstream{work.path() / "attached-note.txt"} << "a file to complete\n";
+    const std::filesystem::path stub =
+        std::filesystem::path{APOGEE_SOURCE_DIR}.parent_path() / "completions" / "apogee.ps1";
+    REQUIRE(std::filesystem::exists(stub));
+
+    // Each Tab through TabExpansion2, PowerShell's own completion entry point,
+    // which applies the stub as a Tab at a prompt does.
+    std::string driver = "$env:PATH = " + powershell_literal(bin.string()) +
+                         " + [System.IO.Path]::PathSeparator + $env:PATH\n. " +
+                         powershell_literal(stub.string()) + "\n" + R"ps(
+function Show([string]$Label, [string]$Line, [int]$Column) {
+    $found = TabExpansion2 -inputScript $Line -cursorColumn $Column
+    $offered = @($found.CompletionMatches | Where-Object { $_.CompletionText })
+    $texts = ($offered | ForEach-Object { $_.CompletionText }) -join '|'
+    $type = ''
+    $chosen = ''
+    if ($offered.Count -gt 0) {
+        $type = [string]$offered[0].ResultType
+        $chosen = $Line.Substring(0, $found.ReplacementIndex) + $offered[0].CompletionText +
+            $Line.Substring($found.ReplacementIndex + $found.ReplacementLength)
+    }
+    [Console]::Out.WriteLine("$Label`t$texts`t$type`t$chosen")
+}
+)ps";
+    // The table twice: Standard passing (pwsh 7.3 and later), then Legacy --
+    // Windows PowerShell 5.1's rules, under which an empty argument is dropped.
+    for (const std::string_view mode : {"Standard", "Legacy"}) {
+        driver += "$global:PSNativeCommandArgumentPassing = '" + std::string{mode} + "'\n";
+        for (std::size_t index = 0; index < kPowerShellLines.size(); ++index) {
+            const auto [line, cursor] = at_cursor(kPowerShellLines[index].typed);
+            driver += "Show '" + std::string{mode} + ":" + std::to_string(index) + "' " +
+                      powershell_literal(line) + " " + std::to_string(cursor) + "\n";
+        }
+    }
+    driver += "$global:PSNativeCommandArgumentPassing = 'Standard'\n";
+    for (const PowerShellAnswer& answered : kPowerShellAnswers) {
+        const auto [line, cursor] = at_cursor(answered.typed);
+        driver += "$env:APOGEE_FAKE_ANSWER = " + powershell_literal(answered.answer) + "\nShow " +
+                  powershell_literal(answered.label) + " " + powershell_literal(line) + " " +
+                  std::to_string(cursor) + "\n";
+    }
+    // The bare protocol: an empty answer leaves the word to PowerShell's own
+    // path completion.
+    driver += "$env:APOGEE_FAKE_ANSWER = 'none'\nShow 'nothing' 'apogee chat --attach ' 21\n";
+    const std::filesystem::path script = work.path() / "driver.ps1";
+    std::ofstream{script, std::ios::binary} << driver;
+
+    // pwsh's caches and module data under the test's own folder, never the
+    // developer's home, and .NET's diagnostics sockets off; no telemetry and
+    // no update check. It starts in the folder, so a path completes from it.
+    apogee::platform::ChildCommand command;
+    command.program = pwsh;
+    command.arguments = {"-NoProfile", "-NonInteractive", "-File", script.string()};
+    command.working_directory = work.path().string();
+    const std::filesystem::path home_dir = work.path() / "home";
+    std::filesystem::create_directories(home_dir);
+    const std::string home = home_dir.string();
+    command.unset_environment = {"HOME",
+                                 "XDG_CACHE_HOME",
+                                 "XDG_CONFIG_HOME",
+                                 "XDG_DATA_HOME",
+                                 "APOGEE_FAKE_ANSWER",
+                                 "DOTNET_EnableDiagnostics",
+                                 "POWERSHELL_TELEMETRY_OPTOUT",
+                                 "POWERSHELL_UPDATECHECK"};
+    command.extra_environment = {{"HOME", home},
+                                 {"XDG_CACHE_HOME", home + "/.cache"},
+                                 {"XDG_CONFIG_HOME", home + "/.config"},
+                                 {"XDG_DATA_HOME", home + "/.local/share"},
+                                 {"DOTNET_EnableDiagnostics", "0"},
+                                 {"POWERSHELL_TELEMETRY_OPTOUT", "1"},
+                                 {"POWERSHELL_UPDATECHECK", "Off"}};
+    const apogee::platform::CapturedRun ran = apogee::platform::run_captured(
+        command, apogee::platform::CapturedLimits{.timeout = std::chrono::minutes{2}});
+    INFO("pwsh's run: " << ran.error);
+    INFO("pwsh's stderr: " << ran.tail);
+    REQUIRE(ran.status == 0);
+    const std::map<std::string, TabOffer, std::less<>> offers = tab_offers(ran.out);
+
+    for (const std::string_view mode : {"Standard", "Legacy"}) {
+        for (std::size_t index = 0; index < kPowerShellLines.size(); ++index) {
+            const PowerShellLine& line = kPowerShellLines[index];
+            INFO(mode << " passing, Tab at the ^ of `" << line.typed << "`");
+            const auto found = offers.find(std::string{mode} + ":" + std::to_string(index));
+            REQUIRE(found != offers.end());
+            CHECK(found->second.texts == "[__complete]" + std::string{line.sent});
+            CHECK(found->second.type == "ParameterValue");
+        }
+    }
+
+    for (const PowerShellAnswer& answered : kPowerShellAnswers) {
+        INFO("Tab at the ^ of `" << answered.typed << "`, answered `" << answered.answer << "`");
+        const auto found = offers.find(answered.label);
+        REQUIRE(found != offers.end());
+        CHECK(found->second.texts == answered.offered);
+        CHECK(found->second.chosen == answered.chosen);
+    }
+
+    const auto nothing = offers.find("nothing");
+    REQUIRE(nothing != offers.end());
+    INFO("offered for an empty answer: " << nothing->second.texts);
+    CHECK(nothing->second.texts.find("attached-note.txt") != std::string::npos);
 }

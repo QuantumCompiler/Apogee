@@ -198,14 +198,14 @@ The bug becomes two fixtures, each failing on today's stub and passing with the 
 ## Out of scope
 
 - **Quote characters and quoted values with spaces**, in every stub: [CLI-M42](stubs-read-the-words-as-the-shell-does.md).
-- **The PowerShell stub's cursor**: [CLI-M37](powershell-completes-the-word-at-the-cursor.md).
+- **The PowerShell stub's cursor**: [CLI-M37](../../../assistant/cli/MILESTONES.md#2026-11-27--powershell-completes-the-word-at-the-cursor-maintenance-item-m37-a-tab-completes-the-word-at-the-cursor-on-every-powershell), shipped 2026-11-27.
 - **Running `cli.shell_completion` in CI.** It needs the built binary, and CI runs the source-level suite. The Catch2 case is the CI lane.
 
 ## Links
 
 - **Blocked by:** — · **Blocks:** [CLI-M42](stubs-read-the-words-as-the-shell-does.md), which rewrites the same lines
 - **Relates to:**
-  - [CLI-M37](powershell-completes-the-word-at-the-cursor.md): its Reference holds up `apogee.bash:15-19` and `:40-46` as the model cut and trim. The cut is right; on 3.2 the slice at `:19` and the trim at `:45` are this bug. M37 shares the fake-`apogee` test harness.
+  - [CLI-M37](../../../assistant/cli/MILESTONES.md#2026-11-27--powershell-completes-the-word-at-the-cursor-maintenance-item-m37-a-tab-completes-the-word-at-the-cursor-on-every-powershell): its Reference held up `apogee.bash:15-19` and `:40-46` as the model cut and trim. The cut is right; on 3.2 the slice at `:19` and the trim at `:45` are this bug. M37's `[powershell]` case in `lifecycle_test.cpp` is the fake-`apogee` harness to share.
   - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its corrected offers reach a 3.2 user only once this ships.
   - ADR 0007, the stubs' rules.
   - The commits that brought each site: 502e45de (v0.1.0), f046bc7b and c5d1a258.
