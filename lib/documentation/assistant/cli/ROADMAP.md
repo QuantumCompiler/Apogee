@@ -2,7 +2,7 @@
 
 How we work: features get discussed in chat, written up here (and in [SPEC.md](SPEC.md)), given their own document in [`backlog/`](../../backlog/cli/README.md) when they're specced, written as a ticket, then an agent takes the backlog item and builds it straight from that document (there is no separate TODO file — the backlog is the queue). When work ships it's recorded in detail in [MILESTONES.md](MILESTONES.md); this file stays high-level — the running board of themes per release, plus what's next.
 
-**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.2.1`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes the version `lib/release/VERSION` names, if it hasn't shipped already (since 2026-09-25; the CLI's own version in `lib/src/cli/CMakeLists.txt` moves only when the CLI changes, and then to the same number). Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
+**Version scheme:** feature releases are `v0.x.0`, patch releases are `v0.x.y`; development happens on a branch named for the release being built (currently `v0.2.2`) and merges into `stable` — **and that merge is the release** (decided 2026-09-22): the pipeline publishes the version `lib/release/VERSION` names, if it hasn't shipped already (since 2026-09-25; the CLI's own version in `lib/src/cli/CMakeLists.txt` moves only when the CLI changes, and then to the same number). Checked boxes are shipped; the detailed write-up of each is in MILESTONES.md.
 
 ---
 
@@ -284,11 +284,7 @@ The release's audit track *(track 55, opened 2026-10-22 from the user-requested 
 - [x] **`train pipeline` and `train cycle` speak JSON** *(55h, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — the GUI's pipeline and cycle screens build on it.
 - [x] **The docs at the release boundary** *(55i, shipped 2026-10-25 — [Milestone AR](MILESTONES.md#milestone-ar--the-audits-cli-findings))* — VERSION and the CLI version to 0.2.0 (without it the merge publishes nothing), ROADMAP, README, CLAUDE and DEVELOPER stating today's facts.
 
----
-
-## In progress
-
-### v0.2.1 — The mod's CLI siblings (track 54), Apogee in Xcode (track 56) and the second bug sweep (track 57)
+### v0.2.1 — The mod's CLI siblings (track 54), Apogee in Xcode (track 56) and the second bug sweep (track 57) *(released 2026-11-26 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1))*
 
 Opened 2026-10-21 from the mod spike: the hidden MCP stdio server (it answers today with 17 read-only tools; the spike's handshake is the measurement) becomes the public `apogee mcp serve` with the status reads served byte-for-byte *(54a)*, and `complete` joins as the first callable tool — opt-in per tool through config, local-and-unmetered providers only, bounded *(54b)*. The consumer is the new third application, the Apogee mod ([`lib/documentation/assistant/mod/`](../mod/CLAUDE.md)). In build order:
 
@@ -330,6 +326,19 @@ The release's second-sweep track *(track 57, opened 2026-10-31, the user's call:
 - [x] **The review fetch stays in bounds** *(57x, shipped 2026-11-14 — [Milestone AT](MILESTONES.md#milestone-at--the-second-sweeps-cli-findings))* — 57o's recorded Not done. `git_diff`'s and `git_log`'s review fetch ran a repository's own remote settings, and a probe made each of a planted `uploadpack`, `ext::`, `core.sshCommand`, `core.gitProxy` and `credential.helper` run. A `remote` given as a path read an outside repository with no approval, and a network URL reached a host the model chose. Now `remote` must be a configured remote; its URL is judged first (a folder inside the root, confined as `repo` is; a network host asked about by website through `fetch_url`'s gate, the user's call reversing Milestone V); the fetch runs by that URL with an explicit refspec, no submodule, redirect or other transport (a redirect the person's own config follows for that URL aside); a repository's own command and rerouting settings refuse it by name -- a header naming another site among them -- the person's own honored and neither their `GIT_CONFIG` nor a long config hiding any; and no git tool fetches a missing object lazily from a promisor remote, whatever the person's own `GIT_NO_LAZY_FETCH` says.
 - [x] **Links in a git folder stay in bounds** *(57y, shipped 2026-11-15 — [Milestone AT](MILESTONES.md#milestone-at--the-second-sweeps-cli-findings))* — 57o's other recorded Not done, found to be a class. 57o's link check names five entries of a git folder and the top of `objects/` and `objects/pack/`. A link anywhere else git reads led the git tools out of the root unasked (probed 2026-11-15). Loose objects gave another repository's commits and files. `BISECT_START` and the rebase state files had `git_status` print an outside file whole. `shallow`, the pseudo-refs and `reftable/` gave a line or an id. The review fetch copied linked objects in as real files. No Apogee file tool makes a link, but an allowed shell or the code server can, and the link outlives the grant; a folder you extract or copy can carry one. The git tools now walk the whole `.git` folder, and every object store its alternates borrow from, except `hooks/`, `lfs/` and `annex/`, which they never read: a `git_status` turn measured about 3 ms more on this checkout and about 33 ms more with 50,000 loose objects. Two review rounds closed what the first walk missed -- a folder that cannot be listed, a path ending in whitespace, a link landing on the git folder itself, a reftable stack naming a table outside -- and a submodule's own hooks still read.
 - [x] **Submodules and the files a repository's config names stay in bounds** *(57z, shipped 2026-11-15 — [Milestone AT](MILESTONES.md#milestone-at--the-second-sweeps-cli-findings))* — the git tools' last two read routes out of the root, from 57y's second review. A submodule's git folder reached through its work tree (an embedded `sub/.git` folder, a `gitdir:` file or a link naming another repository) had `git_diff` print an outside commit id, and a file the repository's own config names had `git_status` print an outside value and `git_show` a line of an outside mailmap (probed 2026-11-15). Each populated submodule is confined as `repo` is before `git_status` and a work-tree `git_diff`, and the repository's own `include.path`, `includeIf`, `mailmap.file`, `core.excludesFile` and `core.attributesFile` are judged like an alternates line; the person's own settings stay theirs. The listing runs only where the index holds a gitlink, and a child process is now reaped within a millisecond of exiting, not 20: a `git_status` turn fell from 227 ms to 83 ms on this checkout, and one with 50 populated submodules costs about 55 ms more than before.
+
+---
+
+## In progress
+
+### v0.2.2 — Claude aware of Apogee (track 58)
+
+Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP server that makes Claude aware of Apogee's local models, retrieval and knowledge graph). The spike drove the shipped `apogee mcp serve` as a host would: 22 read-only tools and an opt-in local `complete` already answer, search and the graph tools with no model; what is missing is awareness. The user's calls: both hosts (the mod's track 2 packages it for Claude Code and the desktop mod), opt-in writes per graph and collection, the next release.
+
+- [ ] **The server introduces itself** *(58a — [backlog](../../backlog/cli/v0.2.2/mcp-serve-introduces-itself.md), gated on 58b)* — `initialize` gains instructions from the person's setup (collections, graphs, offered local models, which tool answers what); today the field is empty and a host sees 22 bare names.
+- [ ] **Graphs and knowledge records served** *(58b — [backlog](../../backlog/cli/v0.2.2/mcp-serve-graphs-and-knowledge.md))* — `apogee graph list` and six reads: Claude could not find a named graph (`list_collections` lists collections only) and could not reach the decision records at all.
+- [ ] **A lighter tool set for coding hosts** *(58c — [backlog](../../backlog/cli/v0.2.2/mcp-serve-coding-host-profile.md))* — `--profile knowledge` drops the 8 file and git tools Claude Code already has.
+- [ ] **Claude can refresh what you list** *(58d — [backlog](../../backlog/cli/v0.2.2/mcp-serve-opt-in-refresh.md))* — a listed code graph's model-free update and a listed collection's re-ingest (local embedder only), recorded sources only.
 
 ---
 
@@ -407,15 +416,6 @@ The standing upkeep queue *(created 2026-10-03, the user's call)* — release-ag
 - [ ] **The models verbs say their notes in the house voice on stderr, and as notices on an open stream** — maintenance item M60 *([`the-models-verbs-say-their-notes-on-stderr.md`](../../backlog/cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md))* — measured 2026-11-26: `models migrate` prints `note: could not open <db>: …` on stdout; ten print sites in pull, convert, quantize, migrate and the register chain do the same. They move onto CLI-M58's writer, which gains its job-stream branch; after M58.
 
 ## Up next
-
-### v0.2.2 — Claude aware of Apogee (track 58)
-
-Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP server that makes Claude aware of Apogee's local models, retrieval and knowledge graph). The spike drove the shipped `apogee mcp serve` as a host would: 22 read-only tools and an opt-in local `complete` already answer, search and the graph tools with no model; what is missing is awareness. The user's calls: both hosts (the mod's track 2 packages it for Claude Code and the desktop mod), opt-in writes per graph and collection, the next release.
-
-- [ ] **The server introduces itself** *(58a — [backlog](../../backlog/cli/v0.2.2/mcp-serve-introduces-itself.md), gated on 58b)* — `initialize` gains instructions from the person's setup (collections, graphs, offered local models, which tool answers what); today the field is empty and a host sees 22 bare names.
-- [ ] **Graphs and knowledge records served** *(58b — [backlog](../../backlog/cli/v0.2.2/mcp-serve-graphs-and-knowledge.md))* — `apogee graph list` and six reads: Claude could not find a named graph (`list_collections` lists collections only) and could not reach the decision records at all.
-- [ ] **A lighter tool set for coding hosts** *(58c — [backlog](../../backlog/cli/v0.2.2/mcp-serve-coding-host-profile.md))* — `--profile knowledge` drops the 8 file and git tools Claude Code already has.
-- [ ] **Claude can refresh what you list** *(58d — [backlog](../../backlog/cli/v0.2.2/mcp-serve-opt-in-refresh.md))* — a listed code graph's model-free update and a listed collection's re-ingest (local embedder only), recorded sources only.
 
 ### v0.2.3 — The harness server (track 59)
 

@@ -69,17 +69,13 @@ Opened 2026-10-22 (the user's call): a thorough bug and feature-disparity audit 
 - [x] **The remaining verbs** *(4k, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — saved-chat compact/info/recall, one provider registered, `server_tools` shown, graph export/dedupe/delete, MCP remove, raw records, capabilities from launch.
 - [x] **Docs and the board catch up** *(4l, shipped 2026-10-26 — [Milestone E](MILESTONES.md#milestone-e--the-audits-gui-findings))* — shipped gaps flipped by probe; ROADMAP, SPEC and CLAUDE stating what shipped.
 
----
-
-## In progress
-
-### v0.2.1 — Track 5, Apogee in Xcode
+### v0.2.1 — Track 5, Apogee in Xcode *(released 2026-11-26 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1))*
 
 Opened 2026-10-31 from that day's Xcode research (the user's call). The capability is the CLI's track 56: `apogee acp`, Apogee as a custom agent in Xcode 26.6 and later over the Agent Client Protocol on stdio, and the setup it prints (the CLI's 56d). The app gives that setup a place, and asks nothing of Xcode itself.
 
 - [x] **Xcode in Settings** *(5a, shipped 2026-11-08 — [Milestone F](MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side))* — `check`'s Xcode rows in the CLI's words; "Let Apogee use Xcode's tools" through the CLI's `xcode` preset; the fields to paste into Xcode's Add an Agent sheet, with Copy; `acp` classified in the parity table as run by an agent host, never from the app. Its gate, the CLI's 56d, shipped 2026-11-01 ([Milestone AS](../cli/MILESTONES.md#milestone-as--apogee-in-xcode)).
 
-### v0.2.1 — Track 6, the second bug sweep's findings
+### v0.2.1 — Track 6, the second bug sweep's findings *(released 2026-11-26 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1))*
 
 Opened 2026-10-31 (the user's call): a second bug sweep over the CLI and GUI — 16 hunters, three skeptics per finding, the critic's leads hunted too; 155 of 162 findings survived (the CLI's track 57 carries the method and the counts). The app's 41 findings and its side of 18 shared ones are ten items; 6g and 6i waited on their CLI siblings (57u; 57g and 57h), all since shipped. They ship into [Milestone G](MILESTONES.md#milestone-g--the-second-sweeps-gui-findings).
 
@@ -94,11 +90,17 @@ Opened 2026-10-31 (the user's call): a second bug sweep over the CLI and GUI —
 - [x] **Training screens follow the CLI's resume and status truth** *(6i, shipped 2026-11-08 — [Milestone G](MILESTONES.md#milestone-g--the-second-sweeps-gui-findings))* — five findings from the second sweep, each a button or a state the CLI does not back, now read from its documents (the CLI's 57g and 57h). A cycle pass's pipeline is never offered Resume, on any binary, and its page says the candidate is the cycle's and that Run one pass on the Cycle tab runs the next; a pass running now says it runs and the cycle judges its candidate, never that it was discarded. `train status`'s `running` is read as the ids the CLI writes, so a run still training that is older than the five newest is listed first, by its id, and opens. A dead pass's `cycle.lock` is said in the CLI's words with its path and Show in Finder, the State reads "stopped, its lock left behind", and Run one pass is held with that reason; an older binary's held cycle adds the CLI's own remedy. Resume names the stage the CLI resumes from (`Resume from stage 3, c; stage 1, a, failed its gate and stays as it is`) and passes `--pipeline <spec>` wherever the document names it, so a `Nightly SFT` entry and a spec-file run resume; it is held, with the console line, while a live process runs the pipeline or nothing finds its spec. An unreadable history says `The cycle history could not be read: <reason>` where the history goes, and Run, Halt and Resume are held on it. An older binary keeps today's ways, minus a cycle pass's resume, and with Resume held, with the console line, where the run's spec name is none of the named pipelines.
 - [x] **An edit's Render says it plans again** *(6j, shipped 2026-11-08 — [Milestone G](MILESTONES.md#milestone-g--the-second-sweeps-gui-findings))* — Compose's Preview the changes → Render looked like a preview and its commit, but the CLI's edit dry run writes nothing (52c, unchanged), so Render runs the command again and its planner plans the edit again. Once a preview is drawn, the sheet now says so beside Render, naming the planner the preview's `plan.backend` names ("Render plans the edit again with planner: what renders can differ from this preview, and the planner is called a second time."); Render's help says it in brief, and a re-roll alone, which calls no planner, says nothing of the kind. A preview stands only while the form makes the command it was planned for: changing the instruction or a re-roll drops it, and the sheet offers Preview the changes again. After a render started beside a drawn preview, the project page says "The render planned again, and its changes differ from the preview" above its own diff when its scenes' sources, change words or narration, or the scenes left out, came out otherwise; seeds are never compared, and a render that matches says nothing extra. Render's command is unchanged, and the preview is kept in memory alone. The design's edit pane draws the line.
 
-### v0.2.1 — Track 11, the app's logo
+### v0.2.1 — Track 11, the app's logo *(released 2026-11-26 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1))*
 
 Opened 2026-11-14 (the user's call): `lib/design/assets/Logo.png` becomes the macOS app's icon and Apogee's official logo. Until then the app showed macOS's generic icon.
 
 - [x] **The Apogee logo is the app's icon and the official logo** *(11a, shipped 2026-11-18 — [Milestone H](MILESTONES.md#milestone-h--the-apps-logo))* — every macOS icon size generated from the one master by a script into the app's asset catalog, the app target naming it, a check that fails on a stale or incomplete set, and the logo shown in the README and on the design canvas.
+
+---
+
+## In progress
+
+*(Nothing for the Apple apps in v0.2.2: their next release is v0.2.4.)*
 
 ---
 

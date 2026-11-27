@@ -8,7 +8,7 @@
 
 Priority-ordered: the topmost item whose gate is satisfied is the next one to build.
 
-**Track 1, the mod is born** (1a–1d) has shipped, complete in **v0.2.1** — in development on its branch, released when it merges into `stable`. Opened 2026-10-21 from that day's mod spike (the user's call), it made the Claude plugin at `lib/src/mod/`: its scaffold and four layers under the layering check (1a), Apogee's served tools, the `/apogee` set and the status line (1b), the pane (1c) and its own workflow (1d). Its story is [ROADMAP.md](../../assistant/mod/ROADMAP.md), and each item's record is in [Milestone A](../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born). The earliest table still open is **v0.2.2**'s, Claude aware of Apogee (track 2).
+**Track 1, the mod is born** (1a–1d) has shipped, complete in [v0.2.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1), released 2026-11-26. Opened 2026-10-21 from that day's mod spike (the user's call), it made the Claude plugin at `lib/src/mod/`: its scaffold and four layers under the layering check (1a), Apogee's served tools, the `/apogee` set and the status line (1b), the pane (1c) and its own workflow (1d). Its story is [ROADMAP.md](../../assistant/mod/ROADMAP.md), and each item's record is in [Milestone A](../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born). The earliest table still open is **v0.2.2**'s, Claude aware of Apogee (track 2).
 
 ### v0.2.2
 

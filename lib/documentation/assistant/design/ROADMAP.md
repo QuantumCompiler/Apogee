@@ -6,9 +6,9 @@ How we work: features get discussed in chat, written up here, given their own do
 
 ---
 
-## In progress
+## Shipped releases
 
-### v0.2.1 — Track 1, the design prototype in React
+### v0.2.1 — Track 1, the design prototype in React *(released 2026-11-26 · [release notes](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1))*
 
 Opened 2026-11-14 (the user's idea): the design rebuilt in React and TypeScript with the production GUIs' layers and screen modules, its data the CLI's own recordings, built into one `lib/design/main.html` that opens by double-click. The claude.ai canvas is retired once the new app covers every board.
 
@@ -33,3 +33,9 @@ Opened 2026-11-14 (the user's idea): the design rebuilt in React and TypeScript 
 - [x] **The build boards as pages in the React design app** *(1r, shipped 2026-11-21 — [Milestone A](MILESTONES.md#milestone-a--the-design-prototype-in-react), [DEVELOPER.md](DEVELOPER.md#the-build-pages))* — The contract, layout and processes boards become pages of the React design app, so a contract row is a data edit, the stat cards are counted, the layout's numbers come from the tokens, and the macOS header shows the real floor, macOS 27.
 - [x] **The parity proof: the React app against the old prototype, preset by preset** *(1s, shipped 2026-11-21 — [Milestone A](MILESTONES.md#milestone-a--the-design-prototype-in-react), [DEVELOPER.md](DEVELOPER.md#the-parity-proof))* — Prove the React app draws everything the old prototype drew, preset by preset, judged on regions, states, controls and wording, with every defect fixed and the report seen by the user before anything is retired. `npm run parity` passes on 123 pairs; after its report was presented, the user wrote "Go ahead and continue" (2026-11-21).
 - [x] **Retire the old prototype and rewrite the law** *(1t, shipped 2026-11-21 — [Milestone A](MILESTONES.md#milestone-a--the-design-prototype-in-react), [the design's guide](CLAUDE.md))* — Once the parity proof is green, the old one-file prototype and its boards are deleted (kept in git history), the canvas gets a last note pointing to lib/design/main.html, and every guide, comment and pending item that cited the old files points to the React design app instead. Track 1 is complete in development.
+
+---
+
+## In progress
+
+*(Nothing planned for the design in v0.2.2 yet.)*

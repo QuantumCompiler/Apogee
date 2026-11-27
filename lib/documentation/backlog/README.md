@@ -2,48 +2,45 @@
 
 The work queue, seen one release at a time. This page is the **overview**: what each release plans across every product, with every item linked to its document. Each product's own index (its `README.md`, linked below) stays the **authority** on its rows, ids, gates and format. This page mirrors it and is updated in the same pass. The [documentation router](../CLAUDE.md) says which product a change belongs to.
 
-## v0.2.1, the release in progress
+## v0.2.2, the release in progress
 
-The branch is `v0.2.1`; the last published release is v0.2.0.
+The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1), released 2026-11-26.
 
-**Still to build: nothing.** Every queue's v0.2.1 tracks have shipped in development (2026-11-21).
-- **The design:** none; track 1 is complete in development (2026-11-21). The prototype is rebuilt in React; its law (1a), its scaffold (1b), the old prototype's baseline (1c), the CLI stand-in (1d), its first screen (1e), the session screen's two halves (1u, 1v), the Sessions place around it with the console (1g), the Models place (1h), Settings (1i), the Training place (1j), the Video place with the runtime consent (1k), the compositions (1l), the Voice place (1m), the Library and Review places (1n), the Knowledge and Code graph places (1o), the Suites and Tasks places (1p), the gallery with the foundations pages (1q), the build boards as pages (1r), the parity proof (1s) and retiring the old prototype (1t) have shipped: every place and every Build and Foundations board is ported (the canvas's 5 Exploration boards are not, 1q's default), the built file is the one review surface, after 1s's report was presented you wrote "Go ahead and continue" (2026-11-21), and the old one-file prototype and the claude.ai canvas are retired.
-- **The mod:** none; track 1 is complete in development (2026-11-21). The Claude plugin is born: its scaffold, 1a, its tools, slash commands and status line, 1b, its pane, 1c, and its pipeline, 1d, have shipped.
-- **The Apple apps:** none; their three tracks for this release have shipped.
-- **The CLI:** none; its three tracks for this release have shipped.
+**Still to build: 6 items.**
+- **The CLI:** 4. Track 58, Claude aware of Apogee: the MCP server introduces itself, serves graphs and knowledge records, offers a lighter set to coding hosts, and refreshes what you list.
+- **The mod:** 2. Track 2, Claude aware of Apogee: Apogee as a Claude Code plugin, and graphs and knowledge records in the desktop mod.
+- **The Apple apps:** none in this release; their next is v0.2.4.
+- **The design:** none planned yet.
 
 Outside the release, 28 maintenance items can be picked up any time: the CLI's M36–M47 (2026-11-22) and M48–M60 (2026-11-26), and the Apple apps' M21–M23 (2026-11-26). Ten wait on another maintenance item: the CLI's M42 on M37 and M41, M43 on M40, M44 on M43, M46 on M45, M49 and M50 on M48, M56 on M55, M58 on the Apple apps' M22 and M60 on M58, and the Apple apps' M23 on M21. None of the 28 waits on a decision from you.
 
-**Can start today** (nothing gates it): no release item; any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55, M57 and M59; the Apple apps' M21 and M22).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md) and [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md); and any maintenance item below that waits on nothing (the CLI's M36–M41, M45, M47, M48, M51–M55, M57 and M59; the Apple apps' M21 and M22).
 
-### The design ([queue](design/README.md#index))
+### The CLI ([queue](cli/README.md#v022))
 
-**Track 1:** the design prototype is rebuilt in React and TypeScript, using the same layers and screen modules as the Mac app. It reads the CLI's own recorded output, and it builds into one `lib/design/main.html` that opens with a double-click. The old one-file prototype, frozen at `b375fac9` (1c's baseline), is retired. New screens are drawn in the React app. The law, 1a, has shipped: the design's [ADR 0001](../adrs/design/react-design-prototype.md). So has the scaffold, 1b: the empty app, its module map and layering check, and one `npm run check` ([DEVELOPER.md](../assistant/design/DEVELOPER.md)). So has the old prototype's baseline, 1c: its still frames at that revision, re-made by `npm run baseline` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-old-prototypes-baseline)). So has the CLI stand-in, 1d: the app's three lower layers, answering every read, command, job and chat from the CLI's own recordings ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-cli-stand-in)). So has the first screen, 1e: the tokens generated from tokens.json, the shell with its 11 places, the composition root, and the system monitor on the CLI's recorded `system` document, so the built file opens at the monitor ([DEVELOPER.md](../assistant/design/DEVELOPER.md#styles-the-shell-and-the-first-screen)). The session screen, 1f, was split on 2026-11-19 into 1u and 1v, and 1f stays spent. Its first half, 1u, has shipped too: the session's turn grown only from the CLI's recorded streams, its header and composer, the answer's markdown and code, and the presets `chat:new`, `chat:private`, `chat:play` and `chat:suite`. So has its second, 1v: the five scenarios and the session's states replayed from captured or hand-made streams, the nine presets from `chat` to `chat:compacting`, and `chat` the default start again ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-session)). So has 1g: the sidebar's list of the CLI's saved chats on every screen, the inspector beside the session, the execute door and the console, with the presets `execute` and `console` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-sessions-place-and-the-console)). So has 1h: the Models place -- its four tabs, its sheets and five confirms -- on the CLI's recordings, a pull and a conversion landing in Stored weights, and its nine presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-models-place)). So has 1i: Settings -- its ten panes over the CLI's reads and verbs, Appearance restyling the whole app, Keyboard listing the shell's keys -- and its thirteen presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#settings)). So has 1j: the Training place -- its five tabs, the promote and pull sheets, a pipeline, a cycle pass, a promote and a pull replayed from the CLI's streams -- and its ten presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-training-place)). So has 1k: the Video place's clips over the records the CLI wrote, a clip's page with its player, the generate form, a run replayed from its stream, and the one-time install consent and card, with the player, the phase row, the install card and the consent sheet in the shared styles module, and its four presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-video-place-and-the-runtime-consent)). So has 1l: the compositions in Video's second tab -- a brief planned on paper and rendered scene by scene from the project the composer saves, Stop and Resume, an edit previewed and rendered as a new video -- the chosen voice shared through `styles`, and its five presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-compositions)). So has 1m: the Voice place -- the speeches over the records the CLI wrote beside their WAVs, the speak card with the voice model's own voices, the selected speech with its waveform, player and sentence timings, a speech spoken from a hand-made stream and read back from the folder -- and its preset `voice` ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-voice-place)). So has 1n: the Library and Review places -- the agents, symphonies and MCP servers, the person's own definition files edited in place and closed asked first, Review's dry run, its targets, the last sweep and its skills -- and their ten presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#library-and-review)). So has 1o: the Knowledge and Code graph places -- the decision records and the collections on the CLI's recordings, the code graph on the recorded `demo` graph with its Functions and Files views, the notes prose graph, the More menu's export, dedupe and delete, and Ask about this landing in a new session -- and their six presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#knowledge-and-the-code-graph)). So has 1p: the Suites and Tasks places -- the recorded suites and the CLI's verdict on each, a chat opened under one and the session switched to it, the ledger's tasks, a run followed live from its recorded stream with halt, cancel, resume and Run again, a refusal's alert and the New task sheet -- and their nine presets ([DEVELOPER.md](../assistant/design/DEVELOPER.md#suites-and-tasks)); every place is ported. So has 1q: the gallery, the canvas's Build and Foundations pages and rows inside the built file on `?gallery` or ⌥⌘G -- every screen board the app at its preset and still, App live, every preset a frame -- with the color, type, components and logo pages generated from the tokens and the modules' own specimens, and it replaces the claude.ai canvas as the review surface ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-gallery)). So has 1r: the contract, layout and processes boards as pages in the gallery's Build row -- a contract row one data edit, the stat cards counted, the gaps the monitor and the Models place found added as G25-G32, every size the layout page shows read from the tokens and every key from the key map, the native controls under the real floor, `SWIFTUI · MACOS 27`, and every color a token ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-build-pages)). So has 1s: the parity proof, every preset 1c kept and every rebuilt board shot beside the built file and each of the 4,606 differences classed as the CLI's data or a fix a shipped item records, none open; after its report was presented you wrote "Go ahead and continue" (2026-11-21) ([DEVELOPER.md](../assistant/design/DEVELOPER.md#the-parity-proof)). So has 1t: the old one-file prototype and its boards deleted after `npm run parity` ran green (kept in git history, 1c's baseline re-making their pictures), `tokens.json` moved beside the built file, the canvas closed with a last note, [the design's guide](../assistant/design/CLAUDE.md) the one guide, and every Swift comment, doc line and pending Apple-apps item re-pointed at the design app. All twenty-one are in [Milestone A](../assistant/design/MILESTONES.md#milestone-a--the-design-prototype-in-react); **track 1 is complete in development.**
+**Track 58, Claude aware of Apogee:** `apogee mcp serve`, which already answers with 22 read-only tools, learns to say what it is and what it can reach, so a host such as Claude Code knows when to use it.
 
-Nothing is left to build.
+| # | Item | Waits on |
+|---|---|---|
+| 58a | [The server introduces itself](cli/v0.2.2/mcp-serve-introduces-itself.md) | 58b |
+| 58b | [Graphs and knowledge records served](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) | — |
+| 58c | [A lighter tool set for coding hosts](cli/v0.2.2/mcp-serve-coding-host-profile.md) | — |
+| 58d | [Claude can refresh what you list](cli/v0.2.2/mcp-serve-opt-in-refresh.md) | — |
 
-### The mod ([queue](mod/README.md#index))
+### The mod ([queue](mod/README.md#v022))
 
-**Track 1, the mod is born:** the Claude plugin, driving the same `apogee` binary through its MCP server and JSON documents. The scaffold, 1a, has shipped ([Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)): the plugin at `lib/src/mod/` with its four layers under the layering check, binary discovery and the not-installed guard, and `changed.sh mod`. So have its working surfaces, 1b: Apogee's served tools and `apogee_complete` for Claude, the `/apogee` set with promote and rollback confirmed, and the status line. So has its pane, 1c: backends and models, training and the version ledger beside the chat, read back after every confirmed command, polled only while shown, with promote and rollback as confirmed buttons. So has its pipeline, 1d: its own workflow, `mod.yml`, gated by `changed.sh mod`, with `tsc` on every runner, validate where the `claude` CLI installs headlessly (the skip said otherwise), `claude plugin test` a dev-host gate, and the plugin zipped as the artifact `apogee-mod`. All four are in [Milestone A](../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born); **track 1 is complete in development.** Your live look (`claude --plugin-dir lib/src/mod`, on Claude Code 2.1.326 or newer) is still to come.
+**Track 2, Claude aware of Apogee:** the server reaches Claude through both hosts.
 
-Nothing is left to build.
+| # | Item | Waits on |
+|---|---|---|
+| 2a | [Apogee as a Claude Code plugin](mod/v0.2.2/claude-code-plugin.md) | CLI 58a, CLI 58c |
+| 2b | [The desktop mod shows graphs and knowledge records](mod/v0.2.2/mod-graphs-and-knowledge.md) | CLI 58b |
 
-### The Apple apps ([queue](darwin/README.md#index))
-
-**macOS.** Nothing is left to build. Apogee in Xcode (track 5), the second bug sweep's app findings (track 6) and the app's logo (track 11) have shipped ([Milestone F](../assistant/darwin/MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side), [Milestone G](../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings), [Milestone H](../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo)).
-
-### The CLI ([queue](cli/README.md#index))
-
-Nothing is left to build. This release's three CLI tracks have shipped:
-- the mod's CLI siblings, `apogee mcp serve` (track 54, [Milestone W](../assistant/cli/MILESTONES.md#milestone-w--the-mcp-client));
-- Apogee in Xcode (track 56, [Milestone AS](../assistant/cli/MILESTONES.md#milestone-as--apogee-in-xcode));
-- the second bug sweep's CLI findings (track 57, [Milestone AT](../assistant/cli/MILESTONES.md#milestone-at--the-second-sweeps-cli-findings)).
-
-**One step is yours.** After the release's build, you turn on the merge ruleset so CI gates merges into `stable` (57m, [the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57)). Run it against the release pull request after its first green run (`required-checks.py --pr <N> --apply`), so the mod's two new jobs, `what changed (mod)` and `build mod` (mod 1d), are required beside the CLI's and the app's.
+**One step is yours, still open from v0.2.1.** The merge ruleset that makes CI gate merges into `stable` is not in force yet (`required-checks.py --verify`, 2026-11-26: "there is no 'Stable: CI must pass' ruleset"). `lib/scripts/required-checks.py --pr 12 --apply` creates it from v0.2.1's pull request, the mod's two jobs, `what changed (mod)` and `build mod`, among its required checks ([the ROADMAP line](../assistant/cli/ROADMAP.md#v021--the-mods-cli-siblings-track-54-apogee-in-xcode-track-56-and-the-second-bug-sweep-track-57-released-2026-11-26--release-notes)).
 
 ### Ties to later releases
 
-None now: [mod 2b](mod/v0.2.2/mod-graphs-and-knowledge.md)'s gate on mod 1c was satisfied when 1c shipped (2026-11-21); it waits on CLI 58b alone, in v0.2.2.
+None now.
 
 ## Any time: maintenance
 
@@ -86,7 +83,6 @@ One row per release, with each track linked. Follow a link to see the items and 
 
 | Release | CLI | Apple apps | Mod |
 |---|---|---|---|
-| v0.2.2 | [Track 58, Claude aware of Apogee](cli/README.md#v022) (58a–58d) | — | [Track 2, Claude aware of Apogee](mod/README.md#v022) (2a–2b) |
 | v0.2.3 | [Track 59, the harness server](cli/README.md#v023) (59a–59h) | — | — |
 | v0.2.4 | [Track 60, one tool definition and device tools](cli/README.md#v024) (60a–60e); [track 62, the server console](cli/README.md#v024) (62a–62h); [track 63, people and access](cli/README.md#v024) (63a–63e) | [Track 7, the Mac as a client](darwin/README.md#v024) (7a–7e); [track 10, the server window and its People place](darwin/README.md#v024) (10a–10c, macOS) | — |
 | v0.2.5 | — | [Track 8, iPad](darwin/README.md#v025) (8a–8c); [track 9, iPhone, the foldable and the three platforms whole](darwin/README.md#v025) (9a–9c) | — |
@@ -94,7 +90,7 @@ One row per release, with each track linked. Follow a link to see the items and 
 
 On 2026-11-18 (the user's call), v0.2.4 took in v0.2.6 and v0.2.7, v0.2.5 took in v0.3.0, and v0.3.1 became v0.2.6. The items kept their ids.
 
-The design has nothing planned after v0.2.1 yet.
+The design has nothing planned in a later release yet.
 
 ## The queues
 

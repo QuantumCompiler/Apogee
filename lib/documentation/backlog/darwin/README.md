@@ -136,7 +136,7 @@ Priority-ordered: the topmost item whose gate is satisfied is the next one to bu
 - **Track 3, MLX kinds in the app** (3a, 3b), opened 2026-10-21 from the CLI's MLX-for-every-kind spike: each MLX set's kind, engines and drafters, in [Milestone D](../../assistant/darwin/MILESTONES.md#milestone-d--mlx-kinds-in-the-app).
 - **Track 4, the CLI/GUI audit's GUI findings** (4a–4l), opened 2026-10-22 (the user's call: a thorough bug and feature-disparity audit over both applications), in [Milestone E](../../assistant/darwin/MILESTONES.md#milestone-e--the-audits-gui-findings).
 
-**Tracks 5, 6 and 11 have shipped**, complete in **v0.2.1** — in development on its branch, released when it merges into `stable`:
+**Tracks 5, 6 and 11 have shipped**, complete in [v0.2.1](https://github.com/QuantumCompiler/Apogee/releases/tag/v0.2.1), released 2026-11-26:
 - **Track 5, Apogee in Xcode, the app's side** (5a), opened 2026-10-31 from that day's Xcode research (the user's call; the CLI's track 56 is the capability): Settings › Xcode, in [Milestone F](../../assistant/darwin/MILESTONES.md#milestone-f--apogee-in-xcode-the-apps-side).
 - **Track 6, the second bug sweep's GUI findings** (6a–6j), opened 2026-10-31 (the user's call: a second bug sweep over both applications), in [Milestone G](../../assistant/darwin/MILESTONES.md#milestone-g--the-second-sweeps-gui-findings).
 - **Track 11, the app's logo** (11a), opened 2026-11-14 (the user's call): the macOS app's icon generated from `lib/design/assets/Logo.png`, in [Milestone H](../../assistant/darwin/MILESTONES.md#milestone-h--the-apps-logo).
