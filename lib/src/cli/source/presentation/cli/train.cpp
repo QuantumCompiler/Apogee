@@ -37,6 +37,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "machine/json_reporter.h"
 #include "models/quantize.h"
 #include "modelstore/gguf_inspect.h"
@@ -1052,8 +1053,11 @@ struct PromotionHold {
     for (const harness::AdapterConfig& adapter : adapters) {
         if (!same_path(adapter.path, version_path)) {
             return "'" + key + "' is an mlx entry, which applies one adapter, and it already " +
-                   "applies " + adapter.path + " -- take it off with 'apogee config set-backend " +
-                   key + " --adapters \"\"', then promote again";
+                   "applies " + adapter.path + " -- take it off with '" +
+                   harness::render(
+                       {.verbs = {"config", "set-backend"},
+                        .parts = {harness::operand(key), harness::option("--adapters", "")}}) +
+                   "', then promote again";
         }
     }
     return {};

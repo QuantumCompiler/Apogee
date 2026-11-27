@@ -687,6 +687,15 @@ TEST_CASE("a selection that names nothing, or two things, says so", "[graph][nav
         failure_of([&] { const apogee::graph::OpenGraph open{home.target("plain")}; });
     CHECK(plain.kind == Kind::NotBuilt);
     CHECK(plain.message == "no graph built for 'plain' -- run: apogee graph build plain");
+    // CLI-M48: the build it names runs as printed for a name the CLI made --
+    // the one hint the HTTP bodies and the graph tools carry too.
+    {
+        const Store dashed{apogee::harness::embeddings_dir() / "-y.db"};
+    }
+    const Failure dashed =
+        failure_of([&] { const apogee::graph::OpenGraph open{home.target("-y")}; });
+    CHECK(dashed.kind == Kind::NotBuilt);
+    CHECK(dashed.message == "no graph built for '-y' -- run: apogee graph build -- -y");
 }
 
 TEST_CASE("the graph tools take the collections' read rule: names reach, paths never",

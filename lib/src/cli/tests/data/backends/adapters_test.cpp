@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/store.h"
 #include "support/env_guard.h"
@@ -30,6 +31,7 @@ using apogee::backends::adapter_refusal;
 using apogee::backends::AdapterCheck;
 using apogee::backends::AdapterFiles;
 using apogee::backends::embedding_space;
+using apogee::backends::join_adapters;
 using apogee::backends::pin_adapters;
 using apogee::backends::spell_adapters;
 using apogee::backends::WeightHashing;
@@ -411,7 +413,16 @@ TEST_CASE("an embedding space is the model and the content of every adapter it a
 TEST_CASE("a set is spelled as set-backend takes it back, an empty one as a quoted nothing",
           "[backends][adapters][pin]") {
     CHECK(spell_adapters({}) == "\"\"");
+    // The set is one word by the one renderer's rule (CLI-M48): bare in the
+    // POSIX shells, double-quoted in PowerShell, where a comma splits it.
     CHECK(spell_adapters({{.path = "/l/a.gguf"}, {.path = "/l/b.gguf", .scale = 0.5}}) ==
+          apogee::harness::shell_word("/l/a.gguf,/l/b.gguf:0.5"));
+    CHECK(apogee::harness::shell_word("/l/a.gguf,/l/b.gguf:0.5",
+                                      apogee::harness::CommandShell::Posix) ==
           "/l/a.gguf,/l/b.gguf:0.5");
     CHECK(spell_adapters({{.path = "/my loras/a.gguf"}}) == "\"/my loras/a.gguf\"");
+    // A path double quotes would not read back whole is single-quoted.
+    CHECK(spell_adapters({{.path = "/l/$x/a.gguf"}}) == "'/l/$x/a.gguf'");
+    CHECK(join_adapters({{.path = "/my loras/a.gguf", .scale = 0.5}, {.path = "/l/b.gguf"}}) ==
+          "/my loras/a.gguf:0.5,/l/b.gguf");
 }

@@ -26,6 +26,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "models/source_hf.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
@@ -287,8 +288,9 @@ TEST_CASE("a pull of an MLX repository lands under mlx/ by its weights' hash, ve
           std::string::npos);
     CHECK(out.find("mlx model: llama, 4-bit (affine, group 64), 32768-token window (the default; "
                    "trained for 131072), ") != std::string::npos);
-    CHECK(out.find("apogee config add-backend M-4bit --type mlx --model-path " + dir.string()) !=
-          std::string::npos);
+    // The path one word by the rule (CLI-M48), so the pin holds on Windows.
+    CHECK(out.find("apogee config add-backend M-4bit --type mlx --model-path " +
+                   apogee::harness::shell_word(dir.string())) != std::string::npos);
     pull.check_no_staging();
 
     // Its record: the repository, and every file as it landed.
@@ -463,7 +465,7 @@ TEST_CASE("convert --mlx lands a runnable MLX model in the store, recorded and r
     CHECK(out.find("hashing it (") != std::string::npos);
     CHECK(out.find("mlx model: llama, 4-bit (affine, group 64)") != std::string::npos);
     CHECK(out.find("apogee config add-backend m-4bit --type mlx --model-path " +
-                   stored.front().dir.string()) != std::string::npos);
+                   apogee::harness::shell_word(stored.front().dir.string())) != std::string::npos);
     const std::optional<apogee::models::Snapshot> record =
         apogee::models::load_snapshot(stored.front().dir);
     REQUIRE(record.has_value());
@@ -1885,7 +1887,8 @@ TEST_CASE("a pull of an MLX embedding, voice or video set lands it whole and say
         const std::string name = apogee::models::stored_mlx_name(stored);
         CHECK(out.find("\nUse it as the embedding role by adding a backend:\n  apogee config "
                        "add-backend " +
-                       name + " --type mlx --model-path " + stored.dir.string() +
+                       name + " --type mlx --model-path " +
+                       apogee::harness::shell_word(stored.dir.string()) +
                        "\n  apogee config set-default-embedding " + name + "\n") !=
               std::string::npos);
     }
@@ -2906,7 +2909,7 @@ TEST_CASE(
                    "alone -- an mlx entry over its base names it as its "
                    "draft -- apogee config set-backend <its base's mlx "
                    "backend> --draft " +
-                   drafter.string()) != std::string::npos);
+                   apogee::harness::shell_word(drafter.string())) != std::string::npos);
     // ...and an entry over it, written into the file by hand, cannot run,
     // saying what it is.
     {

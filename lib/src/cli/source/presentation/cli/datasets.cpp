@@ -22,6 +22,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "logger/session.h"
 #include "machine/json_reporter.h"
 #include "models/acquire.h"
@@ -35,6 +36,14 @@
 
 namespace apogee::commands {
 namespace {
+
+/// `apogee train run <snapshot> --dataset <name>`, by the one renderer
+/// (CLI-M48): an option's value parses whole, so `-x` stays bare.
+[[nodiscard]] std::string train_on_command(const std::string& dataset) {
+    return harness::render(
+        {.verbs = {"train", "run"},
+         .parts = {harness::placeholder("<snapshot>"), harness::option("--dataset", dataset)}});
+}
 
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee datasets: " << message << "\n";
@@ -128,7 +137,10 @@ void pull_dataset(const DatasetPullRequest& request, const TransportMaker& trans
     std::cout << "\n"
               << result.path.string() << "\n"
               << result.files << " file(s), " << human_size(result.bytes) << "\n"
-              << "\nConvert it with:  apogee datasets prepare " << result.path.string() << "\n";
+              << "\nConvert it with:  "
+              << harness::render({.verbs = {"datasets", "prepare"},
+                                  .parts = {harness::operand(result.path.string())}})
+              << "\n";
     if (JobStream* job = JobStream::current(); job != nullptr) {
         // Last: where the dataset landed, the folder `datasets prepare` takes.
         job->events().emit_document(nlohmann::json{{"object", "dataset.pull"},
@@ -364,8 +376,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         }
         std::cout << "\n" << out.string() << "\n";
         if (!*prep_eval) {
-            std::cout << "\nTrain on it with:  apogee train run <snapshot> --dataset "
-                      << out.stem().string() << "\n";
+            std::cout << "\nTrain on it with:  " << train_on_command(out.stem().string()) << "\n";
         }
     });
 
@@ -517,8 +528,7 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         if (result.retries > 0) {
             std::cout << ", " << result.retries << " retried";
         }
-        std::cout << "\n\nTrain on it with:  apogee train run <snapshot> --dataset " << *synth_name
-                  << "\n";
+        std::cout << "\n\nTrain on it with:  " << train_on_command(*synth_name) << "\n";
     });
 
     // ---- kits --------------------------------------------------------------

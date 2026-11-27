@@ -20,6 +20,7 @@
 #include "cli/root.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "models/quantize.h"
 #include "modelstore/gguf_inspect.h"
 #include "modelstore/sidecar.h"
@@ -192,7 +193,8 @@ TEST_CASE("convert makes a vision model's projector beside it", "[commands][mode
     CHECK(calls.at(1).find("--mmproj") != std::string::npos);
 
     // The one command that uses both.
-    CHECK(out.find("--mmproj-path " + stored.front().projector.string()) != std::string::npos);
+    CHECK(out.find("--mmproj-path " + apogee::harness::shell_word(
+                                          stored.front().projector.string())) != std::string::npos);
     CHECK(out.find("no chat template") == std::string::npos);
     // The hash is announced, never a silent wait (2026-09-24), and nothing
     // left behind claims the staging name.

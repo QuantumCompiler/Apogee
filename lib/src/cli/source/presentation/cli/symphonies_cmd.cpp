@@ -29,6 +29,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "harness/harness.h"
 #include "machine/json_reporter.h"
 #include "operations/suites.h"
@@ -392,8 +393,14 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         std::cout << (result.replaced ? "replaced" : "created") << " symphony '" << result.name
                   << "' (" << symphony::role_chain(spec) << ")\n"
                   << "  config: " << result.config_path.string() << "\n\n"
-                  << "Play it:  apogee symphonies play " << result.name << " --input \"…\"\n"
-                  << "Edit it:  apogee symphonies edit " << result.name << "\n";
+                  << "Play it:  "
+                  << harness::render({.verbs = {"symphonies", "play"},
+                                      .parts = {harness::operand(result.name),
+                                                harness::option_placeholder("--input", "\"…\"")}})
+                  << "\nEdit it:  "
+                  << harness::render({.verbs = {"symphonies", "edit"},
+                                      .parts = {harness::operand(result.name)}})
+                  << "\n";
     });
 }
 
@@ -482,8 +489,10 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
                       scratch.string());
         }
         if (edited.name != definition.spec.name) {
-            fail_user("'edit' does not rename -- make '" + edited.name + "' with 'apogee " +
-                      "symphonies create " + edited.name + " --from " + scratch.string() +
+            fail_user("'edit' does not rename -- make '" + edited.name + "' with '" +
+                      harness::render({.verbs = {"symphonies", "create"},
+                                       .parts = {harness::operand(edited.name),
+                                                 harness::option("--from", scratch.string())}}) +
                       "' (the edit is kept there), then delete '" + definition.spec.name + "'");
         }
         try {
@@ -501,7 +510,9 @@ void bind_edit(CLI::App& parent, const RootContext& context) {
                       << config_path.string() << ", standing in for the "
                       << (definition.source == symphony::Source::Shipped ? "shipped starter"
                                                                          : "spec file")
-                      << " of its name ('apogee symphonies delete " << edited.name
+                      << " of its name ('"
+                      << harness::render({.verbs = {"symphonies", "delete"},
+                                          .parts = {harness::operand(edited.name)}})
                       << "' brings that back)\n";
         }
     });
@@ -753,12 +764,16 @@ std::vector<std::string> symphony_list_lines(const symphony::Catalog& catalog) {
                                    padded("SOURCE", kSourceColumn) + "DESCRIPTION"};
     for (const symphony::Definition& definition : catalog.definitions) {
         const std::vector<std::string> problems = symphony::validate(definition.spec, catalog);
-        lines.push_back(padded(definition.spec.name, kNameColumn) +
-                        padded(symphony::role_chain(definition.spec), kStagesColumn) +
-                        padded(source_label(definition), kSourceColumn) +
-                        (problems.empty() ? definition.spec.description
-                                          : "cannot be played -- 'apogee symphonies show " +
-                                                definition.spec.name + "' says why"));
+        lines.push_back(
+            padded(definition.spec.name, kNameColumn) +
+            padded(symphony::role_chain(definition.spec), kStagesColumn) +
+            padded(source_label(definition), kSourceColumn) +
+            (problems.empty()
+                 ? definition.spec.description
+                 : "cannot be played -- '" +
+                       harness::render({.verbs = {"symphonies", "show"},
+                                        .parts = {harness::operand(definition.spec.name)}}) +
+                       "' says why"));
     }
     return lines;
 }

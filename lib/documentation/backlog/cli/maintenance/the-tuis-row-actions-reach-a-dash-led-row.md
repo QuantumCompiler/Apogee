@@ -228,7 +228,7 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
 
 ## Out of scope
 
-- **The asks' words**, such as `('apogee datasets delete -x')`, and the program word they print: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) for the Datasets ask, [CLI-M61](every-printed-command-goes-through-the-renderer.md) for the Train and Agents asks, and [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
+- **The asks' words**, such as `('apogee datasets delete -x')`, and the program word they print: [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27) for the Datasets ask, [CLI-M61](every-printed-command-goes-through-the-renderer.md) for the Train and Agents asks, and [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Creation rules for dataset names**: [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) for new names, and [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md) for the readers.
 - **A way out for a hand-written entry the editors refuse**: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md) for backends. The gap for agents and MCP servers, which have no rename verb, is recorded there.
 - **The Mac app's argv**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed) for its Training datasets delete and the other rows where a person meets harm today, and [APP-M23](../../../assistant/darwin/MILESTONES.md#2026-11-27--every-name-the-app-passes-is-read-as-a-name-maintenance-item-m23-every-name-the-app-passes-is-read-as-a-name) for every other site.
@@ -239,7 +239,7 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
 
 - **Blocked by:** — · **Blocks:** —
 - **Relates to:**
-  - [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), which owns `shell_word`, which the `t` prefill consumes, and the Datasets ask's words; [CLI-M61](every-printed-command-goes-through-the-renderer.md), which owns the Train and Agents asks' words;
+  - [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), which owns `shell_word`, which the `t` prefill consumes, and the Datasets ask's words; [CLI-M61](every-printed-command-goes-through-the-renderer.md), which owns the Train and Agents asks' words;
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), the way out a hand-written backend meets once its row's act reaches the verb;
   - [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), whose read rule keeps every listed dataset, `-h` included, readable and deletable by name, and which leaves the shell's `--` to this item (its Open questions);
   - [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), whose create rule stops new dash-led datasets, while existing ones still need this item;

@@ -64,7 +64,7 @@ set(APOGEE_LINKS_video contracts modelstore platform training)
 
 # ---- Presentation -----------------------------------------------------------
 set(APOGEE_LINKS_markdown ansi)
-set(APOGEE_LINKS_render "")
+set(APOGEE_LINKS_render contracts)
 set(APOGEE_LINKS_views agentloop ansi contracts markdown platform)
 set(APOGEE_LINKS_machine agent agentloop contracts tasks)
 set(APOGEE_LINKS_operations agentloop backends contracts embedstore graph harness knowledge

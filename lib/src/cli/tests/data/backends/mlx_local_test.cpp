@@ -23,6 +23,7 @@
 #include "backends/factory.h"
 #include "contracts/errors.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "support/draft_head_configs.h"
 #include "support/env_guard.h"
@@ -1825,8 +1826,9 @@ TEST_CASE(
               (drafted.dir.path() / "model").string() +
                   " is a drafter: it runs beside its base model, never alone -- an mlx entry "
                   "over its base names it as its draft");
-        CHECK(readiness.remedy == "apogee config set-backend <its base's mlx backend> --draft " +
-                                      (drafted.dir.path() / "model").string());
+        CHECK(readiness.remedy ==
+              "apogee config set-backend <its base's mlx backend> --draft " +
+                  apogee::harness::shell_word((drafted.dir.path() / "model").string()));
         CHECK(apogee::backends::to_string(MlxRefusal::Drafter) == "a drafter");
         // Pulled, with no record: its config says so all the same.
         std::filesystem::remove(drafted.dir.path() / "model" / "apogee-snapshot.json");

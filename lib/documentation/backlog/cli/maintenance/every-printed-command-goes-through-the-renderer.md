@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Remedies › every printed command CLI-M48 leaves: the backend, suite, agent and MCP holes only a hand edit reaches, model refs and handles, run and task ids, `train`, `models`, the video runtime, the TUI's agent and rollback confirms and the rest of the sweep; `cli.one_suggested_command`; CLAUDE.md's invariant |
 | **Labels** | `remedies` `shell-quoting` `source-check` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The APP-M21 probes' CLI asides (2026-11-26), then a sandboxed investigation, two skeptics and a critic the same day; groomed on 2026-11-27 as Pass B of the split-first item, by the group run |
 | **Created** | 2026-11-26 |
@@ -18,7 +18,7 @@
 
 ## Summary
 
-[CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) adds one renderer for the commands Apogee prints, folds the five private quoters into it, and routes through it every site a name reaches with no hand edit, plus the backend doors. The rest of the sweep's about 226 name holes still join a name in raw: the kinds a hand edit or an older config reaches (backends, suites, agents, MCP servers), model refs and handles, run and task ids, and a few holes that are not names. This item, Pass B of the split, moves every remaining site onto the renderer with no other behaviour change. It adds `cli.one_suggested_command`, a source check that ships with an empty allowlist, so a raw join or a sixth quoter can't start again.
+[CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27) adds one renderer for the commands Apogee prints, folds the five private quoters into it, and routes through it every site a name reaches with no hand edit, plus the backend doors. The rest of the sweep's about 226 name holes still join a name in raw: the kinds a hand edit or an older config reaches (backends, suites, agents, MCP servers), model refs and handles, run and task ids, and a few holes that are not names. This item, Pass B of the split, moves every remaining site onto the renderer with no other behaviour change. It adds `cli.one_suggested_command`, a source check that ships with an empty allowlist, so a raw join or a sixth quoter can't start again.
 
 ## Description
 
@@ -30,7 +30,7 @@
 
 ### Steps to reproduce
 
-This item shares CLI-M48's reproduction: [its Steps to reproduce](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md#steps-to-reproduce), with the same sandbox, binary and joins. Its own kinds were not reproduced one by one. A hand edit, or a config written before 55f's add rule (2026-10-25), is the only way to reach them (Evidence 15). Of their remedies, only graph (`c:e04`) and backend (`c:e05`) were measured to the editor's refusal; suites, agents and MCP servers stopped earlier (`c:e01`–`c:e03`). Run ids and task ids are never odd. The nearest steps there are 6 and 7, a hand-edited backend reaching a remedy.
+This item shares CLI-M48's reproduction: its Steps to reproduce (`git show 5a0850ff:lib/documentation/backlog/cli/maintenance/a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md`; [its record](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes)), with the same sandbox, binary and joins. Its own kinds were not reproduced one by one. A hand edit, or a config written before 55f's add rule (2026-10-25), is the only way to reach them (Evidence 15). Of their remedies, only graph (`c:e04`) and backend (`c:e05`) were measured to the editor's refusal; suites, agents and MCP servers stopped earlier (`c:e01`–`c:e03`). Run ids and task ids are never odd. The nearest steps there are 6 and 7, a hand-edited backend reaching a remedy.
 
 ### Actual result
 
@@ -76,14 +76,14 @@ This item finishes the job:
 - **A source check.** It keeps a sixth quoter from starting, as `cli.one_key_resolver` does for secrets, and a new raw join with it.
 
 The item was specced whole and marked split first: about 190 sites, six chmod rows, five quoters to fold, three test layers and a source check are more than one focused session. On 2026-11-27 it was groomed into two documents (Decision log):
-- **[CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), Pass A**, keeps the id M48. It takes the renderer, the folds, the tests that pin it, and every site a name reaches with no hand edit: collections and graphs, symphonies, datasets with a leading `-`, and path values under the home. It also takes the backend doors, where a wrong target is measured (`m09`).
+- **[CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), Pass A**, keeps the id M48. It takes the renderer, the folds, the tests that pin it, and every site a name reaches with no hand edit: collections and graphs, symphonies, datasets with a leading `-`, and path values under the home. It also takes the backend doors, where a wrong target is measured (`m09`).
 - **This one, Pass B**, takes the remaining sites, `cli.one_suggested_command` and the CLAUDE.md invariant. It is gated on CLI-M48.
 
 ### Evidence
 
 All measured 2026-11-26 by an investigator, two skeptics and a critic, each in its own sandbox, with the built binary `apogee 0.2.0 (33ea685d, 2026-11-22, macos-arm64)` (Evidence 1): `env -i` with PATH, `HOME` and `APOGEE_HOME` three levels deep, stdin from `/dev/null`, mock backends only. Labels `c:…` are the critic's runs. Unprefixed labels are the investigator's, except `n01`–`n03` (the cause skeptic's) and `y05`–`y07` (the fix skeptic's). Source lines are at HEAD 5b8927c9.
 
-The numbers are CLI-M48's, so a number names the same finding in both documents. The findings that bear only on CLI-M48's sites are cited there by number: [CLI-M48's Evidence](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md#evidence).
+The numbers are CLI-M48's, so a number names the same finding in both documents. The findings that bear only on CLI-M48's sites are cited there by number: CLI-M48's Evidence (`git show 5a0850ff:lib/documentation/backlog/cli/maintenance/a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md`).
 
 1. **The binary.** `apogee version` (`c:v00`) prints `apogee 0.2.0 (33ea685d, 2026-11-22, macos-arm64)` and `channel: release`. The stamp names HEAD~1, but the binary holds HEAD 5b8927c9's source strings: `strings | grep -c "no pipeline run 'train pipeline resume' takes"` gives 1, and `git log -S` finds that string only in 5b8927c9. The stamp under-reports.
 2. **A dash-led collection's remedy is refused** (`graph.cpp:1535-1536`, `:1637-1640`, and the stdout hints after a success): CLI-M48's Evidence 2 (`p02`–`p05`, `r2`, `r3`, `c:k03`–`c:k06`, `st3`, `n03`).
@@ -196,7 +196,7 @@ Paths under `lib/src/cli/`.
 | `source/presentation/cli/mcp_cmd.cpp`, and the rest of the sweep | `mcp_cmd.cpp:125`'s `try_tool`, a non-name hole. Then 1 to 4 sites in each remaining file of the sweep's 42: the suites, agents and MCP servers, the model refs and handles, the run and task ids. |
 | `tests/scripts/cmake/one_suggested_command.cmake` (new), `tests/CMakeLists.txt` | Fixture (3), registered as `cli.one_suggested_command` beside `cli.one_key_resolver` (`:698-703`). Its allowlist ships empty. |
 
-**What it builds on.** CLI-M48's renderer, shipped before this item, in `source/data/contracts/suggested_command.h`: `shell_word`, `SuggestedCommand` (`program`, `verbs`, `parts`), `CommandPart`, `operand`, `option` (a greedy option is marked by its caller), `render` and `render_all`. Its shipped code and its fixtures (1) and (2) are the authority. This item adds no rule. The rules, as CLI-M48 specs them:
+**What it builds on.** CLI-M48's renderer, shipped before this item, in `source/data/contracts/suggested_command.h`: `shell_word`, `SuggestedCommand` (`program`, `verbs`, `parts`), `CommandPart`, `operand`, `option` (a greedy option is marked by its caller), `render` and `render_all`; as shipped, also `placeholder` and `option_placeholder` (printed verbatim) and `CommandShell` with `native_command_shell()` (the rule's platform parameter). Its shipped code and its fixtures (1) and (2) are the authority: `tests/data/contracts/suggested_command_test.cpp` and `tests/presentation/cli/suggested_command_test.cpp`, with `tests/support/printed_command.h`'s `remedy_doors` splitting a remedy outside quotes. This item adds no rule. The rules, as CLI-M48 specs them:
 
 **Order.**
 - When no operand starts with `-`, and no greedy option sits directly before an operand, the parts print in today's order, word for word.
@@ -271,7 +271,7 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 |---|---|---|
 | Should a site that sets a command off in single quotes keep them when the command holds a quoted word? (First raised as the user's call; it changes no behaviour, so it is a default.) | `[default]` | Keep each site's delimiter. Most inner quoting under this rule is double quotes (`'apogee config delete-backend "my model"'`), so single quotes nest only for words with `$`, a backtick, `"` or `!`. Tests assert that the message contains the rendering, rather than parsing the prose. No house rule covers delimiters, and the choice changes no behaviour. |
 | How does a site know that an option is greedy? | `[default]` | The caller marks it. Today no remedy puts a greedy option before an operand: `graph.cpp:1013-1019` and `:1108-1112` print `--source <dir> --graph NAME`. CLI-M48's Data test pins the rendering, and its parse-back covers the sites that name `--source`. |
-| How a word is quoted, where `--` goes, a name holding a newline or a tab, the Windows and PowerShell rule, and what the HTTP bodies and tool results carry | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) owns them, in its Open questions and Decision log. This item's sites take its renderer as it ships, and add no rule. |
+| How a word is quoted, where `--` goes, a name holding a newline or a tab, the Windows and PowerShell rule, and what the HTTP bodies and tool results carry | `(consumed decision)` | [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27) owns them, in its Open questions and Decision log. This item's sites take its renderer as it ships, and add no rule. |
 | Should a printed command name `apogee-dev` on the dev channel, or the root flag a run was given? | `(consumed decision)` | [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md) owns it. CLI-M48 gives the renderer a `program` field, `apogee` by default, and changes nothing else about it. |
 | Should a backend door name `rename-backend` first, for a name the config editors refuse? | `(consumed decision)` | [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md) owns it. Once the renderer quotes it, a pasted `delete-backend` reaches 57e's refusal, which names `rename-backend`, so no wrong target remains. |
 
@@ -287,11 +287,11 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 | 2026-11-26 | **53c's quoting is revised for the words it broke** (`MILESTONES.md:128`): `;`, `$`, backticks, `a"b`, a UNC path, a path ending in a backslash, and the empty word `check.cpp` printed as nothing. Code-exec's single quotes become double quotes for the two pinned words. A dated MILESTONES line records it (ADR 0006). | the spec |
 | 2026-11-26 | **Blocks CLI-M49 and CLI-M50**, both built on the renderer. **No gate with CLI-M46**: its own decision row says whichever lands first, and its two hand-quoted check remedies end up built through the renderer either way. **Independent of CLI-M45 and of APP-M21/M23**, the app's argv. | the spec |
 | 2026-11-26 | **The rename-backend door is CLI-M50's, not this item's.** Choosing a door is a different change from rendering one, and the door sites don't know `yaml_plain_key`. 55f's record says "existing odd names reached by `rename-backend`" (`MILESTONES.md:11232`). | the spec |
-| 2026-11-27 | **Split into Pass A, [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), and Pass B, this item (CLI-M61)**, taking the item's own recorded default (its Open question "Should every site land in one item, or the reachable kinds first?": one item, built in two passes), which the grooming consumes. Pass A keeps the id M48: the maintenance sequence's numbers ascend down the rows, and CLI-M49 and CLI-M50 already gate on M48 and build on Pass A's renderer, so keeping M48 for Pass A keeps both the ascent and their gate. Pass B takes the next id, M61 (M60 was the highest ever assigned), and its row goes at the end of the Maintenance table, gated on M48. Pass B takes the source check's acceptance criterion, and the plain-bytes guard over the sites it moves. The run could not confirm the split with the user, who had been told of the plan and invited to object, so the split is flagged for their veto in the run's report. | default (the group run's grooming) |
+| 2026-11-27 | **Split into Pass A, [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), and Pass B, this item (CLI-M61)**, taking the item's own recorded default (its Open question "Should every site land in one item, or the reachable kinds first?": one item, built in two passes), which the grooming consumes. Pass A keeps the id M48: the maintenance sequence's numbers ascend down the rows, and CLI-M49 and CLI-M50 already gate on M48 and build on Pass A's renderer, so keeping M48 for Pass A keeps both the ascent and their gate. Pass B takes the next id, M61 (M60 was the highest ever assigned), and its row goes at the end of the Maintenance table, gated on M48. Pass B takes the source check's acceptance criterion, and the plain-bytes guard over the sites it moves. The run could not confirm the split with the user, who had been told of the plan and invited to object, so the split is flagged for their veto in the run's report. | default (the group run's grooming) |
 
 ## Out of scope
 
-- **Pass A's work, already done in CLI-M48.** That covers the renderer and its order and word rules, the five quoters and the hand-typed `""` folded in, fixtures (1) and (2), and the `pwsh` case. It also covers every site a name reaches with no hand edit (collections and graphs, symphonies, datasets, path values under the home, check's six chmod rows) and the backend doors: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md).
+- **Pass A's work, already done in CLI-M48.** That covers the renderer and its order and word rules, the five quoters and the hand-typed `""` folded in, fixtures (1) and (2), and the `pwsh` case. It also covers every site a name reaches with no hand edit (collections and graphs, symphonies, datasets, path values under the home, check's six chmod rows) and the backend doors: [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27).
 - **The program word and root a printed command names** (`apogee-dev`, `--dev`): [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md).
 - **Offering `rename-backend` to a backend the editors refuse**, and the dead ends for graph entries, suites, agents and MCP servers: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md).
 - **The TUI's argv without `--`** (its row actions on a dash-led row): [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md). This item renders the Train and Agents views' confirm texts.
@@ -302,7 +302,7 @@ Every fixture is hermetic: a `CliHome` or a temporary `APOGEE_HOME`, mock backen
 
 ## Links
 
-- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), Pass A of the split, whose renderer and folds this item builds on · **Blocks:** —
+- **Blocked by:** — (CLI-M48 [shipped 2026-11-27](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes)), Pass A of the split, whose renderer and folds this item builds on · **Blocks:** —
 - **Relates to:**
   - [CLI-M49](a-printed-command-names-the-binary-that-printed-it.md) and [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), gated on CLI-M48, not on this item: each, built first, moves its own remaining sites onto the renderer, and CLI-M49 starts the source check this item extends;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's row actions, whose Train and Agents confirm texts this item renders, and whose `t` prefill it wires if CLI-M51 lands first;

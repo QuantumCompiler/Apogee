@@ -17,6 +17,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/mcp_serve.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
 #include "operations/renames.h"
@@ -69,12 +70,28 @@ namespace {
     }
 }
 
-/// `text` as one word of a command a person copies: double-quoted when a
-/// shell would split it or read a backslash as an escape (a Windows path), as
-/// `spell_adapters` quotes a set.
-[[nodiscard]] std::string shell_word(const std::string& text) {
-    return text.empty() || text.find_first_of(" '\"\\") != std::string::npos ? "\"" + text + "\""
-                                                                             : text;
+/// `apogee config set-backend <name>` with `edits` as flags, each value
+/// one word -- the parts the one renderer orders (CLI-M48), so a door that
+/// adds a flag adds a part, never text after a rendered `-- <name>`.
+[[nodiscard]] harness::SuggestedCommand set_backend_parts(
+    std::string_view name, const std::vector<BackendFieldEdit>& edits) {
+    harness::SuggestedCommand command{.verbs = {"config", "set-backend"},
+                                      .parts = {harness::operand(name)}};
+    for (const BackendFieldEdit& edit : edits) {
+        std::string flag = edit.field;
+        std::ranges::replace(flag, '_', '-');
+        command.parts.push_back(harness::option("--" + flag, edit.value));
+    }
+    return command;
+}
+
+/// The same with `--adapters <set>` after the edits, the set one word.
+[[nodiscard]] std::string with_adapters(std::string_view name,
+                                        const std::vector<BackendFieldEdit>& edits,
+                                        const std::string& set) {
+    harness::SuggestedCommand command = set_backend_parts(name, edits);
+    command.parts.push_back(harness::option("--adapters", set));
+    return harness::render(command);
 }
 
 /// The adapters an entry keeps checked against the base `edits` move it
@@ -98,7 +115,6 @@ namespace {
         for (const BackendFieldEdit& edit : edits) {
             trial = harness::set_backend_field(trial, name, edit.field, edit.value);
         }
-        const std::string command = set_backend_command(name, edits);
         const harness::Config edited = harness::parse_edited_config(trial);
         const harness::BackendConfig* entry = edited.find_backend(name);
         if (entry == nullptr || entry->adapters.empty()) {
@@ -137,7 +153,7 @@ namespace {
                    " -- an adapter applies only over the weights it was trained on, so nothing "
                    "was edited; if these are the weights they were made for, re-pin them in the "
                    "same edit: " +
-                   command + " --adapters " + backends::spell_adapters(entry->adapters) +
+                   with_adapters(name, edits, backends::join_adapters(entry->adapters)) +
                    ", or take them off: " + take_off;
         }
         said = base.string() + " (sha256 " + now + ")";
@@ -305,18 +321,8 @@ constexpr std::array<std::pair<std::string_view, std::string harness::ModelsConf
 
 }  // namespace
 
-std::string set_backend_command(std::string_view name, const std::vector<BackendFieldEdit>& edits) {
-    std::string command = "apogee config set-backend " + std::string{name};
-    for (const BackendFieldEdit& edit : edits) {
-        std::string flag = edit.field;
-        std::ranges::replace(flag, '_', '-');
-        command += " --" + flag + " " + shell_word(edit.value);
-    }
-    return command;
-}
-
 std::string adapters_take_off(std::string_view name, const std::vector<BackendFieldEdit>& edits) {
-    return set_backend_command(name, edits) + " --adapters \"\"";
+    return with_adapters(name, edits, "");
 }
 
 std::string base_replaced_under_adapters(std::string_view name, const harness::BackendConfig& entry,
@@ -370,14 +376,17 @@ std::string role_refusal(std::string_view name, const harness::BackendConfig& ba
     // role it can take.
     if (embedding_role) {
         return reason +
-               " -- this mlx backend chats and embeds nothing; point the chat role at it "
-               "('apogee config set-default " +
-               std::string{name} + "') and the embedding role at a backend that embeds";
+               " -- this mlx backend chats and embeds nothing; point the chat role at it ('" +
+               harness::render(
+                   {.verbs = {"config", "set-default"}, .parts = {harness::operand(name)}}) +
+               "') and the embedding role at a backend that embeds";
     }
     return reason +
            " -- this mlx backend embeds through mlx-embeddings and answers no chat or "
-           "completion; point the embedding role at it ('apogee config set-default-embedding " +
-           std::string{name} + "') and models." + std::string{field} + " at a backend that chats";
+           "completion; point the embedding role at it ('" +
+           harness::render(
+               {.verbs = {"config", "set-default-embedding"}, .parts = {harness::operand(name)}}) +
+           "') and models." + std::string{field} + " at a backend that chats";
 }
 
 AddedBackend add_backend_text(std::string_view content, std::string_view name,

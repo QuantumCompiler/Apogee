@@ -12,7 +12,8 @@
 
 namespace apogee::testing {
 
-CliHome::CliHome(const std::string& config, std::string file) : file_(std::move(file)) {
+CliHome::CliHome(const std::string& config, std::string file, const std::string& folder)
+    : file_(std::move(file)), home_(folder.empty() ? root_.path() : root_.path() / folder) {
     std::filesystem::create_directories(config_path().parent_path());
     std::ofstream{config_path(), std::ios::binary} << config;
 }

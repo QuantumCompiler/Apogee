@@ -7,6 +7,7 @@
 #include "agentloop/graph_context.h"
 #include "agentloop/rerank.h"
 #include "contracts/errors.h"
+#include "contracts/suggested_command.h"
 
 namespace apogee::knowledge {
 namespace {
@@ -161,7 +162,10 @@ RecordGraph graph_for_records(const Store& store, const harness::Config& config,
     const agentloop::TurnGraph graph = agentloop::resolve_turn_graph(config, collection);
     if (!graph.enabled) {
         out.note = "no knowledge graph covers collection \"" + std::string{collection} +
-                   "\" -- build one with `apogee graph build " + std::string{collection} + "`";
+                   "\" -- build one with `" +
+                   harness::render(
+                       {.verbs = {"graph", "build"}, .parts = {harness::operand(collection)}}) +
+                   "`";
         return out;
     }
     std::vector<embedstore::ChunkRef> seeds;

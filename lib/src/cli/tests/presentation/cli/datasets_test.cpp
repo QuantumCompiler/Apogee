@@ -16,6 +16,7 @@
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "contracts/types.h"
 #include "logger/session.h"
 #include "support/env_guard.h"
@@ -187,6 +188,26 @@ TEST_CASE("datasets create --from sessions mines completed exchanges with the fi
                       &err) == 1);
     CHECK(err.find("--since: invalid date") != std::string::npos);
     CHECK_FALSE(std::filesystem::exists(fixture.dataset("bad")));
+}
+
+TEST_CASE("datasets synth's next step keeps a dash-led name as the option value it is",
+          "[commands][datasets][synth][M48]") {
+    // CLI-M48: `--dataset -x` parses whole, so the hint names it bare, by
+    // the one renderer -- and a plain name's line is today's bytes.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"datasets", "synth", "--teacher", "teacher", "--kit", "reasoning",
+                         "--count", "1", "--", "-x"},
+                        &out, &err) == 0);
+    INFO(err);
+    CHECK(out.find("Train on it with:  apogee train run <snapshot> --dataset -x\n") !=
+          std::string::npos);
+    REQUIRE(fixture.run({"datasets", "synth", "plain", "--teacher", "teacher", "--kit", "reasoning",
+                         "--count", "1"},
+                        &out, &err) == 0);
+    CHECK(out.find("Train on it with:  apogee train run <snapshot> --dataset plain\n") !=
+          std::string::npos);
 }
 
 TEST_CASE("datasets synth distils through a named teacher, de-duplicates, and stops at the bound",
@@ -571,7 +592,8 @@ TEST_CASE("datasets pull streams as a job: its bytes, the text run's words, wher
         return false;
     });
     CHECK(people == notices);
-    CHECK(people.back() == "Convert it with:  apogee datasets prepare " + landed.string());
+    CHECK(people.back() == "Convert it with:  apogee datasets prepare " +
+                               apogee::harness::shell_word(landed.string()));
     std::vector<std::string> files_moved;
     for (const nlohmann::json& event : moved) {
         const std::string line = "  [" + std::to_string(event.at("index").get<int>()) + "/" +

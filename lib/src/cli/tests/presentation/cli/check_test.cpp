@@ -51,6 +51,7 @@
 #include "support/gguf_builder.h"
 #include "support/mlx_model.h"
 #include "support/pipeline_model.h"
+#include "support/printed_command.h"
 #include "support/terminal_output.h"
 #include "support/towered_configs.h"
 #include "training/python_env.h"
@@ -3206,11 +3207,14 @@ TEST_CASE("the code-execution server's registration line quotes a path only wher
                                    "/opt/my python/bin/python3", "--args",
                                    "/home/me/.apogee/training/scripts/code_exec_server.py"});
     CHECK(registration.mcp_create_line("code") ==
-          "apogee mcp create code --command '/opt/my python/bin/python3' --args "
+          "apogee mcp create code --command \"/opt/my python/bin/python3\" --args "
           "/home/me/.apogee/training/scripts/code_exec_server.py");
+    // CLI-M48: the one renderer's word rule -- 53c's double quotes wherever
+    // they read back whole, as every other printed command spells a path.
     registration.interpreter = "/opt/it's/python3";
-    CHECK(registration.mcp_create_line("code").find(R"('/opt/it'\''s/python3')") !=
-          std::string::npos);
+    CHECK(registration.mcp_create_line("code").find(R"("/opt/it's/python3")") != std::string::npos);
+    registration.interpreter = "/opt/$py/python3";
+    CHECK(registration.mcp_create_line("code").find("'/opt/$py/python3'") != std::string::npos);
     // No interpreter, no line: never a guessed command.
     registration.interpreter.clear();
     CHECK(registration.mcp_create_arguments("code").empty());
@@ -3553,26 +3557,17 @@ TEST_CASE("an mlx entry's adapter is a directory, pinned to the model directory'
 namespace {
 
 /// Each door a remedy names -- `<command> to <what it does>`, joined by
-/// `, or ` -- as the words a person types after `apogee`.
+/// `, or `, both read outside quotes (CLI-M48) -- as the words a person
+/// types after `apogee`.
 [[nodiscard]] std::vector<std::vector<std::string>> doors_of(const std::string& remedy) {
     std::vector<std::vector<std::string>> doors;
-    std::size_t start = 0;
-    while (start < remedy.size()) {
-        const std::size_t end = remedy.find(", or ", start);
-        std::string door = remedy.substr(start, end == std::string::npos ? end : end - start);
-        if (const std::size_t to = door.find(" to "); to != std::string::npos) {
-            door.resize(to);
-        }
+    for (const std::string& door : apogee::testing::remedy_doors(remedy)) {
         apogee::commands::LineTokens tokens = apogee::commands::line_tokens(door);
         REQUIRE(tokens.error.empty());
         REQUIRE_FALSE(tokens.words.empty());
         REQUIRE(tokens.words.front() == "apogee");
         tokens.words.erase(tokens.words.begin());
         doors.push_back(std::move(tokens.words));
-        if (end == std::string::npos) {
-            break;
-        }
-        start = end + 5;
     }
     return doors;
 }

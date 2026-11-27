@@ -10,6 +10,7 @@
 #include "agentloop/graph_context.h"
 #include "contracts/collection_name.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/graph_communities.h"
 #include "graph/extract.h"
 
@@ -563,7 +564,10 @@ namespace {
     }
     GraphTarget target;
     target.name = name;
-    target.build_hint = "run: apogee graph build " + name;
+    // The one remedy every surface carries (CLI-M48): the CLI's error, the
+    // admin plane's body and the graph tools' result.
+    target.build_hint =
+        "run: " + harness::render({.verbs = {"graph", "build"}, .parts = {harness::operand(name)}});
     if (const harness::NamedGraphConfig* named = config.find_graph(name); named != nullptr) {
         target.store_path = agentloop::graph_db_path(name);
         if (!file_exists(target.store_path)) {

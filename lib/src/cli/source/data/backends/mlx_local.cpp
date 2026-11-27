@@ -20,6 +20,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "logger/operational.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/snapshot.h"
@@ -471,7 +472,9 @@ MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& 
                            " is a drafter: it runs beside its base model, never alone -- an mlx "
                            "entry over its base names it as its draft";
         readiness.remedy =
-            "apogee config set-backend <its base's mlx backend> --draft " + dir.string();
+            harness::render({.verbs = {"config", "set-backend"},
+                             .parts = {harness::placeholder("<its base's mlx backend>"),
+                                       harness::option("--draft", dir.string())}});
         return readiness;
     }
     if (!kind.registers()) {
@@ -566,9 +569,11 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
             !draft.pairs()) {
             readiness.refusal = MlxRefusal::Draft;
             readiness.reason = "its draft cannot run beside it: " + draft.reason;
-            readiness.remedy = draft.remedy.empty() ? "apogee config set-backend " +
-                                                          std::string{name} + " --draft \"\""
-                                                    : draft.remedy;
+            readiness.remedy = draft.remedy.empty()
+                                   ? harness::render({.verbs = {"config", "set-backend"},
+                                                      .parts = {harness::operand(name),
+                                                                harness::option("--draft", "")}})
+                                   : draft.remedy;
             return readiness;
         }
     }

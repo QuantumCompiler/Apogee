@@ -16,6 +16,7 @@
 
 #include "contracts/config_edit.h"
 #include "contracts/sha256.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/sidecar.h"
 
 namespace apogee::backends {
@@ -134,9 +135,15 @@ private:
     bool changed_ = false;
 };
 
-/// The command that writes an entry's adapters.
-[[nodiscard]] std::string retake(const AdapterCheck& check) {
-    return "apogee config set-backend " + check.backend + " --adapters";
+/// The command that writes an entry's adapters, `set` its one value -- or,
+/// as a `placeholder`, what the person fills in -- by the one renderer
+/// (CLI-M48).
+[[nodiscard]] std::string retake(const AdapterCheck& check, const std::string& set,
+                                 bool placeholder = false) {
+    return harness::render({.verbs = {"config", "set-backend"},
+                            .parts = {harness::operand(check.backend),
+                                      placeholder ? harness::option_placeholder("--adapters", set)
+                                                  : harness::option("--adapters", set)}});
 }
 
 /// Why `adapter` is not the kind of file its runtime reads, or empty: its
@@ -146,18 +153,18 @@ private:
     switch (adapter_files(adapter, check)) {
         case AdapterFiles::Missing:
             return "the adapter " + adapter.path +
-                   " is not there -- restore it, or take the adapters off with " + retake(check) +
-                   " \"\"";
+                   " is not there -- restore it, or take the adapters off with " +
+                   retake(check, "");
         case AdapterFiles::WrongKind:
             if (check.directories) {
                 return "the adapter " + adapter.path + " is not an mlx-lm adapter directory (" +
                        adapter_kind_gap(adapter, check) +
-                       ") -- name the directory its training wrote, with " + retake(check) +
-                       " <directory>";
+                       ") -- name the directory its training wrote, with " +
+                       retake(check, "<directory>", true);
             }
             return "the adapter " + adapter.path +
                    " is not a file -- a llamacpp entry applies a GGUF LoRA file, named with " +
-                   retake(check) + " <file.gguf>";
+                   retake(check, "<file.gguf>", true);
         case AdapterFiles::Pinned:
         case AdapterFiles::Unpinned:
             break;
@@ -256,7 +263,7 @@ std::string adapter_kind_gap(const harness::AdapterConfig& adapter, const Adapte
     return {};
 }
 
-std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) {
+std::string join_adapters(const std::vector<harness::AdapterConfig>& adapters) {
     std::string out;
     for (const harness::AdapterConfig& adapter : adapters) {
         std::string item = adapter.path;
@@ -267,10 +274,11 @@ std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) 
         }
         out += (out.empty() ? "" : ",") + item;
     }
-    if (out.empty()) {
-        return "\"\"";
-    }
-    return out.find_first_of(" '\"\\") == std::string::npos ? out : "\"" + out + "\"";
+    return out;
+}
+
+std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters) {
+    return harness::shell_word(join_adapters(adapters));
 }
 
 std::string weights_sha256(const fs::path& weights, const WeightHashing& hashing) {
@@ -313,8 +321,8 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
             return refused;
         }
         if (adapter.base_sha256.empty()) {
-            return "the adapter " + adapter.path + " is pinned to no base -- " + retake(check) +
-                   " " + spell_adapters(adapters) + " records the base each applies over";
+            return "the adapter " + adapter.path + " is pinned to no base -- " +
+                   retake(check, join_adapters(adapters)) + " records the base each applies over";
         }
     }
     const std::string base = weights_sha256(check.base, check.hashing);
@@ -331,7 +339,7 @@ std::string adapter_refusal(const std::vector<harness::AdapterConfig>& adapters,
                    ") -- an adapter applies only over the weights it was trained on: point "
                    "model_path back at them, or, if these are the ones it was made for, pin it "
                    "again with " +
-                   retake(check) + " " + spell_adapters(adapters);
+                   retake(check, join_adapters(adapters));
         }
     }
     return {};

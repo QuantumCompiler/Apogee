@@ -15,6 +15,7 @@
 #include "cli/tui_child.h"
 #include "cli/tui_common.h"
 #include "contracts/layout.h"
+#include "contracts/suggested_command.h"
 #include "operations/dataset_core.h"
 #include "operations/training_reads.h"
 #include "training/datasets.h"
@@ -270,8 +271,10 @@ tui::ListOptions datasets_view_options(const RootContext& context,
                         .label = "delete",
                         .confirm =
                             [](const tui::ListRow& row) {
-                                return "Delete dataset " + row.key + " ('apogee datasets delete " +
-                                       row.key + "')?";
+                                return "Delete dataset " + row.key + " ('" +
+                                       harness::render({.verbs = {"datasets", "delete"},
+                                                        .parts = {harness::operand(row.key)}}) +
+                                       "')?";
                             },
                         .run =
                             [&context, binary](const tui::ListRow& row) {

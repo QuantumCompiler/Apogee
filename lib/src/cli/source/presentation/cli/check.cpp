@@ -47,6 +47,7 @@
 #include "contracts/jsonc.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "graph/code_languages.h"
@@ -419,6 +420,14 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
     }
 }
 
+/// `chmod <mode> <path>`, the path one word by the one renderer (CLI-M48),
+/// so a home whose folder holds a space or a quote still gets the door it
+/// names.
+[[nodiscard]] std::string chmod_command(std::string_view mode, const std::string& path) {
+    return harness::render(harness::SuggestedCommand{
+        .program = "chmod", .verbs = {std::string{mode}}, .parts = {harness::operand(path)}});
+}
+
 void check_config(CheckReport& report, const CheckInputs& inputs) {
     const std::string file = inputs.config_path.filename().string();
     if (inputs.config_missing) {
@@ -548,10 +557,14 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                 // is refused, so the hint never names it.
                 add(report, Status::Fail, "Config", label,
                     "model_path does not exist: " + model.string(),
-                    "apogee config set-backend " + name +
-                        " --model-path <an existing .gguf> to repoint it, or apogee config "
-                        "delete-backend " +
-                        name + " to remove it");
+                    harness::render({.verbs = {"config", "set-backend"},
+                                     .parts = {harness::operand(name),
+                                               harness::option_placeholder(
+                                                   "--model-path", "<an existing .gguf>")}}) +
+                        " to repoint it, or " +
+                        harness::render({.verbs = {"config", "delete-backend"},
+                                         .parts = {harness::operand(name)}}) +
+                        " to remove it");
                 continue;
             }
             // A full header read rather than the 4-byte magic check this used
@@ -881,7 +894,7 @@ void check_filesystem(CheckReport& report, const CheckInputs& inputs) {
         if (leaks) {
             add(report, Status::Fail, "Filesystem", label,
                 "is readable by other users, and may hold conversation transcripts",
-                "chmod 700 '" + path.string() + "'   (or: apogee check --fix)");
+                chmod_command("700", path.string()) + "   (or: apogee check --fix)");
         } else {
             add(report, Status::Ok, "Filesystem", label, std::string{entry.purpose} + " (private)");
         }
@@ -1049,13 +1062,6 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Models", "models/",
             "no models installed -- Apogee bundles none; pull one with 'apogee models pull'");
     }
-}
-
-/// `text` as one word of a command a person copies: double-quoted when a
-/// shell would split it or read a backslash as an escape (a Windows path), as
-/// `--adapters` spells a set (53a).
-[[nodiscard]] std::string shell_word(const std::string& text) {
-    return text.find_first_of(" '\"\\") == std::string::npos ? text : "\"" + text + "\"";
 }
 
 /// The door that promotes `run` onto `name` again (53c), as it would run
@@ -1235,7 +1241,7 @@ void check_adapters(CheckReport& report, const CheckInputs& inputs) {
                 const std::filesystem::path pinned = stored_base(adapter.base_sha256);
                 return pinned.empty()
                            ? std::string{}
-                           : set_backend + " --model-path " + shell_word(pinned.string()) +
+                           : set_backend + " --model-path " + harness::shell_word(pinned.string()) +
                                  " to run it over the weights it was pinned to";
             };
             if (backend.model_path.empty()) {
@@ -1341,7 +1347,7 @@ void check_secrets(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Secrets", label,
             "is readable by other users, and it is the /v1/admin bearer",
-            "chmod 600 '" + token.string() + "'   (or: apogee check --fix)");
+            chmod_command("600", token.string()) + "   (or: apogee check --fix)");
         return;
     }
     add(report, Status::Ok, "Secrets", label, "present, private (0600)");
@@ -1372,7 +1378,7 @@ void check_credential_store(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Secrets", label,
             "is readable by other users, and it holds provider API keys",
-            "chmod 600 '" + file.string() + "'   (or: apogee check --fix)");
+            chmod_command("600", file.string()) + "   (or: apogee check --fix)");
         return;
     }
     const secrets::CredentialStore store{file};
@@ -1603,7 +1609,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
                 std::filesystem::status(command, code).permissions();
             if ((mode & std::filesystem::perms::owner_exec) == std::filesystem::perms::none) {
                 add(report, Status::Warn, "MCP", label, server.command + " is not executable",
-                    "chmod +x '" + server.command + "'   (or: apogee check --fix)");
+                    chmod_command("+x", server.command) + "   (or: apogee check --fix)");
                 continue;
             }
         }
@@ -1794,7 +1800,9 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
                    !std::filesystem::exists(collection_path(agent.collection), code)) {
             add(report, Status::Warn, "Agents", label,
                 "collection '" + agent.collection + "' does not exist; the agent runs without it",
-                "apogee embed ingest " + shell_word(agent.collection) + " <path>");
+                harness::render({.verbs = {"embed", "ingest"},
+                                 .parts = {harness::operand(agent.collection),
+                                           harness::placeholder("<path>")}}));
             clean = false;
         }
         for (const std::string& server : agent.mcp) {
@@ -1871,7 +1879,7 @@ void check_knowledge(CheckReport& report, const CheckInputs& inputs) {
     if (leaks) {
         add(report, Status::Fail, "Knowledge", archive,
             "is readable by other users, and it holds raw conversations",
-            "chmod 700 '" + raw.string() + "'   (or: apogee check --fix)");
+            chmod_command("700", raw.string()) + "   (or: apogee check --fix)");
         return;
     }
     std::size_t files = 0;
@@ -2031,10 +2039,15 @@ void check_memory(CheckReport& report, const CheckInputs& inputs) {
         std::filesystem::perms::none) {
         add(report, Status::Fail, "Memory", "recall",
             "the summaries' index is readable by others: " + index.string(),
-            "chmod 600 " + index.string());
+            chmod_command("600", index.string()));
         return;
     }
     add(report, Status::Ok, "Memory", "recall", counted + " -- private" + off);
+}
+
+/// `apogee graph build <name>`, by the one renderer (CLI-M48).
+[[nodiscard]] std::string graph_build_command(const std::string& name) {
+    return harness::render({.verbs = {"graph", "build"}, .parts = {harness::operand(name)}});
 }
 
 /// The `Graph` section: every collection whose `graph:` block says anything
@@ -2068,9 +2081,11 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
         if (!std::filesystem::exists(db, code)) {
             add(report, graph.enabled ? Status::Warn : Status::Ok, "Graph", label,
                 detail + "; no collection on disk yet",
-                graph.enabled
-                    ? "apogee embed ingest ... --db " + name + ", then apogee graph build " + name
-                    : std::string{});
+                graph.enabled ? harness::render({.verbs = {"embed", "ingest"},
+                                                 .parts = {harness::placeholder("..."),
+                                                           harness::option("--db", name)}}) +
+                                    ", then " + graph_build_command(name)
+                              : std::string{});
             continue;
         }
         try {
@@ -2079,7 +2094,7 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
             if (!stats.built()) {
                 add(report, graph.enabled ? Status::Warn : Status::Ok, "Graph", label,
                     detail + "; not built",
-                    graph.enabled ? "apogee graph build " + name : std::string{});
+                    graph.enabled ? graph_build_command(name) : std::string{});
                 continue;
             }
             detail += "; built: " + std::to_string(stats.nodes) + " node(s), " +
@@ -2116,12 +2131,18 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Fail, "Graph", label,
                 "collides with a collection name -- the collection's own graph becomes "
                 "unreachable",
-                "rename the graph: apogee config delete-graph " + name + ", then add-graph");
+                "rename the graph: " +
+                    harness::render(
+                        {.verbs = {"config", "delete-graph"}, .parts = {harness::operand(name)}}) +
+                    ", then add-graph");
             continue;
         }
         if (graph.collections.empty() && graph.sources.empty()) {
             add(report, Status::Fail, "Graph", label, "no member collections or source trees",
-                "apogee config add-graph " + name + " --collections <a,b> --force");
+                harness::render({.verbs = {"config", "add-graph"},
+                                 .parts = {harness::operand(name),
+                                           harness::option_placeholder("--collections", "<a,b>"),
+                                           harness::option("--force")}}));
             continue;
         }
         // Source trees (27k): each a directory, every language vendored.
@@ -2171,8 +2192,10 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
                 !std::filesystem::exists(member_db, code)) {
                 add(report, Status::Fail, "Graph", label,
                     "member collection '" + member + "' does not exist",
-                    "apogee embed ingest " + shell_word(member) +
-                        " <path>, or remove it from the graph's collections");
+                    harness::render(
+                        {.verbs = {"embed", "ingest"},
+                         .parts = {harness::operand(member), harness::placeholder("<path>")}}) +
+                        ", or remove it from the graph's collections");
                 members_ok = false;
             }
         }
@@ -2203,7 +2226,7 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Ok, "Graph", label, detail + "; built");
         } else {
             add(report, Status::Ok, "Graph", label, detail + "; not yet built",
-                "apogee graph build " + name);
+                graph_build_command(name));
         }
     }
 }

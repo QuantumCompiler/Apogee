@@ -273,7 +273,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
 - **`datasets prepare --out <any path>`**, by design and documented (training.md:226).
 - **The full-screen shell passing a listed name without `--`** (`tui_training.cpp:278-279`): [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md).
 - **The Mac app passing `--` before a dataset's name**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed).
-- **synth's printed next step**, `Train on it with:  apogee train run <snapshot> --dataset <name>` (`presentation/cli/datasets.cpp:520`), which prints a dash-led name bare: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md).
+- **synth's printed next step**, `Train on it with:  apogee train run <snapshot> --dataset <name>` (`presentation/cli/datasets.cpp:520`), which prints a dash-led name bare: [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27).
 - **A rule for path arguments on CLI-59d's door** ([reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)): 59d's own.
 - **Adjacent oddities the investigation left as asides**, not in this item:
   - `train run --dataset notes` prefers a file named `notes` in the working folder over the dataset (`train.cpp:1896-1898`), an order training.md:459 does not state;
@@ -289,7 +289,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose door would run these verbs: best landed first, though this item does not make that door safe for paths;
   - [CLI-M57](a-saved-chat-names-only-its-own-files.md), the same before-59d priority for a saved chat's id;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the full-screen shell's delete of a dash-led dataset;
-  - [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), synth's printed `train run … --dataset <name>` line;
+  - [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), synth's printed `train run … --dataset <name>` line;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose aside this item answers and whose `datasets delete --yes -- -h` keeps working;
   - [ADR 0002](../../../adrs/cli/mode-parity.md), [ADR 0006](../../../adrs/cli/backwards-compatibility.md), [ADR 0007](../../../adrs/cli/tab-completion.md).
 - **Follows from:** MILESTONES' `training-datasets` record (Milestone Z, 2026-09-19), whose parity table calls `datasets delete` a twin and `info` read-only. This item makes the twin claim true.

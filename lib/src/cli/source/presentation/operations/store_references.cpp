@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/hf_ref.h"
 #include "modelstore/mlx_info.h"
 
@@ -405,8 +406,13 @@ std::string clear_door(const harness::Config& config, const std::vector<StoreRef
     if (reference.backend.empty()) {
         return "apogee config set-default-video off";
     }
+    const auto set_backend = [&reference](std::string_view flag, const std::string& value) {
+        return harness::render(
+            {.verbs = {"config", "set-backend"},
+             .parts = {harness::operand(reference.backend), harness::option(flag, value)}});
+    };
     if (reference.field != "adapters") {
-        return "apogee config set-backend " + reference.backend + " --" + reference.field + " \"\"";
+        return set_backend("--" + reference.field, "");
     }
     // The adapters the entry keeps: every one the delete strands left out,
     // since `--adapters` checks and pins each it is given.
@@ -422,8 +428,8 @@ std::string clear_door(const harness::Config& config, const std::vector<StoreRef
             }
         }
     }
-    return "apogee config set-backend " + reference.backend + " --adapters " +
-           (rest.empty() ? std::string{"\"\""} : rest);
+    // The joined set is one word, `""` when nothing is kept (CLI-M48).
+    return set_backend("--adapters", rest);
 }
 
 }  // namespace apogee::commands

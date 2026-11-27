@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "agentloop/side_call.h"
+#include "contracts/suggested_command.h"
 #include "contracts/symphony_walk.h"
 #include "harness/roles.h"
 #include "symphony/runner.h"
@@ -251,8 +252,11 @@ std::string reached_at(std::string_view root, const ReachedMember& member) {
 
 std::string unprojectable(const harness::SymphonySpec& spec, const Catalog& catalog) {
     if (spec.input.image) {
-        return "it takes an image, which a tool call cannot give -- 'apogee symphonies play " +
-               spec.name + " --image <file>' plays it";
+        return "it takes an image, which a tool call cannot give -- '" +
+               harness::render({.verbs = {"symphonies", "play"},
+                                .parts = {harness::operand(spec.name),
+                                          harness::option_placeholder("--image", "<file>")}}) +
+               "' plays it";
     }
     if (const std::vector<std::string> problems = validate(spec, catalog); !problems.empty()) {
         return "it cannot be played: " + problems.front();

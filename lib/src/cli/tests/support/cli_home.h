@@ -17,10 +17,13 @@ class CliHome {
 public:
     /// `config` is the config file's text, at `config/<file>`: the older
     /// `config.yaml` unless a test names the layout's `config.json` (28i).
-    explicit CliHome(const std::string& config, std::string file = "config.yaml");
+    /// A `folder` puts the home in a folder of that name inside the
+    /// throwaway one, so its path can hold a space or a quote (CLI-M48).
+    explicit CliHome(const std::string& config, std::string file = "config.yaml",
+                     const std::string& folder = {});
 
     [[nodiscard]] const std::filesystem::path& home() const noexcept {
-        return root_.path();
+        return home_;
     }
 
     [[nodiscard]] std::filesystem::path config_path() const;
@@ -49,7 +52,8 @@ private:
 
     std::string file_;
     TempDir root_{"cli-home-" + std::to_string(std::random_device{}())};
-    EnvGuard guard_{"APOGEE_HOME", root_.path().string()};
+    std::filesystem::path home_{root_.path()};
+    EnvGuard guard_{"APOGEE_HOME", home_.string()};
 };
 
 }  // namespace apogee::testing

@@ -28,6 +28,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/errors.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/store.h"
 #include "graph/build.h"
 #include "graph/code_build.h"
@@ -86,6 +87,25 @@ void require_plain_name(std::string_view name) {
 [[nodiscard]] bool file_exists(const std::filesystem::path& path) {
     std::error_code code;
     return std::filesystem::exists(path, code);
+}
+
+/// `apogee graph <verb> <name>`, then `options`, by the one renderer
+/// (CLI-M48): a collection the CLI made -- `-x`, `a;b`, `my notes` --
+/// reaches the verb as printed.
+[[nodiscard]] std::string graph_command(std::string_view verb, const std::string& name,
+                                        const std::vector<harness::CommandPart>& options = {}) {
+    harness::SuggestedCommand command{.verbs = {"graph", std::string{verb}},
+                                      .parts = {harness::operand(name)}};
+    command.parts.insert(command.parts.end(), options.begin(), options.end());
+    return harness::render(command);
+}
+
+/// `apogee graph build --source <dir> --graph <name>`: the source tree a
+/// named graph is given, `--source` taking every word after it.
+[[nodiscard]] std::string source_build_command(const std::string& name) {
+    return harness::render({.verbs = {"graph", "build"},
+                            .parts = {harness::option_placeholder("--source", "<dir>", true),
+                                      harness::option("--graph", name)}});
 }
 
 [[nodiscard]] std::string missing_problem(const std::string& name) {
@@ -163,7 +183,7 @@ struct Target {
     if (target.named != nullptr) {
         if (!file_exists(target.db_path)) {
             fail_user("graph '" + target.name +
-                      "' has not been built yet -- run: apogee graph build " + target.name);
+                      "' has not been built yet -- run: " + graph_command("build", target.name));
         }
         return embedstore::Store{target.db_path};
     }
@@ -355,7 +375,7 @@ void print_build_summary(const std::string& name, const graph::BuildResult& resu
         std::cout << "Chunk limit reached -- the interrupted file will re-extract on the next "
                      "build.\n";
     }
-    std::cout << "Run `apogee graph stats " << name << "` for the graph's shape.\n";
+    std::cout << "Run `" << graph_command("stats", name) << "` for the graph's shape.\n";
 }
 
 [[nodiscard]] std::string type_summary(const embedstore::GraphStats& stats) {
@@ -416,7 +436,7 @@ void print_stats_body(std::ostream& out, const std::string& name,
             languages += (languages.empty() ? "" : ", ") + language + " " + std::to_string(count);
         }
         out << "  Code:      " << st.code_files << " file(s) parsed (" << languages << "), "
-            << st.unresolved_names << " unresolved name(s) -- `apogee graph update " << name
+            << st.unresolved_names << " unresolved name(s) -- `" << graph_command("update", name)
             << "` re-parses what changed\n";
     }
     if (!code_only || !st.extract_model.empty()) {
@@ -424,8 +444,8 @@ void print_stats_body(std::ostream& out, const std::string& name,
             << "\n";
     }
     if (st.stale_files > 0) {
-        out << "  Stale:     " << st.stale_files
-            << " source file(s) need re-extraction -- run `apogee graph build " << name << "`\n";
+        out << "  Stale:     " << st.stale_files << " source file(s) need re-extraction -- run `"
+            << graph_command("build", name) << "`\n";
     }
     if (st.failed_chunks > 0) {
         out << "  Failed:    " << st.failed_chunks
@@ -436,7 +456,7 @@ void print_stats_body(std::ostream& out, const std::string& name,
         if (st.communities_unsummarised > 0) {
             out << ", " << st.communities_unsummarised << " clustered without a summary";
         }
-        out << " (`apogee graph communities " << name << " --list`)\n";
+        out << " (`" << graph_command("communities", name, {harness::option("--list")}) << "`)\n";
     }
 }
 
@@ -578,8 +598,8 @@ void print_communities(const embedstore::Store& store, const std::string& name,
                        std::size_t limit = 0) {
     const std::vector<embedstore::GraphCommunity> communities = store.graph_communities();
     if (communities.empty()) {
-        std::cout << "No communities stored for \"" << name << "\". Run: apogee graph communities "
-                  << name << "\n";
+        std::cout << "No communities stored for \"" << name
+                  << "\". Run: " << graph_command("communities", name) << "\n";
         return;
     }
     std::size_t shown = 0;
@@ -609,13 +629,16 @@ void print_communities(const embedstore::Store& store, const std::string& name,
         std::cout << "\n";
     }
     if (shown < communities.size()) {
-        std::cout << "... and " << communities.size() - shown
-                  << " more -- `apogee graph communities " << name << " --list` lists every one.\n";
+        std::cout << "... and " << communities.size() - shown << " more -- `"
+                  << graph_command("communities", name, {harness::option("--list")})
+                  << "` lists every one.\n";
     }
     if (unsummarised > 0) {
         std::cout << unsummarised << " communit" << (unsummarised == 1 ? "y" : "ies")
-                  << " clustered with no model have no summary -- `apogee graph communities "
-                  << name << " -m <backend>` writes them.\n";
+                  << " clustered with no model have no summary -- `"
+                  << graph_command("communities", name,
+                                   {harness::option_placeholder("-m", "<backend>")})
+                  << "` writes them.\n";
     }
 }
 
@@ -868,11 +891,15 @@ void build_code(embedstore::Store& store, const Target& target,
     const harness::NamedGraphConfig* existing = config.find_graph(name);
     if (existing == nullptr &&
         (config.find_embedding(name) != nullptr || file_exists(collection_path(name)))) {
-        fail_user("'" + name +
-                  "' is a collection -- a source tree builds into a named graph. Name one with "
-                  "--graph <name>; it may list '" +
-                  name + "' as a member: apogee config add-graph <name> --collections " + name +
-                  " --sources <dir>");
+        fail_user(
+            "'" + name +
+            "' is a collection -- a source tree builds into a named graph. Name one with "
+            "--graph <name>; it may list '" +
+            name + "' as a member: " +
+            harness::render(
+                {.verbs = {"config", "add-graph"},
+                 .parts = {harness::placeholder("<name>"), harness::option("--collections", name),
+                           harness::option_placeholder("--sources", "<dir>", true)}}));
     }
     harness::NamedGraphConfig entry = existing != nullptr ? *existing : harness::NamedGraphConfig{};
     bool changed = existing == nullptr;
@@ -1017,12 +1044,12 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     const harness::NamedGraphConfig& named = *target.named;
     if (named.collections.empty() && named.sources.empty()) {
         fail_user("graph '" + target.name +
-                  "' has no member collections or source trees -- add some with 'apogee config "
-                  "add-graph " +
-                  target.name +
-                  " --collections <a,b> --force', or 'apogee graph build --source "
-                  "<dir> --graph " +
-                  target.name + "'");
+                  "' has no member collections or source trees -- add some with '" +
+                  harness::render({.verbs = {"config", "add-graph"},
+                                   .parts = {harness::operand(target.name),
+                                             harness::option_placeholder("--collections", "<a,b>"),
+                                             harness::option("--force")}}) +
+                  "', or '" + source_build_command(target.name) + "'");
     }
     // The graph database is created by the first real build. A dry run over
     // a graph that does not exist yet plans against an in-memory store, so
@@ -1107,16 +1134,14 @@ void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
     if (target.named == nullptr) {
         fail_user("'" + target.name +
                   "' is not a named graph -- `graph update` refreshes a named graph's source "
-                  "trees; a collection's graph is rebuilt with `apogee graph build " +
-                  target.name + "`");
+                  "trees; a collection's graph is rebuilt with `" +
+                  graph_command("build", target.name) + "`");
     }
     const harness::NamedGraphConfig& named = *target.named;
     if (!graph_updatable(named)) {
-        fail_user("graph '" + target.name +
-                  "' has no source trees -- add one with `apogee graph build --source <dir> "
-                  "--graph " +
-                  target.name + "`; its collections are extracted by `apogee graph build " +
-                  target.name + "`");
+        fail_user("graph '" + target.name + "' has no source trees -- add one with `" +
+                  source_build_command(target.name) + "`; its collections are extracted by `" +
+                  graph_command("build", target.name) + "`");
     }
     // The build lock, as every build of a named graph holds it (57t).
     std::string refusal;
@@ -1128,8 +1153,8 @@ void run_graph_update(const RootContext& context, const UpdateFlags& flags) {
     embedstore::Store store{target.db_path};
     build_code(store, target, named, flags.force, false, flags.quiet, flags.show_skipped, true);
     if (!named.collections.empty()) {
-        std::cout << "Its collections [" << join(named.collections)
-                  << "] are left as they are: `apogee graph build " << target.name
+        std::cout << "Its collections [" << join(named.collections) << "] are left as they are: `"
+                  << graph_command("build", target.name)
                   << "` extracts them, a model call per stale chunk -- `update` never makes "
                      "one.\n";
     }
@@ -1199,8 +1224,8 @@ struct StatsRead {
 
 void print_stats(std::ostream& out, const StatsRead& read) {
     if (!read.built) {
-        out << "No graph built for \"" << read.name << "\". Run: apogee graph build " << read.name
-            << "\n";
+        out << "No graph built for \"" << read.name
+            << "\". Run: " << graph_command("build", read.name) << "\n";
         return;
     }
     if (!read.named.has_value()) {
@@ -1242,7 +1267,7 @@ void print_stats(std::ostream& out, const StatsRead& read) {
     }
     if (!read.as_built.empty()) {
         out << "  Note: membership changed since the last build (was [" << join(read.as_built)
-            << "]) -- run `apogee graph build " << read.name << "` to converge.\n";
+            << "]) -- run `" << graph_command("build", read.name) << "` to converge.\n";
     }
 }
 
@@ -1538,8 +1563,8 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         const Target target = resolve_target(config, *sh_name);
         const embedstore::Store store = open_target(target);
         if (!store.graph_stats().built()) {
-            fail_user("no graph built for '" + target.name + "' -- run: apogee graph build " +
-                      target.name);
+            fail_user("no graph built for '" + target.name +
+                      "' -- run: " + graph_command("build", target.name));
         }
         // The document says the match the text says in its lines (37c).
         const bool json = *sh_format == ReadFormat::Json;
@@ -1641,8 +1666,8 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (store.graph_stats().edges == 0) {
             fail_user("graph '" + target.name +
-                      "' has no relations to cluster -- build it first: apogee graph build " +
-                      target.name);
+                      "' has no relations to cluster -- build it first: " +
+                      graph_command("build", target.name));
         }
         // Clustering is deterministic and needs no model; a summary is one
         // generation call (27k). With nothing to summarise with -- or told
@@ -1728,8 +1753,10 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << "Summaries absent: " << result.summaries_absent << " communit"
                       << (result.summaries_absent == 1 ? "y" : "ies") << " stored without one"
                       << (absent.empty() ? std::string{} : " (" + absent + ")")
-                      << " -- clustering needs no model; `apogee graph communities " << target.name
-                      << " -m <backend>` summarises them.\n";
+                      << " -- clustering needs no model; `"
+                      << graph_command("communities", target.name,
+                                       {harness::option_placeholder("-m", "<backend>")})
+                      << "` summarises them.\n";
         }
         if (!result.embed_error.empty()) {
             std::cout << "Warning: summary embedding stopped early (" << result.embed_error
@@ -1822,11 +1849,12 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             if (const std::size_t cleared = pass.vectors_cleared(); cleared > 0) {
                 std::cout << cleared
                           << " survivor(s) took a merged description and lost their vector -- "
-                             "full-text searchable until `apogee graph build "
-                          << target.name << "` embeds them again.\n";
+                             "full-text searchable until `"
+                          << graph_command("build", target.name) << "` embeds them again.\n";
             }
-            std::cout << "Note: community memberships changed -- re-run `apogee graph communities "
-                      << target.name << "` to refresh the summaries.\n";
+            std::cout << "Note: community memberships changed -- re-run `"
+                      << graph_command("communities", target.name)
+                      << "` to refresh the summaries.\n";
         }
     });
 
@@ -1862,9 +1890,10 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
             const embedstore::GraphStats& st = deletion.stats;
             std::cout << "Deleted graph \"" << target.name << "\": " << st.nodes << " node(s), "
                       << st.edges << " edge(s), " << st.mentions
-                      << " mention(s). The graphs: config entry is untouched (`apogee config "
-                         "delete-graph "
-                      << target.name << "` removes it).\n";
+                      << " mention(s). The graphs: config entry is untouched (`"
+                      << harness::render({.verbs = {"config", "delete-graph"},
+                                          .parts = {harness::operand(target.name)}})
+                      << "` removes it).\n";
             return;
         }
         embedstore::Store store = open_existing(target.name);

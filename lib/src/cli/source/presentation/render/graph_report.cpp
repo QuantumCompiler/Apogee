@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/suggested_command.h"
+
 namespace apogee::render {
 namespace {
 
@@ -209,18 +211,24 @@ void communities(std::string& out, const json& report, const std::string& graph)
     const std::int64_t total = num(stored, "total");
     out += "## Communities\n\n";
     if (total == 0) {
-        out += "No communities are stored -- `apogee graph communities " + graph +
+        out += "No communities are stored -- `" +
+               harness::render(
+                   {.verbs = {"graph", "communities"}, .parts = {harness::operand(graph)}}) +
                "` clusters them (with `--no-summaries`, no model call).\n\n";
         return;
     }
     const std::int64_t summarised = total - num(stored, "unsummarised");
-    out +=
-        count_of(total, "community is stored", "communities are stored") + "; " +
-        summary_count(summarised) +
-        (summarised < total ? " -- `apogee graph communities " + graph + " -m <backend>` writes " +
-                                  (summarised == 0 ? "them" : "the rest")
-                            : std::string{}) +
-        ". " + (std::cmp_equal(shown.size(), total) ? "Largest first:" : "The largest:") + "\n\n";
+    out += count_of(total, "community is stored", "communities are stored") + "; " +
+           summary_count(summarised) +
+           (summarised < total
+                ? " -- `" +
+                      harness::render({.verbs = {"graph", "communities"},
+                                       .parts = {harness::operand(graph),
+                                                 harness::option_placeholder("-m", "<backend>")}}) +
+                      "` writes " + (summarised == 0 ? "them" : "the rest")
+                : std::string{}) +
+           ". " + (std::cmp_equal(shown.size(), total) ? "Largest first:" : "The largest:") +
+           "\n\n";
     for (const json& community : shown) {
         const std::int64_t size = num(community, "size");
         out += "### Community " + std::to_string(num(community, "id")) + " -- " +

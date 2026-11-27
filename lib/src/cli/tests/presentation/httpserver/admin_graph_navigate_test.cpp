@@ -80,6 +80,22 @@ TEST_CASE("served navigation reads answer 200 with the document", "[httpserver][
     CHECK(nlohmann::json::parse(explain.body)["decisions"][0]["name"] == "kr-0001");
 }
 
+TEST_CASE("a served read of an unbuilt collection carries the build that runs as printed",
+          "[httpserver][admin][graph][M48]") {
+    // CLI-M48 (ADR 0002): the body is the CLI's text, from the one build
+    // hint -- a collection the CLI made, `-y`, named past `--`.
+    const Fixture fixture;
+    {
+        const apogee::embedstore::Store dashed{apogee::harness::embeddings_dir() / "-y.db"};
+    }
+    const HttpResponse response =
+        apogee::httpserver::admin_graph_neighbors(fixture.context(), "-y", get({{"node", "Fox"}}));
+    CHECK(response.status == 404);
+    CHECK(error_of(response)["type"] == "not_found_error");
+    CHECK(error_of(response)["message"] ==
+          "no graph built for '-y' -- run: apogee graph build -- -y");
+}
+
 TEST_CASE("served navigation failures carry the CLI's message and the right status",
           "[httpserver][admin][graph]") {
     const Fixture fixture;

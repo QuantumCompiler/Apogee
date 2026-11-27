@@ -24,6 +24,7 @@
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "embedstore/ingest.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
@@ -170,14 +171,19 @@ void print_ingest_details(std::ostream& out, const std::string& collection,
     }
     for (const embedstore::Collision& collision : report.collisions) {
         out << "refused " << collision.source << ": it is already in '" << collection << "' from "
-            << collision.root << ", not " << report.root
-            << " -- delete it with 'apogee embed delete " << collection << " --source "
-            << collision.source << "' to replace it\n";
+            << collision.root << ", not " << report.root << " -- delete it with '"
+            << harness::render({.verbs = {"embed", "delete"},
+                                .parts = {harness::operand(collection),
+                                          harness::option("--source", collision.source)}})
+            << "' to replace it\n";
     }
     if (!report.still_held.empty()) {
         out << "\nstill in '" << collection << "' from an earlier ingest, though a walk now "
-            << "leaves them out -- 'apogee embed delete " << collection
-            << " --source <name>' removes one:\n";
+            << "leaves them out -- '"
+            << harness::render({.verbs = {"embed", "delete"},
+                                .parts = {harness::operand(collection),
+                                          harness::option_placeholder("--source", "<name>")}})
+            << "' removes one:\n";
         for (const std::string& source : report.still_held) {
             out << "  " << source << "\n";
         }
@@ -767,9 +773,12 @@ void print_collection_query(std::ostream& out, const RootContext& context,
     const std::filesystem::path path = collection_path(query.collection);
     std::error_code code;
     if (!std::filesystem::exists(path, code)) {
-        throw std::runtime_error{"no collection named '" + query.collection +
-                                 "'. Create one with 'apogee embed ingest " + query.collection +
-                                 " <path>'"};
+        throw std::runtime_error{
+            "no collection named '" + query.collection + "'. Create one with '" +
+            harness::render(
+                {.verbs = {"embed", "ingest"},
+                 .parts = {harness::operand(query.collection), harness::placeholder("<path>")}}) +
+            "'"};
     }
 
     // The same decision `complete` and `chat` make, from the same facts.

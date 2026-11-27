@@ -88,15 +88,11 @@ struct BackendFieldsOutcome {
 [[nodiscard]] std::string kind_refusal(std::string_view name,
                                        const harness::BackendConfig& backend);
 
-/// `apogee config set-backend <name>` with `edits` as flags, each value one
-/// word a person copies -- double-quoted where a shell would split it.
-[[nodiscard]] std::string set_backend_command(std::string_view name,
-                                              const std::vector<BackendFieldEdit>& edits = {});
-
 /// The edit that takes backend `name`'s adapters off, `edits` beside it --
-/// `set_backend_command(name, edits) --adapters ""` -- the door every move of
-/// an entry's base under the adapters it keeps names: 55e's refusals and a
-/// merged promote's (57i).
+/// `apogee config set-backend <name>`, each edit a flag, then
+/// `--adapters ""`, one command rendered by the one renderer (CLI-M48) --
+/// the door every move of an entry's base under the adapters it keeps
+/// names: 55e's refusals and a merged promote's (57i).
 [[nodiscard]] std::string adapters_take_off(std::string_view name,
                                             const std::vector<BackendFieldEdit>& edits = {});
 

@@ -33,6 +33,7 @@
 #include "contracts/errors.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "models/acquire.h"
 #include "models/convert.h"
 #include "models/quantize.h"
@@ -64,6 +65,22 @@ constexpr std::string_view kMlxVideoRemedy = "apogee train setup --with mlx-vide
 
 /// What installs mlx-audio's converter and its Kokoro (53m): opt-in too.
 constexpr std::string_view kMlxAudioRemedy = "apogee train setup --with mlx-audio";
+
+/// `apogee config delete-backend <name>`, by the one renderer (CLI-M48): a
+/// hand-written backend `a;b` is deleted as itself, never `a`.
+[[nodiscard]] std::string delete_backend_command(const std::string& name) {
+    return harness::render(
+        {.verbs = {"config", "delete-backend"}, .parts = {harness::operand(name)}});
+}
+
+/// `apogee config add-backend <name> --type mlx --model-path <dir>`, the
+/// stored MLX directory one word, as a path under a home with a space is.
+[[nodiscard]] std::string mlx_add_command(const std::string& name,
+                                          const models::StoredMlx& stored) {
+    return harness::render({.verbs = {"config", "add-backend"},
+                            .parts = {harness::operand(name), harness::option("--type", "mlx"),
+                                      harness::option("--model-path", stored.dir.string())}});
+}
 
 /// Whether `conversions` -- what `models::snapshot_conversions` answers for a
 /// set -- holds `format`.
@@ -262,14 +279,16 @@ std::string projector_failure(const std::string& error) {
 /// entry, since it answers no chat (55d).
 void print_backend_hint(const std::filesystem::path& model_file,
                         const std::filesystem::path& projector, bool embedding = false) {
+    harness::SuggestedCommand add{
+        .verbs = {"config", "add-backend"},
+        .parts = {harness::placeholder("<name>"), harness::option("--type", "llamacpp"),
+                  harness::option("--model-path", model_file.string())}};
+    if (!projector.empty()) {
+        add.parts.push_back(harness::option("--mmproj-path", projector.string()));
+    }
     std::cout << (embedding ? "\nUse it as the embedding role by adding a backend:\n"
                             : "\nUse it by adding a backend:\n")
-              << "  apogee config add-backend <name> --type llamacpp --model-path "
-              << model_file.string();
-    if (!projector.empty()) {
-        std::cout << " --mmproj-path " << projector.string();
-    }
-    std::cout << "\n";
+              << "  " << harness::render(add) << "\n";
     if (embedding) {
         std::cout << "  apogee config set-default-embedding <name>\n";
     }
@@ -414,8 +433,11 @@ bool remove_backends_too(
 }
 
 std::string backend_doors(const std::string& name) {
-    return "repoint it: apogee config set-backend " + name +
-           " --model-path <file>; or remove it: apogee config delete-backend " + name;
+    return "repoint it: " +
+           harness::render({.verbs = {"config", "set-backend"},
+                            .parts = {harness::operand(name),
+                                      harness::option_placeholder("--model-path", "<file>")}}) +
+           "; or remove it: " + delete_backend_command(name);
 }
 
 std::vector<std::string> settle_backends(const std::filesystem::path& config_path,
@@ -869,9 +891,8 @@ DeletePlan plan_delete(const models::StoreRoots& roots, const harness::Config& c
     plan.error = backend->second.model_path.empty()
                      ? "backend '" + std::string{name} + "' (" +
                            std::string{harness::to_string(backend->second.type)} +
-                           ") has no model file to delete -- remove the backend itself with "
-                           "'apogee config delete-backend " +
-                           std::string{name} + "'"
+                           ") has no model file to delete -- remove the backend itself with '" +
+                           delete_backend_command(std::string{name}) + "'"
                      : "backend '" + std::string{name} + "' points at " +
                            harness::expand_env_and_home(backend->second.model_path) +
                            ", outside the model store -- Apogee deletes only what is in it";
@@ -1448,8 +1469,7 @@ namespace {
 /// `config add-backend` would fill it with.
 void print_mlx_backend_hint(const models::StoredMlx& stored) {
     std::cout << "\nUse it by adding a backend:\n"
-              << "  apogee config add-backend " << models::stored_mlx_name(stored)
-              << " --type mlx --model-path " << stored.dir.string() << "\n";
+              << "  " << mlx_add_command(models::stored_mlx_name(stored), stored) << "\n";
     if (platform::host_target() != "macos-arm64") {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
                   << platform::host_target() << ")\n";
@@ -1478,7 +1498,10 @@ void print_mlx_backend_hint(const models::StoredMlx& stored) {
 void print_mlx_drafter_hint(const models::StoredMlx& stored) {
     std::cout << "\nDraft with it beside its base -- an mlx backend over its base's MLX build "
                  "(converted with --mlx) -- by naming it as that backend's draft:\n"
-              << "  apogee config set-backend <that backend> --draft " << stored.dir.string()
+              << "  "
+              << harness::render({.verbs = {"config", "set-backend"},
+                                  .parts = {harness::placeholder("<that backend>"),
+                                            harness::option("--draft", stored.dir.string())}})
               << "\n";
     if (platform::host_target() != "macos-arm64") {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
@@ -1508,9 +1531,11 @@ void print_mlx_drafter_hint(const models::StoredMlx& stored) {
 void print_mlx_embedding_hint(const models::StoredMlx& stored) {
     const std::string name = models::stored_mlx_name(stored);
     std::cout << "\nUse it as the embedding role by adding a backend:\n"
-              << "  apogee config add-backend " << name << " --type mlx --model-path "
-              << stored.dir.string() << "\n"
-              << "  apogee config set-default-embedding " << name << "\n";
+              << "  " << mlx_add_command(name, stored) << "\n"
+              << "  "
+              << harness::render({.verbs = {"config", "set-default-embedding"},
+                                  .parts = {harness::operand(name)}})
+              << "\n";
     if (platform::host_target() != "macos-arm64") {
         std::cout << "(the mlx backend runs on Apple silicon macOS only; this build is "
                   << platform::host_target() << ")\n";
@@ -2866,7 +2891,7 @@ void check_registrations(const models::StoreRoots& roots, const std::filesystem:
             const std::filesystem::path path = configured_path(found->second.model_path);
             fail("backend '" + name + "' already exists" +
                  (path.empty() ? std::string{} : " and points at " + path.string()) +
-                 " -- remove it with 'apogee config delete-backend " + name +
+                 " -- remove it with '" + delete_backend_command(name) +
                  "' first, or register this one by hand under another name");
         }
     }
@@ -2909,9 +2934,8 @@ void register_backends(const std::filesystem::path& config_path,
                 configured_path(found->second.mmproj_path) == entry.projector.lexically_normal();
             if (!same) {
                 fail("backend '" + entry.name +
-                     "' already exists and points elsewhere -- remove it "
-                     "with 'apogee config delete-backend " +
-                     entry.name + "', then resume");
+                     "' already exists and points elsewhere -- remove it with '" +
+                     delete_backend_command(entry.name) + "', then resume");
             }
             std::cout << "already registered: " << entry.name << "\n";
         } else {
@@ -3192,10 +3216,8 @@ void register_mlx_backend(const std::filesystem::path& config_path, const std::s
     if (const auto found = config.backends.find(name); found != config.backends.end()) {
         if (found->second.type != harness::BackendType::Mlx ||
             configured_path(found->second.model_path) != dir.lexically_normal()) {
-            fail("backend '" + name +
-                 "' already exists and points elsewhere -- remove it with 'apogee config "
-                 "delete-backend " +
-                 name + "', then resume");
+            fail("backend '" + name + "' already exists and points elsewhere -- remove it with '" +
+                 delete_backend_command(name) + "', then resume");
         }
         std::cout << "already registered: " << name << "\n";
     } else {

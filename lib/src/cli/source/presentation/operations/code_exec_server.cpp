@@ -3,27 +3,12 @@
 #include <system_error>
 
 #include "contracts/assets.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 #include "training/python_env.h"
 
 namespace apogee::operations {
 namespace {
-
-/// `word` as a POSIX shell reads it back unchanged: bare when it is only
-/// characters a shell leaves alone, else single-quoted.
-[[nodiscard]] std::string shell_word(const std::string& word) {
-    const bool plain = !word.empty() && word.find_first_not_of(
-                                            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                                            "0123456789_./~:@%+=,-") == std::string::npos;
-    if (plain) {
-        return word;
-    }
-    std::string out = "'";
-    for (const char c : word) {
-        out += c == '\'' ? std::string{"'\\''"} : std::string(1, c);
-    }
-    return out + "'";
-}
 
 /// Two paths name the same file: compared as written, then as resolved.
 [[nodiscard]] bool same_file(const std::filesystem::path& a, const std::filesystem::path& b) {
@@ -45,11 +30,14 @@ std::vector<std::string> CodeExecRegistration::mcp_create_arguments(std::string_
 }
 
 std::string CodeExecRegistration::mcp_create_line(std::string_view name) const {
-    std::string line = "apogee";
-    for (const std::string& argument : mcp_create_arguments(name)) {
-        line += " " + shell_word(argument);
+    if (interpreter.empty()) {
+        return {};
     }
-    return line;
+    // The one renderer (CLI-M48): `--args` takes every word after it.
+    return harness::render(harness::SuggestedCommand{
+        .verbs = {"mcp", "create"},
+        .parts = {harness::operand(name), harness::option("--command", interpreter.string()),
+                  harness::option("--args", script.string(), true)}});
 }
 
 CodeExecRegistration code_exec_registration(

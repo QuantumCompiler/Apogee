@@ -105,10 +105,14 @@ enum class AdapterFiles : std::uint8_t {
 [[nodiscard]] std::string adapter_kind_gap(const harness::AdapterConfig& adapter,
                                            const AdapterCheck& check);
 
-/// `adapters` as `config set-backend --adapters` spells them (53c):
-/// `<path>[:<scale>]`, comma-joined, quoted where a shell would split them
-/// or read a backslash as an escape (a Windows path), `""` for none -- the whole set a fix names,
-/// so it drops nothing it did not mean to.
+/// `adapters` as `config set-backend --adapters` takes them (53c):
+/// `<path>[:<scale>]`, comma-joined, as one unquoted value -- what a
+/// printed command's `--adapters` option carries (CLI-M48).
+[[nodiscard]] std::string join_adapters(const std::vector<harness::AdapterConfig>& adapters);
+
+/// `adapters` as one word of a printed command (53c, CLI-M48): the joined
+/// set through the one renderer's `shell_word`, `""` for none -- the whole
+/// set a fix names, so it drops nothing it did not mean to.
 [[nodiscard]] std::string spell_adapters(const std::vector<harness::AdapterConfig>& adapters);
 
 /// Why `adapters` cannot apply over `check.base`, or empty when they can:

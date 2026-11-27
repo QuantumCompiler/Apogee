@@ -1710,7 +1710,10 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   scale the loader refuses, or pinned to other weights than the base holds
   now; `skipped` when the base cannot be read to check its pin -- each failure's
   `remedy` its doors, `, or `-joined, each a command before ` to <what it
-  does>`. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
+  does>`. Since CLI-M48 a door's words may be quoted as a POSIX shell reads
+  them (PowerShell's spelling on Windows) -- `"my notes"`, `'$HOME'` -- and a
+  dash-led name may follow `--`, so a host reads ` to ` and `, or ` outside
+  quotes. Since M23 the `MLX` section's `runtime`, `vision` and `embeddings`
   rows say each set's installed version against its floor, and two rows join
   them, `video` (mlx-video, its commit against its pin) and `voice`
   (mlx-audio) -- read from the environment's `*.dist-info` records, nothing

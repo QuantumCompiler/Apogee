@@ -231,6 +231,25 @@ TEST_CASE("with no graph built, the tools say how to build one", "[tools][graph]
     CHECK(contains(outcome.content, "no graph is built yet"));
 }
 
+TEST_CASE("a graph tool on an unbuilt collection names the build that runs as printed",
+          "[tools][graph][M48]") {
+    // CLI-M48: the tool result is the model's -- and the saved session's --
+    // copy of the CLI's remedy, from the one build hint.
+    const apogee::testing::TempDir home{"tools-graph-dashed-" +
+                                        std::to_string(std::random_device{}())};
+    const apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
+    {
+        const apogee::embedstore::Store dashed{apogee::harness::embeddings_dir() / "-y.db"};
+    }
+    const apogee::harness::Config config;
+    ToolRegistry registry;
+    apogee::tools::register_graph_tools(registry, {.config = &config, .scope = {}});
+    const ToolOutcome outcome =
+        registry.find("graph_query")->run(R"({"question":"x","collection":"-y"})");
+    CHECK(outcome.is_error);
+    CHECK(outcome.content == "Error: no graph built for '-y' -- run: apogee graph build -- -y");
+}
+
 TEST_CASE("a scoped toolset reads the store it was handed, and takes no selection",
           "[tools][graph][scope]") {
     const apogee::testing::TempDir dir{"tools-graph-scope-" +

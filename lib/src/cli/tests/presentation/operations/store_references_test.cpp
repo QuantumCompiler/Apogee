@@ -11,6 +11,7 @@
 
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/suggested_command.h"
 #include "modelstore/store.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
@@ -345,7 +346,8 @@ TEST_CASE("a delete lets each reference go byte for byte as its own command woul
     CHECK(apogee::commands::clear_door(config, stranded, stranded[0]) ==
           "apogee config set-backend e4b --draft \"\"");
     CHECK(apogee::commands::clear_door(config, stranded, stranded[1]) ==
-          "apogee config set-backend local --adapters " + store.outside.string());
+          "apogee config set-backend local --adapters " +
+              apogee::harness::shell_word(store.outside.string()));
     CHECK(apogee::commands::clear_door(config, stranded, stranded[2]) ==
           "apogee config set-default-video off");
     CHECK(apogee::commands::clear_door(config, stranded, all[0]).empty());
@@ -359,6 +361,6 @@ TEST_CASE("a delete lets each reference go byte for byte as its own command woul
               ->adapters.empty());
     // A scale other than 1 is carried as the flag takes it.
     CHECK(apogee::commands::clear_door(config, {all[5]}, all[5]) ==
-          "apogee config set-backend local --adapters " + (store.lora / "style.gguf").string() +
-              ":0.5");
+          "apogee config set-backend local --adapters " +
+              apogee::harness::shell_word((store.lora / "style.gguf").string() + ":0.5"));
 }

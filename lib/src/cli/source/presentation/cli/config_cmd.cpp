@@ -31,6 +31,7 @@
 #include "contracts/mcp_serve.h"
 #include "contracts/paths.h"
 #include "contracts/server_tools.h"
+#include "contracts/suggested_command.h"
 #include "graph/code_languages.h"
 #include "modelstore/mlx_info.h"
 #include "modelstore/store.h"
@@ -1399,7 +1400,10 @@ void bind_add_graph(CLI::App& parent, const RootContext& context) {
             return harness::append_graph(content, flags->name, graph, flags->force);
         });
         std::cout << "added graph '" << flags->name << "' to " << path.string()
-                  << " -- build it with: apogee graph build " << flags->name << "\n";
+                  << " -- build it with: "
+                  << harness::render(
+                         {.verbs = {"graph", "build"}, .parts = {harness::operand(flags->name)}})
+                  << "\n";
     });
 }
 
@@ -1414,7 +1418,9 @@ void bind_delete_graph(CLI::App& parent, const RootContext& context) {
             return harness::delete_graph(content, *name);
         });
         std::cout << "removed graph '" << *name << "' from " << path.string()
-                  << " (its database, if built, stays: `apogee graph delete " << *name
+                  << " (its database, if built, stays: `"
+                  << harness::render(
+                         {.verbs = {"graph", "delete"}, .parts = {harness::operand(*name)}})
                   << "` removes it while the entry exists)\n";
     });
 }

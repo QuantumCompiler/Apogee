@@ -422,3 +422,24 @@ TEST_CASE("a dataset deleted from its view is apogee datasets delete's, asked fi
     CHECK(has(stage.frame(), "will remove:"));
     CHECK_FALSE(fs::exists(starter));
 }
+
+TEST_CASE("a dataset named with a leading dash is confirmed by the command that reaches it",
+          "[cli][tui][training][M48]") {
+    // CLI-M48: the confirm names the command as it runs when pasted -- `--`
+    // before a dash-led name -- by the one renderer.
+    const Home home;
+    const fs::path dashed = home.training() / "datasets" / "-x.jsonl";
+    write(dashed,
+          "{\"messages\": [{\"role\": \"user\", \"content\": \"hi\"}, "
+          "{\"role\": \"assistant\", \"content\": \"hello\"}]}\n");
+    Stage stage{home, false, built_binary()};
+    (void)stage.frame();
+    for (int step = 0; step < 20 && !has(stage.frame(), "› -x"); ++step) {
+        stage.press(Key::named(Key::Name::Down));
+    }
+    REQUIRE(has(stage.frame(), "› -x"));
+    stage.press(Key::character("x"));
+    CHECK(has(stage.frame(), "Delete dataset -x ('apogee datasets delete -- -x')? [y/N]"));
+    stage.press(Key::character("n"));
+    CHECK(fs::exists(dashed));
+}

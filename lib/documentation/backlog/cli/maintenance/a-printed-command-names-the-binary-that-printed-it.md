@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Output › the program word and root flag of every printed command (`contracts/paths`, CLI-M48's `contracts/suggested_command`) |
 | **Labels** | `remedies` `dev-channel` `root-flags` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The investigation of the APP-M21 and APP-M22 probes' CLI asides (2026-11-26): a sandboxed investigator, then two skeptics, one of whom found this case, and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -244,7 +244,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 | Should `--custom <path>` be echoed? | `[default]` | Yes, as two words, `--custom` and the file, each quoted by `shell_word`, the file made absolute as `acp registration` prints it (`acp_registration.cpp:62`), so the command runs from any folder. A remedy without it runs against another root. |
 | Do the fully literal printed commands take the program word in this item? | `[default]` | Yes. Every command the output tells a person to run is built through the renderer, literal or not: a remedy, a door, a `Run:` or `run:` hint, `check`'s remedies. So `apogee check --fix` and `apogee config migrate` stop sending a dev build's user to `~/.apogee`. Help text, completion descriptions and prose that names a verb in passing keep `apogee`, each on the source check's list for this rule with its reason, apart from M61's allowlist, which stays empty. |
 | Should `--config <file>` be echoed beside the root flag? | `[default]` | No, not in this item. It names a config file, not the root (M10's record), and it was not measured. A follow-up that wants it has 56d's shape: `--config <absolute file>` beside a channel flag or none, never beside `--custom` (`acp_registration.cpp:65-71`). |
-| How a word is quoted, where `--` goes, and the Windows rule | `(consumed decision)` | [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) owns them. This item's words go through its `shell_word`. |
+| How a word is quoted, where `--` goes, and the Windows rule | `(consumed decision)` | [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27) owns them. This item's words go through its `shell_word`. |
 
 ## Decision log
 
@@ -260,7 +260,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 
 ## Out of scope
 
-- **How a printed command's words are quoted and ordered**, the renderer itself and the quoter folds: [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md). Its source check: [CLI-M61](every-printed-command-goes-through-the-renderer.md).
+- **How a printed command's words are quoted and ordered**, the renderer itself and the quoter folds: [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27). Its source check: [CLI-M61](every-printed-command-goes-through-the-renderer.md).
 - **The rename door** a refused backend name is pointed to: [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md).
 - **The TUI's row actions** passing a dash-led name: [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md).
 - **The house voice and the version line** (`apogee <verb>: `, `apogee: `, `apogee 0.2.0 …`), CLI11's usage line (the app named `apogee`, `root.cpp:91`), and help text. They keep `apogee`.
@@ -273,9 +273,9 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
 
 ## Links
 
-- **Blocked by:** [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md) · **Blocks:** —
+- **Blocked by:** — (CLI-M48 [shipped 2026-11-27](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes)) · **Blocks:** —
 - **Sibling:**
-  - [CLI-M48](a-suggested-command-runs-as-printed-for-every-name-the-cli-makes.md), the renderer this item names the binary in, and [CLI-M61](every-printed-command-goes-through-the-renderer.md), which moves the remaining sites onto it and ships the source check this item extends;
+  - [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), the renderer this item names the binary in, and [CLI-M61](every-printed-command-goes-through-the-renderer.md), which moves the remaining sites onto it and ships the source check this item extends;
   - [CLI-M50](a-refused-backend-name-gets-the-rename-that-reaches-it.md), whose door is built through the same renderer and takes the program word with no change of its own;
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's argv builders.
 - **Relates to:**

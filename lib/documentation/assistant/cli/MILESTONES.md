@@ -126,6 +126,7 @@ The two GCCs ran with code generation, so their flow-based warnings show.
 
 - [x] **A drafter's record was never rewritten on Windows** (M25). `rename_snapshot_base` held the record open in an `std::ifstream` while `write_snapshot` replaced it, which Windows refuses. A base's rename then said "could not be rewritten" and left the drafter naming the old base. The read now closes first: the class `rename_session_backend` met on 2026-10-16 (Milestone B). It accounted for 4 of the 16 cases: `store_test`'s, and three in `renames_test`.
 - [x] **A printed door kept a Windows path's backslashes unquoted** (53c). `check`'s Adapters rows and `config set-backend`'s refusals printed `--adapters D:\a\...\style.gguf` bare. A POSIX shell, and the shell's own exec line (`line_tokens`), read each `\` as an escape, so the door ran with the separators gone (`check_test`'s door case). `spell_adapters` and both `shell_word` helpers now quote a word holding a backslash too. A path on macOS or Linux holds none, so nothing printed there changes. The next run found four tests that had pinned a door's bare spelling (`adapters_test`, `backend_fields_test`, two in `check_test`). They now build the word by the same rule.
+  - *Revised 2026-11-27 by [CLI-M48](#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes):* 53c's double quotes broke some words: `;`, `$` and a backtick stayed bare, `a"b` and a UNC path or a path ending in a backslash were mangled, and `check` printed the empty word as nothing. The one renderer's word rule keeps 53c's double quotes for every word they read back whole, and single-quotes the rest. The three quoters this line names are folded into it.
 - [x] **The other 11 cases were the tests', held now to what the code writes on every platform:**
   - the expected config built with `harness::yaml_scalar`, as the editor writes a value. A Windows path is quoted for its drive's colon.
   - expected paths joined with `/` or made absolute the way the code makes them (`lexically_normal`). The pipeline golden's paths read with `/` wherever the platform's separator is `\`.
@@ -3503,6 +3504,60 @@ The integration spike's wall **W7** — "everything else is a CLI command", but 
 **Not verified.** Windows (the suite is in-process and portable; not run there); HTTP twins for the model, chat and doctor reads (none exist; out of scope).
 
 **Left for the owner.** `models info`/`status` as `label: value` fields rather than typed documents; models, chats and check having no admin twin.
+
+### 2026-11-27 — `a-suggested-command-runs-as-printed-for-every-name-the-cli-makes` (maintenance item M48): a suggested command runs as printed, for every name the CLI makes
+
+**Why.** The Mac app's APP-M21 probes left a CLI aside, and a sandboxed investigation, two skeptics and a critic measured it on 2026-11-26. `apogee graph show -- -x Fox` said `run: apogee graph build -x`, and that line, pasted, exited 109.
+- **No function rendered a printed command.** About 226 name holes at about 189 sites joined a name or a path in raw, and five private quoters each solved part of the job, differently.
+- **Every kind of word failed somewhere.** For a collection `a;b` the pasted line built collection `a`, then ran `b`. A hand-written backend `a;b` lost backend `a` to `models delete`'s remedy. `-h` printed help and exited 0, and zsh read `=ls` as `/bin/ls`. A name with a space or a quote, and every path under a home such as `it's home`, failed to parse. A symphony `-q` could be created and not played or edited as printed.
+- **The same text reached other readers**: `check`'s JSON `remedy`, the HTTP admin graph bodies, the graph tools' results and the TUI's confirm prompts.
+The item was specced whole, then split on 2026-11-27: this pass is the renderer, the folds, and every name the CLI makes plus the backend doors. [CLI-M61](../../backlog/cli/maintenance/every-printed-command-goes-through-the-renderer.md) moves the rest and adds the source check.
+
+**What was built**
+
+- [x] **One renderer, in contracts** (`contracts/suggested_command.h/.cpp`, pure text).
+  - `shell_word(word, shell)`: bare when every character is in `A-Za-z0-9_./:@%+=,-` and it does not start with `=`; `""` for the empty word; 53c's double quotes when the word holds no `$`, backtick, `"`, `!` or control character, no doubled backslash and no trailing backslash; single quotes otherwise. Under PowerShell, the Windows build's shell (`native_command_shell()`), a `,` or a leading `@` also quotes, and a `'` inside single quotes is written `''`; a typographic quote moves a word to single quotes, and `--%` is never bare.
+  - `SuggestedCommand` (`program`, `verbs`, `parts`), whose parts are `operand`, `placeholder` (printed verbatim), `option` and `option_placeholder`. A caller marks an option with no limit on its values as greedy.
+  - `render`: today's order for a plain command, byte for byte. For a dash-led operand, or a greedy option directly before an operand, the options come first, then a `--` CLI11 eats after a greedy last option, then a `--` before a dash-led operand, then the operands. `render_all` joins several.
+- [x] **The quoters fold into it.** The `shell_word` copies in `code_exec_server.cpp`, `check.cpp` and `backend_fields.cpp` are gone. `spell_adapters` quotes `join_adapters`' set with the rule, and `clear_door`'s joined set is one word. The hand-typed `""` in `mlx_local.cpp`, `store_references.cpp`, `backend_fields.cpp`, `train.cpp` and `backends/adapters.cpp`'s take-off door are renders. `adapters_take_off` and the re-pin door build parts, so a door that adds `--adapters` adds a part, never text after a rendered `-- <name>`.
+- [x] **Every site a name reaches with no hand edit, and the backend doors.**
+  - The graph: `graph.cpp`'s 22 sites, `graph report`'s two (`render` now links `contracts`), `navigate`'s `build_hint` -- so the HTTP bodies, the graph tools and the navigation verbs carry it with no code of their own -- and `knowledge query --graph`'s note.
+  - `check`: the collection and graph rows (CLI-M46's two `embed ingest` remedies among them), the dangling-`model_path` row (`apogee config set-backend --model-path <an existing .gguf> -- -gone to repoint it, or apogee config delete-backend -- -gone to remove it`, in the text and the JSON `remedy`), and the six chmod rows (`chmod 700 "…/it's home/config"`).
+  - `models`: `backend_doors`, the four delete-backend doors, and the path hints of a stored GGUF, an MLX model, a drafter and an embedding model.
+  - Symphonies: `create`'s `Play it:` and `Edit it:` lines, `edit`'s rename door and its note, `list`'s and the runner's `show` doors, and the image doors in `/play` and the tools.
+  - Datasets: `pull`'s `prepare` hint, the two `--dataset` hints (the value bare, since it parses whole), and the TUI's delete confirm. `embed`'s three doors and `config add-graph`/`delete-graph`'s two lines.
+- [x] **Tests**, each failing on the old code unless named a guard:
+  - `tests/data/contracts/suggested_command_test.cpp` (new): the 31 measured words, each rendered and read back exactly through `/bin/sh`, bash, `zsh -f` and dash with the environment cleared (a shell this host lacks is warned and skipped); the worked examples, placeholders, `""` and plain bytes; PowerShell's table, `%VAR%` under `cmd /C` named as a known gap; and a `pwsh` case gated as CLI-M37's.
+  - `tests/presentation/cli/suggested_command_test.cpp` (new): a `CliHome` under a folder named `it's home`, collections `-x`, `-h`, `--graph`, `--`, `=ls`, `a;b`, `my notes`, `it's`, `$HOME` and a backtick name copied from a plain store, as an older CLI left them. Each `graph show` remedy is read by sh, bash and zsh, then run, and builds its own graph and no other. It also covers: a name across a line break, one single-quoted word; `models delete`'s door for `a;b`, leaving backend `a`; `-gone`'s two doors, the placeholder filled, reaching their verb; the chmod row changing the mode; `symphonies edit`'s rename door creating the symphony; `-q`'s play and edit lines; the house voice; and every word through `line_tokens`.
+  - `navigate_test`, `graph_nav_test` and `admin_graph_navigate_test`: `-y`'s hint in the error, the tool result and the 404 body. `tui_training_test`: the confirm for a dataset `-x`. `datasets_test`: synth's `--dataset -x` hint.
+  - `check_test`'s `doors_of` splits a remedy outside quotes (`support/printed_command.h`), and `CliHome` takes a folder name. The code-exec pins read `"/opt/my python/bin/python3"` and `"/opt/it's/python3"`. The pins that join a temporary path or a comma set build the word by the rule, so they hold on Windows.
+- [x] **Docs.** CLAUDE.md's codebase map, DEVELOPER.md's contracts, `render/` and test rows, the infrastructure tests' card (`printed_command`), [machine-mode.md](../../reference/cli/machine-mode.md)'s `remedy` (a door's words may be quoted; ` to ` and `, or ` are read outside quotes), and the dated revision of 53c's quoting above. SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - one rule on every platform, PowerShell's spelling on Windows;
+  - each site keeps its delimiter;
+  - a newline or a tab single-quoted, never `$'…'`;
+  - the caller marks a greedy option;
+  - the HTTP bodies and tool results carry the rendered command.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **The chmod rows are rendered by the rule**, so a plain path prints bare where the rows wrapped it in single quotes. That wrapping was a private quoter, not a site's delimiter. No pin or golden held it; the Mac app's two recorded `check` documents (`draft-gone-check.json`, `draft-rebuilt-check.json`) hold the old spelling, which no test reads, so no client changes.
+  - **`render` links `contracts`**, so `graph report`'s remedies go through the renderer.
+  - **`backends/adapters.cpp`'s `retake` doors render too.** The sweep missed their hand-typed `""`. No file but `suggested_command.cpp` quotes a word now, but CLI-M40's `delete-allowed-host '<entry>'`, which is CLI-M61's.
+  - **The pins that join a comma set or a temporary path build the word by the rule.** Beyond the five the item names, these are `models_mlx_test`'s embedding and drafter lines, `models_convert_test`'s projector, `store_references_test`'s scaled set and `adapters_test`'s comma set. Their POSIX bytes are unchanged.
+  - **The `pwsh` case asserts Standard passing**: `--` and `""` must reach the program. It warns what Legacy passing changes without asserting it, since Windows PowerShell 5.1 drops an empty argument (CLI-M37's record).
+  - **`mcp_create_line` is empty without an interpreter**, as its arguments are; no caller asks it then.
+  - **PowerShell's typographic quotes and `--%`** (found by the review). Under PowerShell, a word holding `“ ” „` or `‘ ’ ‚ ‛` is single-quoted, with each single one doubled as `'` is. `--%`, PowerShell's stop-parsing token, is never bare. POSIX renderings are unchanged.
+  - **`set_backend_command` is removed** (found by the review). The doors build parts, and a string to append flags to would put an option after a rendered `-- <name>`.
+
+**Verified.**
+- **The gate**, `lib/scripts/cicd.sh --test` on the final code, with nothing else running: exit 0. **4,695 ctest cases**, 100% passed: the run's 4,680 before this item plus its fifteen new cases. Four were skipped: the `pdftotext` case, the extended-attribute write guard's and CLI-M37's `[powershell]` case, as before, and this item's `[powershell]` case, with no pwsh here. The suite ran in 705 s, with no compiler warning in the log. The macOS app built and passed its 1,400 cases (the result bundle's `totalTestCount`), none failed or skipped.
+- **Red first.** Before any site was routed, the new presentation fixture failed in five of its cases. The renderer's own cases failed to compile until the header existed.
+- **Every word read back for real.** The 31 words came back exactly through `/bin/sh`, bash, `zsh -f` and dash on this Mac. Each pasted remedy reached its verb on its own target.
+- **Scans.** Homebrew clang 22 over the changed entries of the compile database, and `x86_64-w64-mingw32-g++` (GCC 16.2) with the project's warning set over every changed `.cpp`, reported no warning of ours. clang-format reports `format OK`.
+- **Review.** A code review over the working tree found no critical issue. Its findings are fixed: machine-mode.md's sentence scoped to what ships, `remedy_doors` reading `'\''`, the fixtures' record corrected, `set_backend_command` removed, PowerShell's typographic quotes and `--%`, and the test structs' defaults.
+
+**Left to CI.** The `pwsh` case's first run is CI's Linux and macOS unit-test rows. Windows' PowerShell spelling, and the pins that build a temporary path's word by the rule, are proven by the Windows rows. Whether CI's Linux image has zsh and dash is said by the shell case's warnings there.
 
 ## Milestone N — Model operations
 

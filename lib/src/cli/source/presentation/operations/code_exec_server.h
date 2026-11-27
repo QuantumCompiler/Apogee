@@ -37,7 +37,9 @@ struct CodeExecRegistration {
     [[nodiscard]] std::vector<std::string> mcp_create_arguments(std::string_view name) const;
 
     /// The same, as one line a shell takes: `apogee mcp create code
-    /// --command ... --args ...`, a path quoted where it needs it.
+    /// --command ... --args ...`, rendered by the one renderer
+    /// (`contracts/suggested_command.h`, CLI-M48). Empty without an
+    /// interpreter.
     [[nodiscard]] std::string mcp_create_line(std::string_view name) const;
 };
 

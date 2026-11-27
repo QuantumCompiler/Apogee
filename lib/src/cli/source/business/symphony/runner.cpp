@@ -12,6 +12,7 @@
 
 #include "agentloop/content.h"
 #include "agentloop/structured.h"
+#include "contracts/suggested_command.h"
 #include "contracts/symphony_walk.h"
 
 namespace apogee::symphony {
@@ -290,8 +291,10 @@ std::string refusal(const harness::SymphonySpec& spec, const Catalog& catalog,
     if (const std::vector<std::string> problems = validate(spec, catalog); !problems.empty()) {
         std::string out = "'" + spec.name + "' cannot be played: " + problems.front();
         if (problems.size() > 1) {
-            out += " (and " + std::to_string(problems.size() - 1) + " more -- " +
-                   "'apogee symphonies show " + spec.name + "' lists them)";
+            out += " (and " + std::to_string(problems.size() - 1) + " more -- '" +
+                   harness::render(
+                       {.verbs = {"symphonies", "show"}, .parts = {harness::operand(spec.name)}}) +
+                   "' lists them)";
         }
         return out;
     }

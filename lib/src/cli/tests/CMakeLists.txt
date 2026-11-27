@@ -58,6 +58,8 @@ add_library(apogee_tests_infrastructure OBJECT
     support/towered_configs.h
     support/draft_head_configs.h
     support/text_edits.h
+    support/printed_command.h
+    support/printed_command.cpp
     support/hermetic_stdin.cpp
     support/hermetic_home.cpp
 )
@@ -73,6 +75,7 @@ add_library(apogee_tests_data OBJECT
     data/contracts/symphony_walk_test.cpp
     data/contracts/host_test.cpp
     data/contracts/collection_name_test.cpp
+    data/contracts/suggested_command_test.cpp
     data/contracts/server_tools_test.cpp
     data/contracts/mcp_serve_test.cpp
     data/contracts/config_adapters_test.cpp
@@ -311,6 +314,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/system_cmd_test.cpp
     presentation/cli/tui_cmd_test.cpp
     presentation/cli/line_tokens_test.cpp
+    presentation/cli/suggested_command_test.cpp
     presentation/cli/tui_agents_test.cpp
     presentation/cli/tui_doctor_test.cpp
     presentation/cli/tui_knowledge_test.cpp

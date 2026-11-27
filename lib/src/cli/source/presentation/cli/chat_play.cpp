@@ -7,6 +7,7 @@
 #include "agentloop/side_call.h"
 #include "cli/chat_recall.h"
 #include "contracts/errors.h"
+#include "contracts/suggested_command.h"
 #include "contracts/types.h"
 #include "contracts/utf8.h"
 #include "logger/operational.h"
@@ -23,8 +24,11 @@ bool is_space(char c) {
 /// command that can.
 std::string way_out(const harness::SymphonySpec& spec, const symphony::PlayInput& input) {
     if (spec.input.image) {
-        return " -- /play gives a symphony text alone; 'apogee symphonies play " + spec.name +
-               " --image <file>' plays it with one";
+        return " -- /play gives a symphony text alone; '" +
+               harness::render({.verbs = {"symphonies", "play"},
+                                .parts = {harness::operand(spec.name),
+                                          harness::option_placeholder("--image", "<file>")}}) +
+               "' plays it with one";
     }
     if (input.text.find_first_not_of(" \t\r\n") == std::string::npos) {
         return " -- " + std::string{kPlayShape};
