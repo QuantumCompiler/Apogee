@@ -439,9 +439,13 @@ struct SettableScalar {
 /// one-line form.
 [[nodiscard]] std::string add_allowed_host(std::string_view content, std::string_view host);
 
-/// Removes `host` from `tools.allowed_hosts`: the exact inverse of
-/// add_allowed_host, so an add and a remove leave the file byte-identical.
-/// Throws ConfigEditError when the host is not listed.
+/// Removes from `tools.allowed_hosts` every entry `host` names
+/// (`allowed_host_matches`, `contracts/host.h`): an entry as written -- a
+/// pasted URL, which allows nothing, is removed by its own spelling -- or,
+/// for a host, every spelling of it, so the host really asks again (CLI-M40).
+/// The exact inverse of add_allowed_host, so an add and a remove leave the
+/// file byte-identical. Throws ConfigEditError when nothing matches, the text
+/// unchanged: a non-host as not a host name, a host as not listed.
 [[nodiscard]] std::string remove_allowed_host(std::string_view content, std::string_view host);
 
 /// Tidies whitespace without touching content: strips trailing spaces, folds

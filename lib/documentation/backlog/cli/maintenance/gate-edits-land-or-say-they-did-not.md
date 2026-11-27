@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Config editing › `config add-allowed-host`, `delete-allowed-host`, `set-permission` and their HTTP twins |
 | **Labels** | `config` `yaml` `hosts` `permissions` `safety` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M40](delete-allowed-host-removes-what-the-list-holds.md) |
+| **Blocked by** | — |
 | **Blocks** | [M44](yaml-editor-refuses-the-layouts-it-does-not-write.md) |
 | **Reporter** | CLI-M40's skeptic (2026-11-22), then a sandboxed investigation and a skeptic's re-run the same day |
 | **Created** | 2026-11-22 |
@@ -167,8 +167,9 @@ Hermetic and in process: the transforms over YAML and JSONC text, the twin throu
 
 ## Links
 
-- **Blocked by:** [CLI-M40](delete-allowed-host-removes-what-the-list-holds.md) · **Blocks:** [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md)
+- **Blocked by:** — · **Blocks:** [CLI-M44](yaml-editor-refuses-the-layouts-it-does-not-write.md)
 - **Relates to:**
+  - [CLI-M40](../../../assistant/cli/MILESTONES.md#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host) (shipped 2026-11-27): `allowed_host_matches`, the predicate this item's read-back checks `delete-allowed-host` by; its count is already what the loader sees go.
   - [CLI-M36](../../../assistant/cli/MILESTONES.md#2026-11-27--grant-and-deny-flags-offer-what-they-take-maintenance-item-m36-the-permission-flags-offer-what-their-verbs-take): its `delete-allowed-host` offer comes from the loader (`ALLOWED_HOST` in `complete_sources.cpp`), so on a compact list it offers hosts the verb refuses today. After this item, the verb takes them.
   - [CLI-M39](../../../assistant/cli/MILESTONES.md#2026-11-27--deny-takes-every-host-a-yes-takes-maintenance-item-m39-a-no-takes-every-host-a-yes-takes-and-a-tools-name-taken-as-a-website-says-so) (shipped 2026-11-27): the same list, `--deny`'s side.
   - 55f and 27f, the compact-list fixes that never reached this scan; 57e, "a printed success is a landed change"; 72c2d75a, the scan's first commit.

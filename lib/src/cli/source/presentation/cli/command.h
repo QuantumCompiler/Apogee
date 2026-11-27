@@ -183,9 +183,10 @@ inline constexpr const char* kTaskGrantToolValue = "TASK_GRANT_TOOL";
 /// offers, and each host the gate lists (`listed_hosts`) that `name_gated`
 /// reads as a website, by its canonical name. Any other website is typed.
 inline constexpr const char* kToolOrWebsiteValue = "TOOL_OR_WEBSITE";
-/// A host in `tools.allowed_hosts` that `config delete-allowed-host` removes,
-/// by the verb's own match (CLI-M36): each entry whose canonical host it
-/// accepts, by that host, once.
+/// An entry of `tools.allowed_hosts` that `config delete-allowed-host`
+/// removes, by the verb's own match (CLI-M36, `allowed_host_matches` since
+/// CLI-M40): a host by its canonical name, once for every spelling, and a
+/// malformed entry as written.
 inline constexpr const char* kAllowedHostValue = "ALLOWED_HOST";
 /// A provider the last scan found to register (M33): `providers register`'s
 /// argument, read from the provider cache, never a scan.

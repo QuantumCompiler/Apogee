@@ -1163,31 +1163,38 @@ TEST_CASE("deny offers each host the gate lists, once and canonical, as the verb
 }
 
 TEST_CASE("delete-allowed-host offers each entry it removes, by its own match, once",
-          "[commands][completion][sources][permissions][config][CLI-M36]") {
-    // The raw list offered `Example.COM.` as written, a URL the verb refuses
-    // (`checked_host`), and could offer a host twice. Now each entry the
-    // verb's match takes is offered canonical, once -- `my_host` among them,
-    // which the verb removes -- and each one offered is removed.
+          "[commands][completion][sources][permissions][config][CLI-M36][CLI-M40]") {
+    // The raw list offered `Example.COM.` as written and could offer a host
+    // twice (CLI-M36). Now each entry is offered as the verb's own match
+    // takes it (CLI-M40): a host canonical, once -- `my_host` among them --
+    // and a malformed entry as written, which the verb now removes; and
+    // each one offered is removed.
     const GrantHome grant;
     const std::vector<std::string> offered =
         grant.offer({"config", "delete-allowed-host"}).candidates;
-    CHECK(offered ==
-          std::vector<std::string>{"docs.python.org", "example.com", "my_host", "side_door"});
+    CHECK(offered == std::vector<std::string>{"docs.python.org", "example.com",
+                                              "https://not-a-host.example/path", "my_host",
+                                              "side_door"});
     for (const std::string& host : offered) {
         INFO(host);
         std::string said;
         CHECK(grant.run({"config", "delete-allowed-host", host}, &said) == 0);
     }
-    CHECK(apogee::harness::load_config(grant.path).tools.allowed_hosts ==
-          std::vector<std::string>{"https://not-a-host.example/path"});
-    // With only an entry it cannot remove left, the hint says so -- not that
-    // the list is empty.
+    CHECK(apogee::harness::load_config(grant.path).tools.allowed_hosts.empty());
     const apogee::harness::Config left = apogee::harness::load_config(grant.path);
     c::CompletionContext context;
     context.config = &left;
     const c::NameList none = c::list_names(c::kAllowedHostValue, context);
     CHECK(none.names.empty());
-    CHECK(none.none.find("no entry 'config delete-allowed-host' takes") != std::string::npos);
+    CHECK(none.none == "no allowed hosts yet -- 'apogee config add-allowed-host'");
+    // Only an empty entry left: nothing a shell can insert is offered, and
+    // the hint says why rather than that the list is empty.
+    apogee::harness::Config empty_entry;
+    empty_entry.tools.allowed_hosts = {""};
+    context.config = &empty_entry;
+    const c::NameList blank = c::list_names(c::kAllowedHostValue, context);
+    CHECK(blank.names.empty());
+    CHECK(blank.none.find("each one left is empty") != std::string::npos);
 }
 
 TEST_CASE("where no program can start, no grant or deny kind offers run_command",

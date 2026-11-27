@@ -427,6 +427,41 @@ TEST_CASE("the editor's refusals are the same in JSONC", "[config_edit][jsonc]")
                       Catch::Matchers::ContainsSubstring("not valid JSON"));
 }
 
+TEST_CASE("a JSONC host list loses an entry as written, or every spelling of a host",
+          "[config_edit][jsonc][hosts][CLI-M40]") {
+    using namespace apogee::harness;
+    std::string pasted{kJsonc};
+    const std::string listed = R"("allowed_hosts": ["docs.python.org"])";
+    REQUIRE(pasted.find(listed) != std::string::npos);
+    pasted.replace(pasted.find(listed), listed.size(),
+                   R"("allowed_hosts": ["docs.python.org", "https://not-a-host.example/path", )"
+                   R"("Example.COM.", "example.com"])");
+    const auto with = [&](std::string_view list) {
+        std::string expected{kJsonc};
+        expected.replace(expected.find(listed), listed.size(),
+                         std::string{R"("allowed_hosts": )"} + std::string{list});
+        return expected;
+    };
+    CHECK(remove_allowed_host(pasted, "https://not-a-host.example/path") ==
+          with(R"(["docs.python.org", "Example.COM.", "example.com"])"));
+    CHECK(remove_allowed_host(pasted, "example.com") ==
+          with(R"(["docs.python.org", "https://not-a-host.example/path"])"));
+    (void)parse_config(remove_allowed_host(pasted, "example.com"), "<edited>");
+    CHECK_THROWS_AS(remove_allowed_host(pasted, "https://typo.example/"), ConfigEditError);
+    CHECK_THROWS_AS(remove_allowed_host(pasted, "pypi.org"), ConfigEditError);
+    CHECK(remove_allowed_host(add_allowed_host(pasted, "pypi.org"), "pypi.org") == pasted);
+
+    // One host a line, with comments: both spellings go, every comment on
+    // the entries kept stays where it was.
+    constexpr std::string_view kLines =
+        "{\n  \"tools\": {\n    \"allowed_hosts\": [\n      \"docs.python.org\",  // the docs\n"
+        "      \"Example.COM.\",\n      // pypi for packages\n      \"pypi.org\",\n"
+        "      \"example.com\"  // again\n    ]\n  }\n}\n";
+    CHECK(remove_allowed_host(kLines, "example.com") ==
+          "{\n  \"tools\": {\n    \"allowed_hosts\": [\n      \"docs.python.org\",  // the docs\n"
+          "      // pypi for packages\n      \"pypi.org\"\n    ]\n  }\n}\n");
+}
+
 TEST_CASE("section names and format read JSONC", "[config_edit][jsonc]") {
     using namespace apogee::harness;
     CHECK(section_entry_names(kJsonc, "backends") == std::vector<std::string>{"claude", "local"});

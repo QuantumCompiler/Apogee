@@ -960,20 +960,25 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kTaskGrantToolValue) {
         list = task_grant_names(context, config);
     } else if (kind == kAllowedHostValue) {
-        // What `delete-allowed-host` removes, by its own match: an entry
-        // whose canonical host `checked_host` -- `canonical_host` -- accepts,
-        // offered as that host, once (CLI-M36). A malformed entry it cannot
-        // remove is not offered.
-        for (const std::string& entry : config.tools.allowed_hosts) {
-            if (const std::optional<std::string> host = harness::canonical_host(entry);
-                host.has_value() && std::ranges::find(list.names, *host) == list.names.end()) {
-                list.names.push_back(*host);
+        // What `delete-allowed-host` removes, by its own match
+        // (`allowed_host_matches`, CLI-M40): a host offered canonical, once,
+        // for every spelling of it (CLI-M36), and a malformed entry as
+        // written, which the verb removes by that spelling. Each name is
+        // held to the verb's predicate, so the offer cannot drift from what
+        // the verb takes (ADR 0007). An empty entry is no word a shell can
+        // insert.
+        const std::vector<std::string>& entries = config.tools.allowed_hosts;
+        for (const std::string& entry : entries) {
+            std::string name = harness::canonical_host(entry).value_or(entry);
+            if (!name.empty() && !harness::allowed_host_matches(entries, name).empty() &&
+                std::ranges::find(list.names, name) == list.names.end()) {
+                list.names.push_back(std::move(name));
             }
         }
-        list.none = config.tools.allowed_hosts.empty()
+        list.none = entries.empty()
                         ? "no allowed hosts yet -- 'apogee config add-allowed-host'"
-                        : "no entry 'config delete-allowed-host' takes -- each one left is not a "
-                          "host name, and 'apogee check' names it";
+                        : "no entry to offer -- each one left is empty, and 'apogee check' "
+                          "names it";
     } else if (kind == kProviderValue) {
         // What the last scan found to register (M33), read from the provider
         // cache -- never a scan -- each with what the scan's row says of it.

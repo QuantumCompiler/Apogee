@@ -20,6 +20,7 @@
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
+#include "contracts/host.h"
 #include "events/bus.h"
 #include "harness/harness.h"
 #include "httpserver/admin.h"
@@ -537,6 +538,67 @@ TEST_CASE("the allowed-hosts twins leave the same bytes the CLI and the always a
     fixture.cli({"config", "delete-allowed-host", "docs.python.org"});
     CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
     CHECK(Fixture::bytes(fixture.http_config) == shipped);
+}
+
+TEST_CASE("the delete twin removes what the CLI removes: an entry as written, every spelling",
+          "[httpserver][admin][hosts][CLI-M40]") {
+    // The twin answered 404 for an entry its own GET listed `valid:false`,
+    // and over two spellings said `deleted` while the file still held one.
+    using apogee::httpserver::admin_delete_allowed_host;
+    const std::string listed = R"("allowed_hosts": [])";
+    const auto with = [&](std::string_view hosts) {
+        std::string text{apogee::harness::config_template()};
+        REQUIRE(text.find(listed) != std::string::npos);
+        text.replace(text.find(listed), listed.size(),
+                     std::string{R"("allowed_hosts": )"} + std::string{hosts});
+        return text;
+    };
+    Fixture fixture;
+    for (const std::filesystem::path& path : {fixture.cli_config, fixture.http_config}) {
+        std::ofstream{path, std::ios::binary | std::ios::trunc}
+            << with(R"(["*.example.com", "Example.COM.", "docs.python.org", "example.com"])");
+    }
+    fixture.startup = apogee::harness::load_config(fixture.http_config);
+
+    // A raw entry: 200, the CLI's bytes, and nothing to restart for -- it
+    // allowed nothing.
+    const HttpResponse raw = admin_delete_allowed_host(fixture.context(), "*.example.com");
+    REQUIRE(raw.status == 200);
+    CHECK(parsed(raw)["deleted"] == "*.example.com");
+    CHECK(parsed(raw)["restart_required"] == false);
+    fixture.cli({"config", "delete-allowed-host", "*.example.com"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(Fixture::bytes(fixture.http_config) ==
+          with(R"(["Example.COM.", "docs.python.org", "example.com"])"));
+
+    // Two spellings: both go, `deleted` names the host, and the server that
+    // started with it listed still reaches it until a restart.
+    const HttpResponse spelled = admin_delete_allowed_host(fixture.context(), "example.com");
+    REQUIRE(spelled.status == 200);
+    CHECK(parsed(spelled)["deleted"] == "example.com");
+    CHECK(parsed(spelled)["restart_required"] == true);
+    fixture.cli({"config", "delete-allowed-host", "example.com"});
+    CHECK(Fixture::bytes(fixture.http_config) == Fixture::bytes(fixture.cli_config));
+    CHECK(Fixture::bytes(fixture.http_config) == with(R"(["docs.python.org"])"));
+    CHECK_FALSE(apogee::harness::host_listed(
+        apogee::harness::load_config(fixture.http_config).tools.allowed_hosts, "example.com"));
+
+    // A name no entry answers to is a 404, a host or not; nothing written.
+    const std::string before = Fixture::bytes(fixture.http_config);
+    for (const char* missing :
+         {"*.example.com", "example.com", "https://typo.example/", "pypi.org"}) {
+        INFO(missing);
+        const HttpResponse miss = admin_delete_allowed_host(fixture.context(), missing);
+        CHECK(miss.status == 404);
+        CHECK(parsed(miss)["error"]["message"].get<std::string>().find(
+                  "is not in tools.allowed_hosts") != std::string::npos);
+    }
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+
+    // The transform's other refusals stay 400: a list it cannot splice.
+    std::ofstream{fixture.http_config, std::ios::binary | std::ios::trunc}
+        << "tools:\n  allowed_hosts: [a.example,\n    \"*.example.com\"]\n";
+    CHECK(admin_delete_allowed_host(fixture.context(), "*.example.com").status == 400);
 }
 
 TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never list env values",

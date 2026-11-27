@@ -91,4 +91,17 @@ bool host_listed(std::span<const std::string> allowed, std::string_view host) {
     return false;
 }
 
+std::vector<std::size_t> allowed_host_matches(std::span<const std::string> entries,
+                                              std::string_view argument) {
+    const std::optional<std::string> wanted = canonical_host(argument);
+    std::vector<std::size_t> matches;
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const std::string& entry = entries[index];
+        if (entry == argument || (wanted.has_value() && canonical_host(entry) == wanted)) {
+            matches.push_back(index);
+        }
+    }
+    return matches;
+}
+
 }  // namespace apogee::harness

@@ -1426,9 +1426,12 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
         if (harness::canonical_host(host).has_value()) {
             add(report, Status::Ok, "Tools", "allowed_hosts", host);
         } else {
+            // The verb removes the entry as written (CLI-M40); `--fix` never
+            // does, since rewriting a pasted URL to its host would widen the
+            // gate unasked.
             add(report, Status::Warn, "Tools", "allowed_hosts",
                 "'" + host + "' is not a host name, so it allows nothing",
-                "write the host alone, e.g. docs.python.org, not a URL or a pattern");
+                "apogee config delete-allowed-host '" + host + "'");
         }
     }
 

@@ -108,7 +108,9 @@ struct AdminConfigContext {
                                                   std::string_view host);
 
 /// `DELETE /v1/admin/allowed-hosts/{id}` -- the `config delete-allowed-host`
-/// twin. `404` when the host is not listed.
+/// twin: the same transform, so the same bytes. `{id}` names an entry as
+/// written, or every spelling of a host (`allowed_host_matches`, CLI-M40);
+/// `404` when no entry answers to it, `400` for the editor's other refusals.
 [[nodiscard]] HttpResponse admin_delete_allowed_host(const AdminConfigContext& context,
                                                      std::string_view host);
 

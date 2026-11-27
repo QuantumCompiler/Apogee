@@ -2,10 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
 
+using apogee::harness::allowed_host_matches;
 using apogee::harness::canonical_host;
 using apogee::harness::host_listed;
 
@@ -55,4 +57,37 @@ TEST_CASE("listing is exact: no prefix, suffix or substring admits a host", "[ha
     CHECK_FALSE(host_listed(allowed, "docs.python.org:8080"));          // not a host
     CHECK_FALSE(host_listed(allowed, "pypi.org"));  // a pasted URL is not an entry
     CHECK_FALSE(host_listed({}, "docs.python.org"));
+}
+
+TEST_CASE("an argument names the entries written as it is, or every spelling of its host",
+          "[harness][host][CLI-M40]") {
+    // What `config delete-allowed-host` and its twin remove (CLI-M40): the
+    // verb matched by canonical host alone, so a pasted URL could not be
+    // named, and stopped at the first of two spellings.
+    const std::vector<std::string> entries{
+        "docs.python.org", "Example.COM.",  "https://not-a-host.example/path",
+        "example.com",     "*.example.com", "my_host"};
+    using Indices = std::vector<std::size_t>;
+    // A host: every spelling of it, in the list's order.
+    CHECK(allowed_host_matches(entries, "example.com") == Indices{1, 3});
+    CHECK(allowed_host_matches(entries, "EXAMPLE.com.") == Indices{1, 3});
+    CHECK(allowed_host_matches(entries, "docs.python.org") == Indices{0});
+    CHECK(allowed_host_matches(entries, "my_host") == Indices{5});
+    // An entry that is not a host: by how it is written, and only so.
+    CHECK(allowed_host_matches(entries, "https://not-a-host.example/path") == Indices{2});
+    CHECK(allowed_host_matches(entries, "*.example.com") == Indices{4});
+    CHECK(allowed_host_matches(entries, "https://not-a-host.example/path/").empty());
+    CHECK(allowed_host_matches(entries, "HTTPS://not-a-host.example/path").empty());
+    CHECK(allowed_host_matches(entries, "not-a-host.example").empty());
+    // A miss names nothing: a typo, an unlisted host, a parent or child.
+    CHECK(allowed_host_matches(entries, "https://typo.example/").empty());
+    CHECK(allowed_host_matches(entries, "pypi.org").empty());
+    CHECK(allowed_host_matches(entries, "python.org").empty());
+    CHECK(allowed_host_matches(entries, "").empty());
+    CHECK(allowed_host_matches({}, "example.com").empty());
+    // The same raw entry twice is named twice; IPv6 in either spelling.
+    const std::vector<std::string> doubled{"*.a.example", "[::1]", "*.a.example", "::1"};
+    CHECK(allowed_host_matches(doubled, "*.a.example") == Indices{0, 2});
+    CHECK(allowed_host_matches(doubled, "::1") == Indices{1, 3});
+    CHECK(allowed_host_matches(doubled, "[::1]") == Indices{1, 3});
 }

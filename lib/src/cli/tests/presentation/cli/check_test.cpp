@@ -1011,6 +1011,41 @@ TEST_CASE("the doctor's Tools section: keys, the root, the switches, and git",
     }
 }
 
+TEST_CASE("a malformed allowed host's row names the verb that removes it, and --fix leaves it",
+          "[commands][check][tools][CLI-M40]") {
+    // The row sent the person to a hand edit, since the verb refused the
+    // entry; now the verb removes it as written (CLI-M40).
+    Install install;
+    install.seed();
+    CheckInputs inputs = inputs_for(install);
+    constexpr std::string_view kConfig =
+        "tools:\n  allowed_hosts:\n    - docs.python.org\n"
+        "    - \"https://not-a-host.example/path\"   # pasted\n";
+    install.write("config/config.yaml", kConfig);
+    load_into(inputs);
+    const CheckReport report = run_checks(inputs);
+    std::vector<const apogee::commands::CheckRow*> rows;
+    for (const apogee::commands::CheckRow& row : report.rows) {
+        if (row.name == "allowed_hosts") {
+            rows.push_back(&row);
+        }
+    }
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[0]->status == Status::Ok);
+    CHECK(rows[0]->detail == "docs.python.org");
+    CHECK(rows[1]->status == Status::Warn);
+    CHECK(rows[1]->detail ==
+          "'https://not-a-host.example/path' is not a host name, so it allows nothing");
+    CHECK(rows[1]->remedy == "apogee config delete-allowed-host 'https://not-a-host.example/path'");
+    CHECK(report.passed());  // a warning, never a failure
+
+    // --fix never touches an existing config (M11): the entry stays.
+    (void)apply_fixes(inputs);
+    std::ifstream in(inputs.config_path, std::ios::binary);
+    const std::string after{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    CHECK(after == kConfig);
+}
+
 TEST_CASE("the doctor reports web search: how to add it, where it points, or what is wrong",
           "[commands][check][tools][search]") {
     Install install;

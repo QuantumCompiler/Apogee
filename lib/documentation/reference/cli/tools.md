@@ -170,6 +170,14 @@ tool, --deny run_command, or leave the toolset out with tools.disabled:
 [shell]` (on stderr, and as a `notice` in machine mode), and in chat
 `/deny shell` and `/allow shell` add the same pointer in their own words. A
 host the config lists or the session answered is yours, and is said plainly.
+`apogee config delete-allowed-host` removes what the list holds (CLI-M40):
+an entry by how it is written -- a pasted URL or pattern, which allows
+nothing and which `check` names with `apogee config delete-allowed-host
+'<entry>'` as its remedy -- or a host by every spelling of it, so over
+`Example.COM.` and `example.com` one `delete-allowed-host example.com` removes
+both and the website asks again; its line names the host (and how many entries
+went), or the entry and that it allowed nothing. A name no entry answers to
+deletes nothing and exits 1.
 
 **The question shows what will run, whole and as it is** (57p). The prompt
 for `run_command` shows the whole command, however long, and the folder it

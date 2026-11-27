@@ -809,9 +809,13 @@ HttpResponse admin_delete_allowed_host(const AdminConfigContext& context, std::s
     if (!loaded.config.has_value()) {
         return loaded.failure;
     }
-    const std::optional<std::string> canonical = harness::canonical_host(host);
-    if (!canonical.has_value() ||
-        !harness::host_listed(loaded.config->tools.allowed_hosts, *canonical)) {
+    // The entries the CLI's verb removes, by the transform's own predicate
+    // (CLI-M40): one as written, or every spelling of a host. None is the
+    // 404, decided here and never read out of the transform's refusal, so
+    // its other refusals stay 400 (ADR 0002).
+    const std::vector<std::string>& entries = loaded.config->tools.allowed_hosts;
+    const std::vector<std::size_t> matches = harness::allowed_host_matches(entries, host);
+    if (matches.empty()) {
         return error_response(404, "'" + std::string{host} + "' is not in tools.allowed_hosts",
                               kNotFoundError);
     }
@@ -824,10 +828,15 @@ HttpResponse admin_delete_allowed_host(const AdminConfigContext& context, std::s
     } catch (const harness::ConfigError& e) {
         return error_response(400, e.what(), kConfigError);
     }
-    const bool restart = context.startup != nullptr &&
+    // What was removed: the host its spellings name, or the entry as written,
+    // which allowed nothing -- so only a host this server started with
+    // listed asks for a restart (a served run reads the list once).
+    const std::string& entry = entries[matches.front()];
+    const std::optional<std::string> canonical = harness::canonical_host(entry);
+    const bool restart = context.startup != nullptr && canonical.has_value() &&
                          harness::host_listed(context.startup->tools.allowed_hosts, *canonical);
-    return json_response(200,
-                         nlohmann::json{{"deleted", *canonical}, {"restart_required", restart}});
+    return json_response(
+        200, nlohmann::json{{"deleted", canonical.value_or(entry)}, {"restart_required", restart}});
 }
 
 HttpResponse admin_set_role(const AdminConfigContext& context, std::string_view field,

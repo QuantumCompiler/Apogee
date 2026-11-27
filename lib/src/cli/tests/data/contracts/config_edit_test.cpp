@@ -1194,6 +1194,110 @@ TEST_CASE("add_allowed_host handles block lists, missing keys and missing sectio
         "tools:\n  allowed_hosts: [a.example]   # none yet\n");
 }
 
+TEST_CASE("remove_allowed_host removes an entry as written, and every spelling of a host",
+          "[config_edit][hosts][CLI-M40]") {
+    using apogee::harness::add_allowed_host;
+    using apogee::harness::parse_config;
+    using apogee::harness::remove_allowed_host;
+    // The bug as a fixture: the URL was refused before the list was read,
+    // and of two spellings the first went and the typed one stayed.
+    CHECK(remove_allowed_host(
+              "tools:\n  allowed_hosts: [docs.python.org, https://not-a-host.example/path]\n",
+              "https://not-a-host.example/path") == "tools:\n  allowed_hosts: [docs.python.org]\n");
+    CHECK(remove_allowed_host("tools:\n  allowed_hosts: [Example.COM., example.com]\n",
+                              "example.com") == "tools:\n  allowed_hosts: []\n");
+    // The investigation's two lists.
+    CHECK(remove_allowed_host("tools:\n  allowed_hosts: [docs.python.org, Example.COM., "
+                              "\"https://not-a-host.example/path\", my_host]\n",
+                              "https://not-a-host.example/path") ==
+          "tools:\n  allowed_hosts: [docs.python.org, Example.COM., my_host]\n");
+    const std::string left = remove_allowed_host(
+        "tools:\n  allowed_hosts: [Example.COM., example.com, "
+        "\"https://not-a-host.example/path\"]\n",
+        "example.com");
+    CHECK(left == "tools:\n  allowed_hosts: [\"https://not-a-host.example/path\"]\n");
+    CHECK(parse_config(left, "<left>").tools.allowed_hosts ==
+          std::vector<std::string>{"https://not-a-host.example/path"});
+    // Wherever the spellings sit, each takes one separator: before it when an
+    // entry it keeps comes first, after it in a leading run.
+    for (const auto& [before, after] : std::vector<std::pair<std::string, std::string>>{
+             {"[Example.COM., docs.python.org, example.com]", "[docs.python.org]"},
+             {"[Example.COM., example.com, docs.python.org]", "[docs.python.org]"},
+             {"[docs.python.org, Example.COM., example.com]", "[docs.python.org]"},
+             {"[docs.python.org,example.com ,  Example.COM.]", "[docs.python.org]"},
+             {"[example.com,  EXAMPLE.com,pypi.org, example.com.]", "[pypi.org]"},
+             {"[a.example, example.com, b.example, Example.COM, c.example]",
+              "[a.example, b.example, c.example]"},
+             {"[ example.com ]", "[]"},
+             {"[\"*.x.example\", a.example, '*.x.example']", "[a.example]"}}) {
+        const std::string host =
+            before.find("*.x") != std::string::npos ? "*.x.example" : "example.com";
+        INFO(before << " - " << host);
+        const std::string edited =
+            remove_allowed_host("tools:\n  allowed_hosts: " + before + "   # kept\n", host);
+        CHECK(edited == "tools:\n  allowed_hosts: " + after + "   # kept\n");
+        CHECK_NOTHROW(parse_config(edited, "<edited>"));
+    }
+
+    // A block list: a quoted entry with a comment, each spelling's own line.
+    constexpr std::string_view kBlock =
+        "tools:\n"
+        "  allowed_hosts:\n"
+        "    - docs.python.org\n"
+        "    # pasted from the browser\n"
+        "    - \"https://not-a-host.example/path\"   # oops\n"
+        "    - Example.COM.\n"
+        "    - example.com   # again\n"
+        "ui:\n"
+        "  markdown: true\n";
+    CHECK(remove_allowed_host(kBlock, "https://not-a-host.example/path") ==
+          "tools:\n"
+          "  allowed_hosts:\n"
+          "    - docs.python.org\n"
+          "    # pasted from the browser\n"
+          "    - Example.COM.\n"
+          "    - example.com   # again\n"
+          "ui:\n"
+          "  markdown: true\n");
+    CHECK(remove_allowed_host(kBlock, "EXAMPLE.COM") ==
+          "tools:\n"
+          "  allowed_hosts:\n"
+          "    - docs.python.org\n"
+          "    # pasted from the browser\n"
+          "    - \"https://not-a-host.example/path\"   # oops\n"
+          "ui:\n"
+          "  markdown: true\n");
+
+    // Add then remove is still the exact inverse, a malformed entry beside it.
+    constexpr std::string_view kPasted = "tools:\n  allowed_hosts: [\"https://x.example/p\"]\n";
+    const std::string added = add_allowed_host(kPasted, "pypi.org");
+    CHECK(added == "tools:\n  allowed_hosts: [\"https://x.example/p\", pypi.org]\n");
+    CHECK(remove_allowed_host(added, "pypi.org") == kPasted);
+    const std::string blocked = add_allowed_host(kBlock, "pypi.org");
+    CHECK(remove_allowed_host(blocked, "pypi.org") == kBlock);
+}
+
+TEST_CASE("remove_allowed_host deletes nothing it does not name, in today's words",
+          "[config_edit][hosts][CLI-M40]") {
+    using apogee::harness::remove_allowed_host;
+    constexpr std::string_view kListed =
+        "tools:\n  allowed_hosts: [docs.python.org, \"https://not-a-host.example/path\"]\n";
+    // Typo protection (26o): a miss is refused, never a quiet no-op.
+    CHECK_THROWS_WITH(remove_allowed_host(kListed, "https://typo.example/"),
+                      "'https://typo.example/' is not a host name: write the host alone, e.g. "
+                      "docs.python.org");
+    CHECK_THROWS_WITH(remove_allowed_host(kListed, "https://not-a-host.example/path/"),
+                      ContainsSubstring("is not a host name"));
+    CHECK_THROWS_WITH(remove_allowed_host(kListed, "pypi.org"),
+                      "'pypi.org' is not in tools.allowed_hosts");
+    CHECK_THROWS_WITH(remove_allowed_host(kListed, "PyPI.org."),
+                      "'pypi.org' is not in tools.allowed_hosts");
+    CHECK_THROWS_WITH(remove_allowed_host(kListed, "not-a-host.example"),
+                      "'not-a-host.example' is not in tools.allowed_hosts");
+    CHECK_THROWS_WITH(remove_allowed_host("ui:\n  markdown: true\n", "*.example.com"),
+                      ContainsSubstring("is not a host name"));
+}
+
 TEST_CASE("allowed-host edits refuse what is not a host, or not listed", "[config_edit][hosts]") {
     const std::string shipped{apogee::harness::config_template()};
     for (const char* bad : {"https://docs.python.org", "docs.python.org/x", "*.python.org",

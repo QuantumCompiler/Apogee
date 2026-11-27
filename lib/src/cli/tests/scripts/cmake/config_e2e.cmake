@@ -685,6 +685,30 @@ expect_equal("${APOGEE_OUT}" "" "no allowed hosts once the last is deleted")
 apogee_run(1 config delete-allowed-host 127.0.0.1)
 apogee_run(1 config add-allowed-host https://example.com/)
 
+# A pasted URL -- a hand edit, since no verb writes one -- allows nothing, and
+# `check` names the verb that removes it, which takes it as written: the file
+# is back to its bytes (CLI-M40). `check --fix` leaves it where it is (M11).
+string(REPLACE "\"allowed_hosts\": []"
+    "\"allowed_hosts\": [\"https://not-a-host.example/path\"]" PASTED "${BEFORE_ALWAYS}")
+file(WRITE "${CONFIG_FILE}" "${PASTED}")
+apogee_run(0 check --fix)
+if(NOT APOGEE_OUT MATCHES "delete-allowed-host 'https://not-a-host\\.example/path'")
+    message(FATAL_ERROR "check does not name the verb for a pasted URL:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_CHECK)
+if(NOT AFTER_CHECK STREQUAL PASTED)
+    message(FATAL_ERROR "check --fix touched the config")
+endif()
+apogee_run(1 config delete-allowed-host https://typo.example/)
+apogee_run(0 config delete-allowed-host https://not-a-host.example/path)
+if(NOT APOGEE_OUT MATCHES "removed 'https://not-a-host\\.example/path' from tools\\.allowed_hosts")
+    message(FATAL_ERROR "delete-allowed-host did not say what it removed:\n${APOGEE_OUT}")
+endif()
+file(READ "${CONFIG_FILE}" AFTER_PASTED)
+if(NOT AFTER_PASTED STREQUAL BEFORE_ALWAYS)
+    message(FATAL_ERROR "delete-allowed-host did not remove the pasted URL as written")
+endif()
+
 # --- concurrent edits all land (55f) ---------------------------------------
 # Sixteen editors at once, each a process of its own, on the shipped template:
 # the lock beside the config makes them take turns, so every entry lands --

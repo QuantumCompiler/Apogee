@@ -1525,8 +1525,19 @@ with the host listed.
 
 ### `DELETE /v1/admin/allowed-hosts/{id}`
 
-The twin of `apogee config delete-allowed-host <host>`. `200 {deleted,
-restart_required}`; `404` when the host is not listed.
+The twin of `apogee config delete-allowed-host <host>`, the same transform
+behind both, so the bytes are identical. Since CLI-M40 (2026-11-27) `{id}`
+names every entry it is written as, or, when it is a host, every spelling of
+that host: `*.example.com` removes a pasted pattern `GET` lists as
+`valid:false`, and `example.com` removes both `Example.COM.` and
+`example.com`, so the host really asks again. `200 {deleted,
+restart_required}`: `deleted` is the host in its canonical form, or the entry
+as written when it was not a host; `restart_required` is `true` when this
+server started with that host listed, and never for an entry that allowed
+nothing. `404` when no entry answers to `{id}`; `400` for the editor's other
+refusals (a list it cannot splice, a `tools:` line holding more than its
+key). An entry holding `/` cannot travel in `{id}` (the path is split on it
+once decoded): it is removed through the CLI or the apps.
 
 ### `GET /v1/admin/auth`
 

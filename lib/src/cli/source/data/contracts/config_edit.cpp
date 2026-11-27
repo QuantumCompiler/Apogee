@@ -2608,33 +2608,60 @@ std::string add_allowed_host(std::string_view content, std::string_view host) {
 }
 
 std::string remove_allowed_host(std::string_view content, std::string_view host) {
-    const std::string canonical = checked_host(host);
     Lines lines = split_lines(content);
     const SectionRange section = find_section(lines, "tools");
     const HostList list = section.found ? find_host_list(lines, section) : HostList{};
 
-    for (std::size_t index = 0; index < list.items.size(); ++index) {
-        const ListItem& item = list.items[index];
-        if (canonical_host(item.value) != canonical) {
-            continue;
-        }
-        if (!list.flow) {
-            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(item.line));
-            return join_lines(lines);
-        }
-        // The exact inverse of the add: the first item takes the separator
-        // after it, any other the separator before it.
-        std::string& line = lines[list.key_line];
-        if (list.items.size() == 1) {
-            line.erase(list.open + 1, list.close - list.open - 1);
-        } else if (index == 0) {
-            line.erase(item.begin, list.items[1].begin - item.begin);
-        } else {
-            line.erase(list.items[index - 1].end, item.end - list.items[index - 1].end);
+    // Every entry the argument names, by the one predicate (CLI-M40): as
+    // written, or each spelling of the same host -- never `checked_host`
+    // first, which refused an entry no host can name.
+    std::vector<std::string> values;
+    values.reserve(list.items.size());
+    for (const ListItem& item : list.items) {
+        values.push_back(item.value);
+    }
+    const std::vector<std::size_t> matches = allowed_host_matches(values, host);
+    if (matches.empty()) {
+        // Nothing named, nothing deleted: a miss says so (26o), in the words
+        // a host and a non-host have always had.
+        throw ConfigEditError("'" + checked_host(host) + "' is not in tools.allowed_hosts");
+    }
+    // Last first, so an earlier match's offsets stay where they were.
+    if (!list.flow) {
+        for (auto match = matches.rbegin(); match != matches.rend(); ++match) {
+            lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(list.items[*match].line));
         }
         return join_lines(lines);
     }
-    throw ConfigEditError("'" + canonical + "' is not in tools.allowed_hosts");
+    std::string& line = lines[list.key_line];
+    if (matches.size() == list.items.size()) {
+        line.erase(list.open + 1, list.close - list.open - 1);
+        return join_lines(lines);
+    }
+    // The exact inverse of the add, one match at a time: an entry with one
+    // kept before it takes the separator before it; a leading run takes the
+    // separator after each, up to the first entry kept.
+    std::vector<bool> removed(list.items.size(), false);
+    for (const std::size_t match : matches) {
+        removed[match] = true;
+    }
+    std::vector<std::pair<std::size_t, std::size_t>> spans;  // [begin, end) in the line
+    bool kept_before = false;
+    for (std::size_t index = 0; index < list.items.size(); ++index) {
+        if (!removed[index]) {
+            kept_before = true;
+            continue;
+        }
+        if (kept_before) {
+            spans.emplace_back(list.items[index - 1].end, list.items[index].end);
+        } else {
+            spans.emplace_back(list.items[index].begin, list.items[index + 1].begin);
+        }
+    }
+    for (auto span = spans.rbegin(); span != spans.rend(); ++span) {
+        line.erase(span->first, span->second - span->first);
+    }
+    return join_lines(lines);
 }
 
 std::string format_config(std::string_view content) {

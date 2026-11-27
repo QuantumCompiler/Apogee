@@ -652,6 +652,25 @@ private:
                 }
             }
         }
+        if (want + 1 < have) {
+            // Several items gone (CLI-M40: every spelling of a host at once):
+            // when what is left is the list with some items taken out, take
+            // the first of them out now, as the one-item drop above does, and
+            // the next round takes the next -- never the list rendered anew,
+            // which loses every comment on the items it keeps.
+            std::size_t matched = 0;
+            std::optional<std::size_t> first_gone;
+            for (std::size_t i = 0; i < have; ++i) {
+                if (matched < want && item_equals(i, matched)) {
+                    ++matched;
+                } else if (!first_gone.has_value()) {
+                    first_gone = i;
+                }
+            }
+            if (matched == want && first_gone.has_value()) {
+                return remove(node, *first_gone, node.children[*first_gone].begin);
+            }
+        }
         if (want == have) {
             for (std::size_t i = 0; i < have; ++i) {
                 if (auto splices = diff(node.children[i], target[i])) {

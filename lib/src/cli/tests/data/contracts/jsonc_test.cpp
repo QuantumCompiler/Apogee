@@ -204,6 +204,29 @@ TEST_CASE("a list gains and loses items in place", "[jsonc][patch]") {
     CHECK(patch(grown, parse_json(kBlock)) == kBlock);
 }
 
+TEST_CASE("a list that loses several items loses each in place, the rest as written",
+          "[jsonc][patch][CLI-M40]") {
+    // Two spellings of one host leave together (CLI-M40): the list was
+    // rendered anew past a one-item drop, losing every comment on the items
+    // it kept.
+    constexpr std::string_view kBlock =
+        "{\n  \"hosts\": [\n    \"a\",  // the docs\n    \"X\",\n    // packages\n"
+        "    \"b\",\n    \"x\"  // again\n  ]\n}\n";
+    Json target = parse_json(kBlock);
+    target["hosts"] = Json::array({"a", "b"});
+    CHECK(patch(kBlock, target) ==
+          "{\n  \"hosts\": [\n    \"a\",  // the docs\n    // packages\n    \"b\"\n  ]\n}\n");
+    // On one line, an inline comment between items stays too.
+    constexpr std::string_view kLine =
+        "{\"hosts\": [\"X\", \"a\" /* keep */, \"x\", \"b\", \"X\"]} // end\n";
+    target = parse_json(kLine);
+    target["hosts"] = Json::array({"a", "b"});
+    CHECK(patch(kLine, target) == "{\"hosts\": [\"a\" /* keep */, \"b\"]} // end\n");
+    // Every item gone: the empty form.
+    target["hosts"] = Json::array();
+    CHECK(patch(kLine, target) == "{\"hosts\": []} // end\n");
+}
+
 TEST_CASE("a one-line object stays on one line", "[jsonc][patch]") {
     constexpr std::string_view kInline = "{\"a\": {\"x\": 1, \"y\": 2}}\n";
     Json target = parse_json(kInline);

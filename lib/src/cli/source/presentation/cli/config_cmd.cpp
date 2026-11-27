@@ -135,6 +135,24 @@ std::string flag_word(bool value) {
     return value ? "true" : "false";
 }
 
+/// `delete-allowed-host`'s line (CLI-M40): the host, or the entry as written
+/// and that it allowed nothing -- never `*canonical_host`, which a malformed
+/// entry has none of -- and how many entries went when there were several.
+/// Every entry `argument` names is that host, or that very spelling
+/// (`allowed_host_matches`), so the argument says what they were.
+std::string removed_hosts_line(const std::string& argument, std::size_t removed) {
+    const std::optional<std::string> host = harness::canonical_host(argument);
+    std::string line = "removed " + (host.has_value() ? *host : "'" + argument + "'") +
+                       " from tools.allowed_hosts";
+    if (removed > 1) {
+        line += " (" + std::to_string(removed) + " entries)";
+    }
+    if (!host.has_value()) {
+        line += " -- it was not a host name, so it allowed nothing";
+    }
+    return line;
+}
+
 /// A list as `config get` prints it: one item per line.
 std::string one_per_line(const std::vector<std::string>& items) {
     std::string out;
@@ -1444,15 +1462,30 @@ void bind_delete_allowed_host(CLI::App& parent, const RootContext& context) {
     auto host = std::make_shared<std::string>();
     CLI::App* cmd = parent.add_subcommand("delete-allowed-host",
                                           "Make fetch_url ask again before reaching a website");
-    cmd->add_option("host", *host, "A host in tools.allowed_hosts")
+    cmd->add_option("host", *host, "A host in tools.allowed_hosts, or an entry as written there")
         ->type_name(kAllowedHostValue)
         ->required();
     cmd->callback([&context, host]() {
         const std::filesystem::path path = config_path_for(context);
-        apply_edit(path, [host](std::string_view content) {
-            return harness::remove_allowed_host(content, *host);
+        // What went, read from the text the edit was handed (57f) by the
+        // transform's own predicate -- an entry as written, or every
+        // spelling of a host (CLI-M40).
+        std::size_t removed = 0;
+        apply_edit(path, [host, &path, &removed](std::string_view content) {
+            std::string edited = harness::remove_allowed_host(content, *host);
+            const auto named = [&](std::string_view text) {
+                return harness::allowed_host_matches(
+                           harness::parse_config(text, path.string()).tools.allowed_hosts, *host)
+                    .size();
+            };
+            // What went, as the loader reads it before and after: an entry
+            // the line editor does not see (CLI-M43) is never counted.
+            const std::size_t before = named(content);
+            const std::size_t after = named(edited);
+            removed = before > after ? before - after : 0;
+            return edited;
         });
-        std::cout << "removed " << *harness::canonical_host(*host) << " from tools.allowed_hosts\n";
+        std::cout << removed_hosts_line(*host, removed) << "\n";
     });
 }
 

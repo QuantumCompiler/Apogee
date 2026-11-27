@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// What a website's host is, in one place.
 ///
@@ -34,5 +36,14 @@ namespace apogee::harness {
 /// entry that is not a host (a URL someone pasted) matches nothing; `check`
 /// is where it gets reported.
 [[nodiscard]] bool host_listed(std::span<const std::string> allowed, std::string_view host);
+
+/// The entries of `tools.allowed_hosts` that `argument` names, as indices in
+/// the list's order: each entry equal to it as written, and, when both are
+/// hosts, each with its canonical form -- so a pasted URL is named by its own
+/// spelling, and a host by every spelling of it (CLI-M40). What
+/// `config delete-allowed-host` removes, its HTTP twin's 404 and the verb's
+/// completion all ask this, so the offer, the verb and the twin agree.
+[[nodiscard]] std::vector<std::size_t> allowed_host_matches(std::span<const std::string> entries,
+                                                            std::string_view argument);
 
 }  // namespace apogee::harness

@@ -11,7 +11,9 @@
 #include <utility>
 #include <vector>
 
+#include "agent/tool.h"
 #include "cli/complete_protocol.h"
+#include "cli/permissions.h"
 #include "cli/registry.h"
 #include "cli/root.h"
 #include "contracts/config.h"
@@ -884,6 +886,111 @@ TEST_CASE("config get reads tools.allowed_hosts one per line, as the host verbs 
     out.clear();
     REQUIRE(home.run({"config", "get", "tools.allowed_hosts"}, &out) == 0);
     CHECK(out == "example.com\n");
+}
+
+// --- delete-allowed-host removes what the list holds (CLI-M40) ---------------
+
+TEST_CASE(
+    "delete-allowed-host removes a hand-written entry as written, and says it allowed nothing",
+    "[commands][config][allowed-hosts][CLI-M40]") {
+    // The verb refused the URL before reading the list, so `check`'s warning
+    // could only be cleared by a hand edit.
+    const std::string kept = std::string{kConfig} +
+                             "tools:\n"
+                             "  allowed_hosts:\n"
+                             "    - docs.python.org   # the docs\n";
+    const CliHome home{std::string{kConfig} +
+                       "tools:\n"
+                       "  allowed_hosts:\n"
+                       "    - docs.python.org   # the docs\n"
+                       "    - \"https://not-a-host.example/path\"   # pasted\n"};
+    std::string out;
+    REQUIRE(home.run({"config", "delete-allowed-host", "https://not-a-host.example/path"}, &out) ==
+            0);
+    CHECK(out ==
+          "removed 'https://not-a-host.example/path' from tools.allowed_hosts -- it was not a host "
+          "name, so it allowed nothing\n");
+    CHECK(home.config_text() == kept);
+
+    // JSONC the same: the entry gone, every other byte kept.
+    const std::string json_kept =
+        "{\n  // web\n  \"tools\": {\"allowed_hosts\": [\"docs.python.org\"]}\n}\n";
+    const CliHome json{
+        "{\n  // web\n  \"tools\": {\"allowed_hosts\": [\"docs.python.org\", "
+        "\"*.example.com\"]}\n}\n",
+        "config.json"};
+    out.clear();
+    REQUIRE(json.run({"config", "delete-allowed-host", "*.example.com"}, &out) == 0);
+    CHECK(out ==
+          "removed '*.example.com' from tools.allowed_hosts -- it was not a host name, so it "
+          "allowed nothing\n");
+    CHECK(json.config_text() == json_kept);
+}
+
+TEST_CASE("delete-allowed-host removes every spelling of a host, so a fetch to it asks again",
+          "[commands][config][allowed-hosts][CLI-M40]") {
+    const CliHome home{std::string{kConfig} +
+                       "tools:\n  allowed_hosts: [Example.COM., example.com, docs.python.org]\n"};
+    const auto fetch = [&](std::string_view host) {
+        const apogee::harness::Config config = apogee::harness::load_config(home.config_path());
+        return apogee::commands::make_permission_checker(config, nullptr)(
+            apogee::agent::GateRequest{"fetch_url", host, "https://example/", true});
+    };
+    REQUIRE(fetch("example.com") == apogee::agent::Permission::Allow);
+    std::string out;
+    REQUIRE(home.run({"config", "delete-allowed-host", "example.com"}, &out) == 0);
+    // The host named, and the count, never the first spelling alone.
+    CHECK(out == "removed example.com from tools.allowed_hosts (2 entries)\n");
+    CHECK(home.config_text() ==
+          std::string{kConfig} + "tools:\n  allowed_hosts: [docs.python.org]\n");
+    CHECK(fetch("example.com") == apogee::agent::Permission::Ask);
+    CHECK(fetch("docs.python.org") == apogee::agent::Permission::Allow);
+    // One spelling: today's line, word for word.
+    out.clear();
+    REQUIRE(home.run({"config", "delete-allowed-host", "DOCS.python.org."}, &out) == 0);
+    CHECK(out == "removed docs.python.org from tools.allowed_hosts\n");
+}
+
+TEST_CASE("delete-allowed-host counts what went, as the loader reads it before and after",
+          "[commands][config][allowed-hosts][CLI-M40]") {
+    // The loader expands `${VAR}` in an entry; the line editor reads the
+    // text, so an entry spelled through a variable is not removed, and the
+    // count says only what went (that it still allows the host is CLI-M43's
+    // read-back).
+    const apogee::testing::EnvGuard variable{"APOGEE_M40_HOST", "example.com"};
+    const CliHome home{std::string{kConfig} +
+                       "tools:\n  allowed_hosts: [Example.COM., example.com, "
+                       "\"${APOGEE_M40_HOST}\"]\n"};
+    std::string out;
+    REQUIRE(home.run({"config", "delete-allowed-host", "example.com"}, &out) == 0);
+    CHECK(out == "removed example.com from tools.allowed_hosts (2 entries)\n");
+    CHECK(home.config_text() ==
+          std::string{kConfig} + "tools:\n  allowed_hosts: [\"${APOGEE_M40_HOST}\"]\n");
+}
+
+TEST_CASE("delete-allowed-host deletes nothing it does not name, and says so",
+          "[commands][config][allowed-hosts][CLI-M40]") {
+    const std::string text =
+        std::string{kConfig} +
+        "tools:\n  allowed_hosts: [docs.python.org, \"https://not-a-host.example/path\"]\n";
+    const CliHome home{text};
+    std::string out;
+    CHECK(home.run({"config", "delete-allowed-host", "https://typo.example/"}, &out) == 1);
+    CHECK(out.find("'https://typo.example/' is not a host name") != std::string::npos);
+    CHECK(home.config_text() == text);
+    out.clear();
+    CHECK(home.run({"config", "delete-allowed-host", "pypi.org"}, &out) == 1);
+    CHECK(out.find("'pypi.org' is not in tools.allowed_hosts") != std::string::npos);
+    CHECK(home.config_text() == text);
+    // Add then delete: the file's own bytes.
+    REQUIRE(home.run({"config", "add-allowed-host", "pypi.org"}, &out) == 0);
+    REQUIRE(home.run({"config", "delete-allowed-host", "pypi.org"}, &out) == 0);
+    CHECK(home.config_text() == text);
+    // The help names both ways an entry is given.
+    out.clear();
+    REQUIRE(home.run({"config", "delete-allowed-host", "--help"}, &out) == 0);
+    CHECK(out.find("A host in tools.allowed_hosts, or an entry as written there") !=
+          std::string::npos);
 }
 
 // --- delete-backend leaves no role naming what it removed (M33) ----------------
