@@ -859,7 +859,8 @@ void bind_migrate(CLI::App& parent, const RootContext& context) {
     CLI::App* cmd = parent.add_subcommand(
         "migrate",
         "Convert a YAML config to JSON (JSONC): every key, value and comment carried over, the "
-        "original kept beside it as <file>.bak");
+        "original kept beside it as <file>.bak -- or nothing written, and the line it cannot carry "
+        "named");
     cmd->callback([&context]() {
         const std::filesystem::path path = config_path_for(context);
         std::error_code code;

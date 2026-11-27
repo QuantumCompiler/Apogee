@@ -178,6 +178,45 @@ TEST_CASE("config.yaml and config.json side by side are refused, both named",
     CHECK(read(json) == "{}\n");
 }
 
+TEST_CASE("check warns when migrate would refuse the older config, in its words and line",
+          "[commands][config][jsonc][migrate][CLI-M47]") {
+    // CLI-M47: the row promised "every comment kept" for every YAML file. It
+    // now runs the migration on the text it read, writing nothing, and a
+    // refusal is a warning in that refusal's words -- in both faces.
+    struct Refused {
+        std::string yaml;
+        std::string said;
+    };
+
+    const std::vector<Refused> refused{
+        {"backends:\n  local:\n    type: mock\n    model: mock-1\ntools:\n  allowed_hosts: "
+         "[docs.python.org,\n    example.com]\nmodels:\n  default: local\n",
+         "line 6: a flow list or map continues onto the next line"},
+        {std::string{kYaml} + "---\nui:\n  markdown: false\n", "line 8: a second YAML document"},
+    };
+    for (const Refused& file : refused) {
+        INFO(file.said);
+        const CliHome home{file.yaml};
+        const Run human = run_default(home, {"check", "--no-color", "-q"});
+        CHECK(human.out.find(file.said) != std::string::npos);
+        CHECK(human.out.find("every comment kept") == std::string::npos);
+        CHECK(human.out.find("by hand, then apogee config migrate") != std::string::npos);
+        const nlohmann::json row =
+            config_row(run_default(home, {"check", "--output-format", "json"}));
+        CHECK(row.at("status") == "warn");
+        CHECK(row.at("name") == "config.yaml");
+        CHECK(row.at("detail").get<std::string>().find(file.said) != std::string::npos);
+        CHECK(row.at("detail").get<std::string>().find("the older YAML format, still read") !=
+              std::string::npos);
+        CHECK(row.at("remedy").get<std::string>().find("by hand, then apogee config migrate") !=
+              std::string::npos);
+        // A trial, never a write.
+        CHECK(read(home.config_path()) == file.yaml);
+        CHECK_FALSE(std::filesystem::exists(home.home() / "config" / "config.json"));
+        CHECK_FALSE(std::filesystem::exists(home.home() / "config" / "config.yaml.bak"));
+    }
+}
+
 TEST_CASE("config upgrade adds what the starter config has and the file lacks; check counts it",
           "[commands][config][jsonc][upgrade]") {
     const std::string old = fixture("upgrade_old.json");

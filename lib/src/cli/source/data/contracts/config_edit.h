@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -503,6 +504,47 @@ struct SettableScalar {
 /// line moves it out from under the comment that explains it, which is
 /// precisely the damage this whole module exists to prevent.
 [[nodiscard]] std::string format_config(std::string_view content);
+
+// ---------------------------------------------------------------------------
+// What a config's text is, read once (CLI-M44) for the editor and for
+// `config migrate` (CLI-M47), each of which refuses in its own words.
+// ---------------------------------------------------------------------------
+
+/// A config's bytes when they are not UTF-8 text.
+struct ForeignEncoding {
+    /// What the text is -- "UTF-16 text (little-endian)" and the like -- by
+    /// YAML's own detection table: a byte-order mark, or the zero bytes its
+    /// first character carries, UTF-32 checked before UTF-16. Empty when the
+    /// text opens as UTF-8 does but holds a NUL byte.
+    std::string_view encoding{};
+    /// Where that NUL byte is, when `encoding` is empty.
+    std::size_t nul = 0;
+};
+
+/// `content`'s encoding when it is not UTF-8 text, else nullopt (a UTF-8
+/// byte-order mark is UTF-8). yaml-cpp decodes UTF-16 and UTF-32 itself
+/// while the editor and the migrator read the bytes, so each refuses such a
+/// text by name rather than misread it.
+[[nodiscard]] std::optional<ForeignEncoding> foreign_encoding(std::string_view content);
+
+/// A YAML config's later document that holds content -- which the loader,
+/// reading the first document alone, never reads.
+struct LaterDocument {
+    /// The marker that ends the first document, `---` or `...`, and its line,
+    /// counted from 0.
+    std::string_view marker{};
+    std::size_t marker_line = 0;
+    /// The line the document holding content starts on, from 0: its own
+    /// `---`, or, with none since a `...`, its first node's line.
+    std::size_t line = 0;
+};
+
+/// The first later document of `content`, a YAML text, that holds content,
+/// else nullopt, by the editor's document rules (CLI-M44): a `---` before any
+/// node starts the first document; a later `---`, or any `...`, ends it; and
+/// after the end, blank lines, comments and markers with nothing but a
+/// comment after them hold nothing. A UTF-8 byte-order mark is read past.
+[[nodiscard]] std::optional<LaterDocument> later_yaml_document(std::string_view content);
 
 // ---------------------------------------------------------------------------
 // The file layer -- the only code here that writes.

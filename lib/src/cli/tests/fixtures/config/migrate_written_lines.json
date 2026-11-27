@@ -1,0 +1,23 @@
+{
+  "ui": {
+    "markdown": false
+  },
+  "tools": {
+    "allowed_hosts": ["docs.python.org"] // the docs
+  },
+  "backends": {
+    "a": {
+      "type": "mock",
+      "model": "mock-1",
+      "system_prompt": "a prompt that wraps"
+    },
+    "b": {
+      "type": "mock",
+      "model": "mock-1",
+      "system_prompt": "You are terse.\n"
+    }
+    // spare:
+    //   type: mock
+  }
+  // end of file
+}

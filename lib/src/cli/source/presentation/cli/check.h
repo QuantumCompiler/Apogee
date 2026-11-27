@@ -92,6 +92,10 @@ struct CheckInputs {
     /// The file is the older YAML the compat read serves (28i): the Config
     /// row names `config migrate`.
     bool config_legacy = false;
+    /// Why `config migrate` would refuse that YAML file, in its own words --
+    /// the line, or the encoding -- found by running the migration on the
+    /// text read, writing nothing (CLI-M47). Empty when it would migrate.
+    std::string config_migrate_refusal;
     /// The options this release's starter config has that the file does not
     /// mention, as dotted paths (28i): the Config row counts them and names
     /// `config upgrade`. Empty when the file is current, or YAML.

@@ -227,6 +227,338 @@ TEST_CASE(
     }
 }
 
+namespace {
+
+/// A two-line config every shape below wraps.
+constexpr std::string_view kBody = "ui:\n  markdown: false\n";
+
+/// `kBody` as JSONC, with `inside` written as the brace's first lines.
+std::string body_json(std::string_view inside = "") {
+    return "{\n" + std::string{inside} + "  \"ui\": {\n    \"markdown\": false\n  }\n}\n";
+}
+
+/// `text` with every `\n` a `\r\n`.
+std::string crlf(std::string_view text) {
+    std::string out;
+    for (const char c : text) {
+        out += c == '\n' ? std::string{"\r\n"} : std::string{c};
+    }
+    return out;
+}
+
+/// `text`, an ASCII string, as UTF-16 bytes, a byte-order mark first or not.
+std::string utf16(std::string_view text, bool big_endian, bool mark) {
+    std::string out;
+    if (mark) {
+        out += big_endian ? std::string{"\xFE\xFF"} : std::string{"\xFF\xFE"};
+    }
+    for (const char c : text) {
+        out += big_endian ? std::string{'\0', c} : std::string{c, '\0'};
+    }
+    return out;
+}
+
+/// The legacy template with a hand-written backend whose last field is
+/// `prompt` -- the file Evidence 1 found refused once it is a block scalar.
+/// It goes first under `backends:`, as a person adds one: the template's
+/// blank line and commented examples follow it.
+std::string template_with_prompt(std::string_view prompt) {
+    std::string yaml = fixture("legacy_template.yaml");
+    constexpr std::string_view kSection = "\nbackends:\n";
+    const std::size_t section = yaml.find(kSection);
+    REQUIRE(section != std::string::npos);
+    yaml.insert(section + kSection.size(),
+                "  hand:\n    type: mock\n    model: mock-1\n    "
+                "system_prompt: " +
+                    std::string{prompt} + "\n");
+    return yaml;
+}
+
+}  // namespace
+
+TEST_CASE("migrate carries every line the loader reads, each where its twin carries it",
+          "[config][migrate][CLI-M47]") {
+    // Each shape the loader reads and migrate refused, against a pinned
+    // literal: the output today's migrate gives its twin -- the same comment
+    // on a line of its own, or the multi-line value on one line (measured on
+    // HEAD's binary, 2026-11-27).
+    struct Shape {
+        std::string_view name;
+        std::string yaml;
+        std::string json;
+        std::size_t comments = 0;
+    };
+
+    const std::string body{kBody};
+    const std::string carried = body_json("  // c\n");
+    const std::string ended = "{\n  \"ui\": {\n    \"markdown\": false\n  }\n  // end\n}\n";
+    const std::vector<Shape> shapes{
+        {"--- # c", "--- # c\n" + body, carried, 1},
+        {"---  # c (yamllint's spelling)", "---  # c\n" + body, carried, 1},
+        {"--- then a tab, # c", "---\t# c\n" + body, carried, 1},
+        {"--- #c", "--- #c\n" + body, body_json("  //c\n"), 1},
+        {"%YAML 1.2 # c, then ---", "%YAML 1.2 # c\n---\n" + body, carried, 1},
+        {"--- !!map # c", "--- !!map # c\n" + body, carried, 1},
+        {"!!map # c, a tag alone", "!!map # c\n" + body, carried, 1},
+        {"&root # c, an anchor alone", "&root # c\n" + body, carried, 1},
+        {"a header, a blank, then --- # c", "# header\n\n--- # c\n" + body,
+         "// header\n\n" + carried, 2},
+        {"--- # c alone", "--- # c\n", "// c\n{}\n", 1},
+        {"CRLF --- # c, CRLF kept", crlf("--- # c\n" + body), crlf(carried), 1},
+        {"... # end", body + "... # end\n", ended, 1},
+        {"... then # end", body + "...\n# end\n", ended, 1},
+        {"a later document of comments alone", body + "---\n# end\n", ended, 1},
+        {"  - # c over its item",
+         "tools:\n  allowed_hosts:\n  - # c\n    docs.python.org\n  - example.com\n",
+         "{\n  \"tools\": {\n    \"allowed_hosts\": [\n      // c\n      \"docs.python.org\",\n"
+         "      \"example.com\"\n    ]\n  }\n}\n",
+         1},
+        {"a plain scalar's continuation line with # c",
+         "backends:\n  m:\n    type: mock\n    system_prompt: a prompt that\n      wraps # c\n"
+         "    model: mock-1\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"type\": \"mock\",\n      \"system_prompt\": "
+         "\"a prompt that wraps\",\n      // c\n      \"model\": \"mock-1\"\n    }\n  }\n}\n",
+         1},
+        {"a flow value on the line after its key, # c",
+         "tools:\n  allowed_hosts:\n    [docs.python.org] # c\n",
+         "{\n  \"tools\": {\n    \"allowed_hosts\": [\"docs.python.org\"] // c\n  }\n}\n", 1},
+        {"a block scalar last, then comments at three levels",
+         "backends:\n  m:\n    type: mock\n    system_prompt: |\n      You are terse.\n"
+         "    # inside m\n  # inside backends\n# at the root\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"type\": \"mock\",\n      \"system_prompt\": "
+         "\"You are terse.\\n\"\n      // inside m\n    }\n    // inside backends\n  }\n"
+         "  // at the root\n}\n",
+         3},
+        {"a wrapped plain scalar last, then a comment",
+         "backends:\n  m:\n    type: mock\n    system_prompt: a prompt that\n      wraps\n"
+         "    # inside m\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"type\": \"mock\",\n      \"system_prompt\": "
+         "\"a prompt that wraps\"\n      // inside m\n    }\n  }\n}\n",
+         1},
+        // Migrated before, the comment at the next key's level; now it stays in
+        // its container, by indentation (the item's Decision log).
+        {"a wrapped plain scalar, a comment at its container's column, a key",
+         "backends:\n  m:\n    type: mock\n    system_prompt: a prompt that\n      wraps\n"
+         "    # inside m\n  n:\n    type: mock\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"type\": \"mock\",\n      \"system_prompt\": "
+         "\"a prompt that wraps\"\n      // inside m\n    },\n    \"n\": {\n      \"type\": "
+         "\"mock\"\n    }\n  }\n}\n",
+         1},
+        {"a block scalar, a blank line, a comment, the end",
+         "backends:\n  m:\n    type: mock\n    system_prompt: |\n      You are terse.\n\n"
+         "  # spare\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"type\": \"mock\",\n      \"system_prompt\": "
+         "\"You are terse.\\n\"\n    }\n\n    // spare\n  }\n}\n",
+         1},
+        // A blank line after a block scalar's text is not its text (YAML chomps
+        // it): kept as a blank line, as its twin keeps it -- where it was
+        // dropped before (the item's Decision log).
+        {"a block scalar, a blank line, a key",
+         "backends:\n  m:\n    system_prompt: |\n      You are terse.\n\n    type: mock\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"system_prompt\": \"You are terse.\\n\",\n\n"
+         "      \"type\": \"mock\"\n    }\n  }\n}\n",
+         0},
+        // Kept with `|+`, the blank line is the scalar's own text.
+        {"a block scalar kept with |+, a blank line, a key",
+         "backends:\n  m:\n    system_prompt: |+\n      You are terse.\n\n    type: mock\n",
+         "{\n  \"backends\": {\n    \"m\": {\n      \"system_prompt\": \"You are terse.\\n\\n\",\n"
+         "      \"type\": \"mock\"\n    }\n  }\n}\n",
+         0},
+        // A comment shallower than a block scalar's text and deeper than its
+        // key ends the text, as YAML reads it: it was dropped with exit 0.
+        {"a comment between a block scalar's text and its key's column",
+         "a:\n  k: |\n      text\n    # note\n  j: 1\n",
+         "{\n  \"a\": {\n    \"k\": \"text\\n\",\n    // note\n    \"j\": 1\n  }\n}\n", 1},
+        // A value on the line after its key spans two lines too: a comment at
+        // its container's column after it stays in the container.
+        {"a scalar on the line after its key, last, then a comment at its container's column",
+         "a:\n  k:\n    v\n  # c\nb: 1\n",
+         "{\n  \"a\": {\n    \"k\": \"v\"\n    // c\n  },\n  \"b\": 1\n}\n", 1},
+        // A list's first item empty at the end of the file: its place is past
+        // the last line.
+        {"a list whose one item is an empty dash at the end", "notes:\n-\n",
+         "{\n  \"notes\": [\n    null\n  ]\n}\n", 0},
+    };
+    for (const Shape& shape : shapes) {
+        INFO(shape.name);
+        const apogee::harness::Migration migration =
+            apogee::harness::migrate_config_text(shape.yaml);
+        CHECK(migration.text == shape.json);
+        CHECK(migration.comments == shape.comments);
+    }
+}
+
+TEST_CASE("the files migrate carried before come out byte for byte as before",
+          "[config][migrate][CLI-M47]") {
+    // The controls (Evidence 2), each pinned to HEAD's output on 2026-11-27.
+    const std::string body{kBody};
+    const std::string plain = body_json();
+    const std::vector<std::pair<std::string, std::string>> controls{
+        {"---\n" + body, plain},
+        {"---   \n" + body, plain},
+        {"# c\n---\n" + body, body_json("  // c\n")},
+        {"%YAML 1.2\n---\n" + body, plain},
+        {"--- !!map\n" + body, plain},
+        {"--- {ui: {markdown: false}}\n", "{\n  \"ui\": {\"markdown\": false}\n}\n"},
+        {"--- {ui: {markdown: false}} # c\n", "{\n  \"ui\": {\"markdown\": false} // c\n}\n"},
+        {"\xEF\xBB\xBF---\n" + body, plain},
+        {crlf("# c\n" + body + "# end\n"),
+         crlf("{\n  // c\n  \"ui\": {\n    \"markdown\": false\n  }\n  // end\n}\n")},
+        {body + "...\n", plain},
+        {body + "...\n\n", plain},
+        {body + "---\n", plain},
+        {"---\n# one\n# two\n" + body, body_json("  // one\n  // two\n")},
+        {"ui:\n  markdown: false # last\n",
+         "{\n  \"ui\": {\n    \"markdown\": false // last\n  }\n}\n"},
+        {"tools:\n  allowed_hosts:\n  - docs.python.org\n  - example.com\n  disabled: []\n  # "
+         "after\n",
+         "{\n  \"tools\": {\n    \"allowed_hosts\": [\n      \"docs.python.org\",\n      "
+         "\"example.com\"\n    ],\n    \"disabled\": []\n    // after\n  }\n}\n"},
+        {"tools:\n  allowed_hosts:\n    # the docs\n    [docs.python.org]\n",
+         "{\n  \"tools\": {\n    \"allowed_hosts\": [\"docs.python.org\"]\n    // the docs\n  "
+         "}\n}\n"},
+    };
+    for (const auto& [yaml, json] : controls) {
+        INFO(yaml);
+        CHECK(apogee::harness::migrate_config_text(yaml).text == json);
+    }
+}
+
+TEST_CASE("the marker and written-line fixtures migrate to their twins' JSON",
+          "[config][migrate][CLI-M47]") {
+    // Each `.json` is today's output for the fixture's twin: its comments on
+    // lines of their own, its multi-line values on one line.
+    for (const auto& [name, comments] : std::vector<std::pair<std::string, std::size_t>>{
+             {"migrate_markers", 3}, {"migrate_written_lines", 4}}) {
+        INFO(name);
+        const std::string yaml = fixture(name + ".yaml");
+        const apogee::harness::Migration migration = apogee::harness::migrate_config_text(yaml);
+        CHECK(migration.text == fixture(name + ".json"));
+        CHECK(migration.comments == comments);
+        same_meaning(apogee::harness::parse_config(yaml, "yaml"),
+                     apogee::harness::parse_config(migration.text, "jsonc"));
+    }
+    CHECK_FALSE(
+        apogee::harness::parse_config(fixture("migrate_written_lines.yaml"), "yaml").ui.markdown);
+}
+
+TEST_CASE("the legacy template with a block-scalar prompt last carries all 570 comments",
+          "[config][migrate][CLI-M47]") {
+    const apogee::harness::Migration block =
+        apogee::harness::migrate_config_text(template_with_prompt("|\n      You are terse."));
+    const apogee::harness::Migration quoted =
+        apogee::harness::migrate_config_text(template_with_prompt("\"You are terse.\\n\""));
+    CHECK(block.comments == 570);
+    CHECK(quoted.comments == 570);
+    CHECK(block.text == quoted.text);
+}
+
+TEST_CASE("a UTF-8 byte-order mark is read past: every comment carried, no mark written",
+          "[config][migrate][CLI-M47]") {
+    const std::string yaml = fixture("legacy_template.yaml");
+    const apogee::harness::Migration plain = apogee::harness::migrate_config_text(yaml);
+    const apogee::harness::Migration marked =
+        apogee::harness::migrate_config_text("\xEF\xBB\xBF" + yaml);
+    CHECK(plain.comments == 570);
+    CHECK(marked.comments == 570);
+    CHECK(marked.text == plain.text);
+    CHECK(marked.text.starts_with("// Apogee configuration.\n"));
+
+    const apogee::harness::Migration first =
+        apogee::harness::migrate_config_text("\xEF\xBB\xBF" + crlf("# c\n" + std::string{kBody}));
+    CHECK(first.comments == 1);
+    CHECK(first.text == crlf(body_json("  // c\n")));
+    const apogee::harness::Migration indented =
+        apogee::harness::migrate_config_text("\xEF\xBB\xBF  # c\n" + std::string{kBody});
+    CHECK(indented.comments == 1);
+}
+
+TEST_CASE("a config that is not UTF-8 is refused naming its encoding, and nothing is written",
+          "[config][migrate][CLI-M47]") {
+    using Catch::Matchers::ContainsSubstring;
+    const std::string text = "# mine\n" + std::string{kBody};
+    const std::vector<std::pair<std::string, std::string>> cases{
+        {utf16(text, false, true), "UTF-16"},
+        {utf16(text, true, true), "UTF-16"},
+        {utf16(text, false, false), "UTF-16"},
+        {utf16(text, true, false), "UTF-16"},
+        {std::string{"\xFF\xFE\0\0", 4} + utf16(text, false, false) + std::string(2, '\0'),
+         "UTF-32"},
+        {"# a NUL here: " + std::string(1, '\0') + "\n" + std::string{kBody}, "NUL byte"},
+    };
+    const TempDir dir{"config-migrate-encoding-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path yaml = dir.path() / "config" / "config.yaml";
+    for (const auto& [bytes, named] : cases) {
+        INFO(named);
+        CHECK_THROWS_WITH(apogee::harness::migrate_config_text(bytes),
+                          ContainsSubstring(named) && ContainsSubstring("save it as UTF-8"));
+        write(yaml, bytes);
+        CHECK_THROWS_WITH(apogee::harness::migrate_config_file(yaml), ContainsSubstring(named));
+        CHECK(read(yaml) == bytes);
+        CHECK_FALSE(std::filesystem::exists(dir.path() / "config" / "config.json"));
+        CHECK_FALSE(std::filesystem::exists(dir.path() / "config" / "config.yaml.bak"));
+    }
+}
+
+TEST_CASE("a later YAML document holding content is refused, naming the line it starts on",
+          "[config][migrate][CLI-M47]") {
+    using Catch::Matchers::ContainsSubstring;
+    const std::string body{kBody};
+    const std::string later = "tools:\n  disabled: [shell]\n";
+    const std::vector<std::pair<std::string, std::string>> cases{
+        {body + "---\n" + later, "line 3"},             // after a full first document
+        {body + "...\n" + later, "line 4"},             // a document after `...`
+        {body + "... # end\n---\n" + later, "line 4"},  // its own `---` after the end
+        {"---\n---\n" + body, "line 2"},                // an empty first document
+        {"...\n" + body, "line 2"},
+        {body + "--- {tools: {disabled: [shell]}}\n", "line 3"},
+    };
+    const TempDir dir{"config-migrate-documents-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path yaml = dir.path() / "config" / "config.yaml";
+    for (const auto& [text, line] : cases) {
+        INFO(text);
+        CHECK_THROWS_WITH(apogee::harness::migrate_config_text(text),
+                          ContainsSubstring(line + ": a second YAML document") &&
+                              ContainsSubstring("reads only the first"));
+        write(yaml, text);
+        CHECK_THROWS_WITH(apogee::harness::migrate_config_file(yaml),
+                          ContainsSubstring(line + ": a second YAML document"));
+        CHECK(read(yaml) == text);
+        CHECK_FALSE(std::filesystem::exists(dir.path() / "config" / "config.json"));
+        CHECK_FALSE(std::filesystem::exists(dir.path() / "config" / "config.yaml.bak"));
+    }
+}
+
+TEST_CASE("what migrate still cannot carry is refused naming its line",
+          "[config][migrate][CLI-M47]") {
+    using Catch::Matchers::ContainsSubstring;
+    using Catch::Matchers::StartsWith;
+    // A key written twice holds two values a JSON object cannot: named where
+    // the second one is, block or flow -- where the JSON reader's words named
+    // a line of the output before.
+    CHECK_THROWS_WITH(apogee::harness::migrate_config_text("ui:\n  markdown: false\n"
+                                                           "tools:\n  disabled: []\n"
+                                                           "ui:\n  markdown: true\n"),
+                      StartsWith("line 5: the key 'ui' is written again here, first on line 1"));
+    CHECK_THROWS_WITH(
+        apogee::harness::migrate_config_text("ui: {markdown: false, markdown: true}\n"),
+        StartsWith("line 1: the key 'markdown'"));
+    // Every refusal of the file's shape names its line first.
+    for (const std::string_view text :
+         {"models:\n  default: \"a long\n    value\"\n", "tools:\n  allowed_hosts: [a,\n    b]\n",
+          "a: 1\na: 2\n", "ui:\n  markdown: false\n---\nui:\n  markdown: true\n"}) {
+        INFO(text);
+        try {
+            (void)apogee::harness::migrate_config_text(text);
+            FAIL("migrated");
+        } catch (const ConfigError& e) {
+            CHECK_THAT(std::string{e.what()}, StartsWith("line ") &&
+                                                  ContainsSubstring("rewrite that by hand") &&
+                                                  !ContainsSubstring("did not carry"));
+        }
+    }
+}
+
 TEST_CASE("upgrade inserts exactly the missing options, with their comments, and only once",
           "[config][upgrade]") {
     const std::string old = fixture("upgrade_old.json");

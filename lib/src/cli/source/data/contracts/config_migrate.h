@@ -24,11 +24,22 @@ struct Migration {
 /// The legacy YAML config as JSONC, losslessly: every key in its order,
 /// every value as YAML read it (`${ENV}` references literally, never
 /// expanded), every comment -- whole-line and trailing -- carried as `//` at
-/// its place, blank lines kept. Verified before it is returned: the JSONC
-/// holds exactly the YAML's values and exactly its comments. Throws
-/// ConfigError when the YAML cannot be carried exactly -- a quoted value or
-/// flow list spread over several lines, a key that is not a plain scalar --
-/// naming the line, rather than guessing.
+/// its place, blank lines kept. The text is read as the loader reads it
+/// (CLI-M47): past a UTF-8 byte-order mark, which the JSONC does not carry,
+/// and its first document alone. Every line is carried once: a comment on a
+/// line that writes nothing -- a `---`, `...` or `%YAML` line, a tag or
+/// anchor alone, a dash alone, a value carried onto the next line -- goes on
+/// a `//` line of its own where the same comment alone on its line would; a
+/// container's closing comments stay in it by their indentation, past a
+/// block scalar's text or a value carried on. Verified before it is
+/// returned: the JSONC holds exactly the YAML's values and every comment,
+/// once. Throws ConfigError, naming the line, when the YAML cannot be carried
+/// exactly -- a quoted value or flow list spread over several lines, a key
+/// that is not a plain scalar or is written twice in one mapping, a later
+/// document that holds content (`a second YAML document starts here`), a
+/// comment with no place -- and naming the encoding for a UTF-16 or UTF-32
+/// text or one holding a NUL byte (`save it as UTF-8 and run it again`);
+/// never guessing.
 [[nodiscard]] Migration migrate_config_text(std::string_view yaml);
 
 /// What `config migrate` did on disk.
@@ -43,9 +54,11 @@ struct MigrationReport {
 /// Converts the YAML config at `path` to JSONC beside it: `<stem>.json`
 /// written atomically, then the original moved to `<file>.bak` -- the JSONC
 /// first, so an interruption leaves the original in place. Refuses, touching
-/// nothing, when the JSONC file already exists (both named: which is current
-/// is the user's call), when the backup name is taken, when the file is
-/// already JSONC, or when it does not load. Throws ConfigEditError.
+/// nothing, when the file is not UTF-8 (named before the loader reads it,
+/// CLI-M47), when the JSONC file already exists (both named: which is
+/// current is the user's call), when the backup name is taken, when the file
+/// is already JSONC, when it does not load, or when `migrate_config_text`
+/// refuses it. Throws ConfigEditError, or that refusal's ConfigError.
 [[nodiscard]] MigrationReport migrate_config_file(const std::filesystem::path& path);
 
 /// An option the starter config teaches in a comment alone (55g): its

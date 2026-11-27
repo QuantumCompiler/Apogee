@@ -49,7 +49,7 @@ apogee auth add anthropic   # hidden prompt; or --stdin / --from-env
 apogee chat
 ```
 
-The config file is JSON with `//` comments (JSONC) — a strict JSON parser reads it once its comments are stripped. An install from before v0.1.5 keeps its `config.yaml` working, with a one-line notice, until `apogee config migrate` converts it (every comment carried over, the original kept as `config.yaml.bak`); `apogee config upgrade` adds the options a newer release documents, with their comments, and `apogee check` says when there are any.
+The config file is JSON with `//` comments (JSONC) — a strict JSON parser reads it once its comments are stripped. An install from before v0.1.5 keeps its `config.yaml` working, with a one-line notice, until `apogee config migrate` converts it (every comment carried over, the original kept as `config.yaml.bak` -- or, touching nothing, the line it cannot carry named, which `apogee check` says beforehand); `apogee config upgrade` adds the options a newer release documents, with their comments, and `apogee check` says when there are any.
 
 **Subscription CLIs:** if you already use `claude`, `codex` or `gemini`, Apogee can find them — `apogee providers scan` shows what this machine has and the evidence for it, and `--register` adds a backend for each one found (nothing is written without it):
 

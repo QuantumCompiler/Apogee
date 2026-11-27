@@ -1,0 +1,11 @@
+--- # config
+backends:
+  m:
+    type: mock
+    model: mock-1
+tools:
+  allowed_hosts:
+  - # first host
+    docs.python.org
+  - example.com
+... # end

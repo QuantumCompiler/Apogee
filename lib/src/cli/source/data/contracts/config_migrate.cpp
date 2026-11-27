@@ -82,12 +82,24 @@ std::vector<std::string_view> split_lines(std::string_view text) {
         token, [](char c) { return c == '+' || c == '-' || (c >= '1' && c <= '9'); });
 }
 
+/// A block scalar opened on a line: its content sits indented past
+/// `column`, and with `keep` (`|+`, `>+`) its trailing blank lines are its own
+/// text -- else YAML chomps them, and they are the file's blank lines.
+struct BlockOpen {
+    std::size_t column = 0;
+    bool keep = false;
+    /// The header gives the text's indent (`|2`), measured from a parent this
+    /// reader does not track: then every deeper line is text, as before.
+    bool indicated = false;
+    /// The text's indent, its first line with anything on it sets: a comment
+    /// shallower than it ends the text, as YAML reads it.
+    std::optional<std::size_t> text{};
+};
+
 /// Reads one line with YAML on it: where a trailing comment starts (outside
-/// any quoted scalar), and whether a block scalar opens, whose content then
-/// sits indented past the returned column. Refuses what it cannot read one
-/// line at a time.
-std::optional<std::size_t> scan_content(std::string_view line, std::size_t number,
-                                        SourceLine& out) {
+/// any quoted scalar), and whether a block scalar opens. Refuses what it
+/// cannot read one line at a time.
+std::optional<BlockOpen> scan_content(std::string_view line, std::size_t number, SourceLine& out) {
     std::size_t pos = out.indent;
     bool at_start = true;  // where a scalar may begin
     int depth = 0;         // inside flow brackets
@@ -177,27 +189,54 @@ std::optional<std::size_t> scan_content(std::string_view line, std::size_t numbe
     while (header > out.indent && !is_gap(line[header - 1])) {
         --header;
     }
-    if (block_header(line.substr(header, value_end - header))) {
-        return key_column.value_or(dash_column);
+    const std::string_view token = line.substr(header, value_end - header);
+    if (block_header(token)) {
+        return BlockOpen{.column = key_column.value_or(dash_column),
+                         .keep = token.find('+') != std::string_view::npos,
+                         .indicated = token.find_first_of("123456789") != std::string_view::npos,
+                         .text = std::nullopt};
     }
     return std::nullopt;
 }
 
+/// The blank lines that end a block scalar's text, just before `end`: the
+/// file's blank lines again, unless the scalar keeps them as its text.
+void release_trailing_blanks(std::vector<SourceLine>& out,
+                             const std::vector<std::string_view>& lines, std::size_t end,
+                             const BlockOpen& block) {
+    if (block.keep) {
+        return;
+    }
+    for (std::size_t i = end; i-- > 0 && out[i].role == LineKind::Continuation &&
+                              lines[i].find_first_not_of(" \t") == std::string_view::npos;) {
+        out[i].role = LineKind::Blank;
+    }
+}
+
 std::vector<SourceLine> classify(const std::vector<std::string_view>& lines) {
     std::vector<SourceLine> out(lines.size());
-    std::optional<std::size_t> block_parent;
+    std::optional<BlockOpen> block;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::string_view line = lines[i];
         SourceLine& role = out[i];
         const std::size_t first = line.find_first_not_of(" \t");
         const bool blank = first == std::string_view::npos;
         role.indent = blank ? 0 : first;
-        if (block_parent.has_value()) {
-            if (blank || role.indent > *block_parent) {
+        if (block.has_value()) {
+            if (!blank && role.indent > block->column && !block->indicated &&
+                !block->text.has_value()) {
+                block->text = role.indent;
+            }
+            // Deeper than the key is the text -- but a comment shallower than
+            // the text ends it.
+            const bool ends = !blank && block->text.has_value() && role.indent < *block->text &&
+                              line[first] == '#';
+            if (blank || (role.indent > block->column && !ends)) {
                 role.role = LineKind::Continuation;
                 continue;
             }
-            block_parent.reset();
+            release_trailing_blanks(out, lines, i, *block);
+            block.reset();
         }
         if (blank) {
             role.role = LineKind::Blank;
@@ -209,7 +248,10 @@ std::vector<SourceLine> classify(const std::vector<std::string_view>& lines) {
             continue;
         }
         role.role = LineKind::Content;
-        block_parent = scan_content(line, i, role);
+        block = scan_content(line, i, role);
+    }
+    if (block.has_value()) {
+        release_trailing_blanks(out, lines, lines.size(), *block);
     }
     return out;
 }
@@ -267,14 +309,85 @@ std::vector<SourceLine> classify(const std::vector<std::string_view>& lines) {
     return static_cast<std::size_t>(mark.line);
 }
 
+/// Whether the writer puts `node` on one line, where it starts: a scalar, or
+/// a collection written flow or empty.
+[[nodiscard]] bool written_inline(const YAML::Node& node) {
+    if (node.IsScalar()) {
+        return true;
+    }
+    return (node.IsMap() || node.IsSequence()) &&
+           (node.size() == 0 || node.Style() == YAML::EmitterStyle::Flow);
+}
+
+/// Marks the lines whose trailing comment the writer carries as it writes
+/// them: each key's, each value's it writes on one line, each list item's.
+/// Every other line with YAML on it -- a document marker, a directive, a tag
+/// or anchor alone, a dash alone, a value carried onto a line of its own --
+/// holds nothing written there, so `leading` carries its comment.
+void mark_written(const YAML::Node& node, std::vector<bool>& written) {
+    const auto mark = [&written](const YAML::Node& at) {
+        if (const std::optional<std::size_t> line = line_of(at);
+            line.has_value() && *line < written.size()) {
+            written[*line] = true;
+        }
+    };
+    if (node.IsMap()) {
+        for (const auto& pair : node) {
+            mark(pair.first);
+            if (written_inline(pair.second)) {
+                mark(pair.second);
+            }
+            mark_written(pair.second, written);
+        }
+    } else if (node.IsSequence()) {
+        for (const auto& item : node) {
+            mark(item);
+            mark_written(item, written);
+        }
+    }
+}
+
+/// Refuses a key written twice in one mapping, block or flow: JSON holds a
+/// key once, so one of the two values would be lost.
+void refuse_twice_written(const YAML::Node& node) {
+    if (node.IsMap()) {
+        std::vector<std::pair<std::string, std::size_t>> seen;
+        for (const auto& pair : node) {
+            const std::size_t line = line_of(pair.first).value_or(0);
+            if (pair.first.IsScalar()) {
+                const std::string& key = pair.first.Scalar();
+                const auto first =
+                    std::ranges::find(seen, key, &std::pair<std::string, std::size_t>::first);
+                if (first != seen.end()) {
+                    refuse(line, "the key '" + key + "' is written again here, first on line " +
+                                     std::to_string(first->second + 1) +
+                                     ", and a JSON object holds a key once");
+                }
+                seen.emplace_back(key, line);
+            }
+            refuse_twice_written(pair.second);
+        }
+    } else if (node.IsSequence()) {
+        for (const auto& item : node) {
+            refuse_twice_written(item);
+        }
+    }
+}
+
 class Migrator {
 public:
-    /// With `sections`, a top-level key YAML leaves empty but for the
-    /// commented examples indented under it -- the template's `backends:`
-    /// -- becomes an empty object holding those comments, where a reader
-    /// expects them, rather than `null` with its comments after it.
-    Migrator(std::vector<SourceLine> roles, bool sections)
-        : roles_(std::move(roles)), flushed_(roles_.size(), false), sections_(sections) {}
+    /// `written` marks the lines the writer carries a trailing comment for
+    /// itself (`mark_written`). With `sections`, a top-level key YAML leaves
+    /// empty but for the commented examples indented under it -- the
+    /// template's `backends:` -- becomes an empty object holding those
+    /// comments, where a reader expects them, rather than `null` with its
+    /// comments after it.
+    Migrator(std::vector<SourceLine> roles, std::vector<bool> written, bool sections)
+        : roles_(std::move(roles)),
+          written_(std::move(written)),
+          wrote_(roles_.size(), false),
+          flushed_(roles_.size(), false),
+          sections_(sections) {}
 
     /// The top-level keys written as objects that YAML read as null.
     [[nodiscard]] const std::vector<std::string>& emptied() const noexcept {
@@ -320,6 +433,16 @@ public:
         return carried_;
     }
 
+    /// The first line holding a comment the conversion did not carry.
+    [[nodiscard]] std::optional<std::size_t> uncarried() const {
+        for (std::size_t i = 0; i < roles_.size(); ++i) {
+            if ((roles_[i].role == LineKind::Comment || roles_[i].trailing) && !flushed_[i]) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
 private:
     void open(std::string line) {
         out_.push_back(std::move(line));
@@ -330,17 +453,26 @@ private:
     }
 
     /// The blank and comment lines before `line`, each on a line of its own
-    /// at `indent`. Lines with YAML on them belong to values already written.
+    /// at `indent`. A line with YAML on it the writer wrote carried its own
+    /// comment; on any other -- a marker, a directive, properties or a dash
+    /// alone, a value carried on -- the comment goes on a line of its own here.
     void leading(std::size_t line, const std::string& indent) {
         for (; next_ < line && next_ < roles_.size(); ++next_) {
             const SourceLine& role = roles_[next_];
             if (role.role == LineKind::Blank) {
                 open("");
-            } else if (role.role == LineKind::Comment) {
+            } else if (role.role == LineKind::Comment ||
+                       (role.role == LineKind::Content && role.trailing && !written_[next_] &&
+                        !flushed_[next_])) {
                 open(indent + "//" + role.comment);
-                ++carried_;
+                carry(next_);
             }
         }
+    }
+
+    void carry(std::size_t line) {
+        flushed_[line] = true;
+        ++carried_;
     }
 
     /// Whether the first line after `line` with anything on it is a comment
@@ -360,38 +492,52 @@ private:
     }
 
     /// A container's closing comments: those at or past its members' column
-    /// before anything shallower -- the YAML spelling of "still inside".
+    /// before anything shallower -- the YAML spelling of "still inside" --
+    /// over the rest of what was written above (a block scalar's text, a
+    /// plain scalar carried on, a value on the line after its key) and lines
+    /// that write nothing (a marker, a dash alone), never past a line the
+    /// writer has still to write.
     void tail(std::size_t column, const std::string& indent) {
         std::size_t take = next_;
         for (std::size_t i = next_; i < roles_.size(); ++i) {
-            if (roles_[i].role == LineKind::Blank) {
+            const SourceLine& role = roles_[i];
+            if (role.role == LineKind::Blank || role.role == LineKind::Continuation) {
                 continue;
             }
-            if (roles_[i].role == LineKind::Comment && roles_[i].indent >= column) {
+            if (role.role == LineKind::Comment && role.indent >= column) {
                 take = i + 1;
                 continue;
+            }
+            if (role.role == LineKind::Content && !written_[i] && role.indent >= column) {
+                take = role.trailing ? i + 1 : take;
+                continue;
+            }
+            if (role.role == LineKind::Content && wrote_[i]) {
+                continue;  // a value written above, on a line after its key's
             }
             break;
         }
         leading(take, indent);
     }
 
-    /// `line`'s trailing comment, after what was just written.
+    /// `line`'s trailing comment, after what was just written there.
     void trailing(std::optional<std::size_t> line) {
-        if (!line.has_value() || *line >= roles_.size() || flushed_[*line] ||
-            !roles_[*line].trailing) {
+        if (!line.has_value() || *line >= roles_.size()) {
             return;
         }
-        flushed_[*line] = true;
+        wrote_[*line] = true;
+        if (flushed_[*line] || !roles_[*line].trailing) {
+            return;
+        }
         append(" //" + roles_[*line].comment);
-        ++carried_;
+        carry(*line);
     }
 
     void value(const YAML::Node& node, const std::string& indent,
                std::optional<std::size_t> owner) {
         switch (node.Type()) {
             case YAML::NodeType::Map:
-                if (node.size() == 0 || node.Style() == YAML::EmitterStyle::Flow) {
+                if (written_inline(node)) {
                     append(inline_text(node));
                     return;
                 }
@@ -399,7 +545,7 @@ private:
                 members(node, indent, owner);
                 return;
             case YAML::NodeType::Sequence:
-                if (node.size() == 0 || node.Style() == YAML::EmitterStyle::Flow) {
+                if (written_inline(node)) {
                     append(inline_text(node));
                     return;
                 }
@@ -451,7 +597,9 @@ private:
             }
             // After the comma, never before it: `"key": 1, // note`.
             trailing(line);
-            if (pair.second.IsScalar()) {
+            if (written_inline(pair.second)) {
+                // A value on a line of its own -- `allowed_hosts:` over
+                // `  [docs.python.org] # c` -- brings its comment with it.
                 trailing(line_of(pair.second));
             }
         }
@@ -466,7 +614,8 @@ private:
         if (owner.has_value() && first.has_value() && *first > *owner) {
             trailing(owner);
         }
-        const std::size_t column = first.has_value() ? roles_[*first].indent : 0;
+        const std::size_t column =
+            first.has_value() && *first < roles_.size() ? roles_[*first].indent : 0;
         std::size_t remaining = node.size();
         for (const auto& item : node) {
             const std::optional<std::size_t> line = line_of(item);
@@ -486,6 +635,10 @@ private:
     }
 
     std::vector<SourceLine> roles_;
+    std::vector<bool> written_;
+    /// The lines of `written_` written so far.
+    std::vector<bool> wrote_;
+    /// The lines whose comment is carried.
     std::vector<bool> flushed_;
     std::vector<std::string> out_;
     std::size_t next_ = 0;
@@ -811,25 +964,73 @@ struct Placement {
 
 namespace {
 
+/// The byte-order mark a UTF-8 text may open with.
+constexpr std::string_view kUtf8Mark = "\xEF\xBB\xBF";
+
+/// Refuses a text that is not UTF-8, naming what it is (`foreign_encoding`,
+/// the editor's own reading): yaml-cpp would decode it while every line here
+/// is read as bytes, so its comments were lost with exit 0.
+void refuse_encoding(std::string_view text) {
+    const std::optional<ForeignEncoding> foreign = foreign_encoding(text);
+    if (!foreign.has_value()) {
+        return;
+    }
+    if (!foreign->encoding.empty()) {
+        throw ConfigError("this config is " + std::string{foreign->encoding} +
+                          ", not UTF-8 -- save it as UTF-8 and run it again");
+    }
+    throw ConfigError("this config holds a NUL byte at offset " + std::to_string(foreign->nul) +
+                      ", which no UTF-8 text does -- save it as UTF-8 and run it again");
+}
+
+/// Refuses a conversion whose values differ from the file's, naming the
+/// first top-level key whose value does.
+[[noreturn]] void refuse_values(const YAML::Node& root, const Json& expected, const Json& got) {
+    if (root.IsMap() && got.is_object()) {
+        for (const auto& pair : root) {
+            const std::string& key = pair.first.Scalar();
+            if (!got.contains(key) || !expected.contains(key) || got.at(key) != expected.at(key)) {
+                refuse(line_of(pair.first).value_or(0),
+                       "the value of '" + key + "' does not convert exactly");
+            }
+        }
+    }
+    refuse(0, "the file's values do not convert exactly");
+}
+
 Migration convert(std::string_view yaml, bool sections) {
+    // One text: UTF-8, read past its byte-order mark as every reader of the
+    // config reads it.
+    refuse_encoding(yaml);
+    if (yaml.starts_with(kUtf8Mark)) {
+        yaml.remove_prefix(kUtf8Mark.size());
+    }
+    // One document: the loader reads the first alone, so a later one holding
+    // content would be left out of the JSON.
+    if (const std::optional<LaterDocument> later = later_yaml_document(yaml); later.has_value()) {
+        refuse(later->line,
+               "a second YAML document starts here, and Apogee reads only the first document");
+    }
     YAML::Node root;
     try {
         root = YAML::Load(std::string{yaml});
     } catch (const YAML::Exception& e) {
         throw ConfigError(std::string{"not valid YAML: "} + e.what());
     }
+    refuse_twice_written(root);
     const std::vector<std::string_view> lines = split_lines(yaml);
-    std::vector<SourceLine> roles = classify(lines);
-    const std::size_t comments =
-        static_cast<std::size_t>(std::ranges::count_if(roles, [](const SourceLine& line) {
-            return line.role == LineKind::Comment || line.trailing;
-        }));
+    std::vector<bool> written(lines.size(), false);
+    mark_written(root, written);
 
-    Migrator migrator{std::move(roles), sections};
+    Migrator migrator{classify(lines), std::move(written), sections};
     migrator.document(root);
     Migration out{migrator.text(jsonc::newline_of(yaml)), migrator.carried()};
 
-    // Lossless or nothing: the same values, the same comments.
+    // Lossless or nothing: every comment carried, once, and the same values
+    // -- each refusal naming its line.
+    if (const std::optional<std::size_t> line = migrator.uncarried(); line.has_value()) {
+        refuse(*line, "a comment the conversion finds no place for");
+    }
     Json expected = json_of_yaml(yaml, Json{});
     if (expected.is_null()) {
         expected = Json::object();
@@ -837,10 +1038,8 @@ Migration convert(std::string_view yaml, bool sections) {
     for (const std::string& key : migrator.emptied()) {
         expected[key] = Json::object();
     }
-    if (jsonc::parse_json(out.text) != expected || out.comments != comments) {
-        throw ConfigError(
-            "the conversion did not carry the file exactly -- migrate refuses rather than lose "
-            "anything; convert it by hand");
+    if (const Json got = jsonc::parse_json(out.text); got != expected) {
+        refuse_values(root, expected, got);
     }
     return out;
 }
@@ -865,6 +1064,8 @@ MigrationReport migrate_config_file(const std::filesystem::path& path) {
         throw ConfigEditError(path.string() + ": no config file there to migrate");
     }
     const std::string original = read_config_file(path);
+    // Named before the loader reads it, which would decode it.
+    refuse_encoding(original);
     if (jsonc::looks_like_jsonc(original)) {
         throw ConfigEditError(path.string() + " is already JSON -- there is nothing to migrate");
     }

@@ -3258,13 +3258,9 @@ namespace {
 /// The byte-order mark a UTF-8 text may open with.
 constexpr std::string_view kUtf8Mark = "\xEF\xBB\xBF";
 
-/// Refuses a config that is not UTF-8 text (CLI-M44), naming what it is: a
-/// UTF-16 or UTF-32 text, by its byte-order mark or by the zero bytes its
-/// first character carries (YAML's own detection), or any text holding a
-/// NUL byte. yaml-cpp decodes such a file itself while the editor edits its
-/// bytes, so an edit appended UTF-8 to UTF-16 text and printed a success the
-/// loader never read.
-void refuse_encoding(std::string_view content) {
+}  // namespace
+
+std::optional<ForeignEncoding> foreign_encoding(std::string_view content) {
     // YAML's detection table, in its order: each pattern's first bytes, -1
     // for any byte.
     struct Detected {
@@ -3290,28 +3286,16 @@ void refuse_encoding(std::string_view content) {
                     static_cast<unsigned char>(content[i]) == detected.opens.at(i);
         }
         if (opens) {
-            throw ConfigEditError("this config is " + std::string{detected.encoding} +
-                                  ", and the editor edits UTF-8 alone -- save it as UTF-8; "
-                                  "nothing was changed");
+            return ForeignEncoding{.encoding = detected.encoding, .nul = 0};
         }
     }
     if (const std::size_t nul = content.find('\0'); nul != std::string_view::npos) {
-        throw ConfigEditError("this config holds a NUL byte at offset " + std::to_string(nul) +
-                              ", which no UTF-8 text does -- save it as UTF-8; nothing was "
-                              "changed");
+        return ForeignEncoding{.encoding = {}, .nul = nul};
     }
+    return std::nullopt;
 }
 
-/// A YAML config's text, cut where the line editor edits it (CLI-M44): a
-/// UTF-8 byte-order mark before it, kept as it is; then its first document,
-/// the one `YAML::Load` reads; then the rest from the marker that ends it --
-/// a `...`, or the `---` starting a second document -- which holds nothing
-/// but blank lines, comments and markers.
-struct YamlText {
-    std::string_view mark;
-    std::string_view document;
-    std::string_view rest;
-};
+namespace {
 
 /// What `line` is as a document marker, `---` or `...` alone or with a
 /// comment or a node after it, or "" -- with `content` set when a node
@@ -3328,18 +3312,19 @@ std::string_view document_marker(std::string_view line, bool& content) {
     return {};
 }
 
-/// `content` cut into its `YamlText`. A rest holding anything the loader
-/// would read as a later document's content is refused by name, naming the
-/// hand edit -- `config migrate` refuses that shape too: the editor edits the
-/// first document alone, and a key it found or wrote in a later one would
-/// print a success the loader never reads.
-YamlText yaml_text_of(std::string_view content) {
-    YamlText out;
-    if (content.starts_with(kUtf8Mark)) {
-        out.mark = content.substr(0, kUtf8Mark.size());
-        content.remove_prefix(kUtf8Mark.size());
-    }
-    out.document = content;
+/// Where the first document of `content` -- a YAML text past any byte-order
+/// mark -- ends (CLI-M44), as a byte offset (npos when it runs to the end),
+/// and the first later document holding content, if there is one: a `---`
+/// before any node starts the first document, a later `---` or any `...`
+/// ends it, and after the end only blank lines, comments and markers with
+/// nothing but a comment after them hold nothing.
+struct DocumentEnd {
+    std::size_t offset = std::string_view::npos;
+    std::optional<LaterDocument> later{};
+};
+
+DocumentEnd find_document_end(std::string_view content) {
+    DocumentEnd out;
     const yaml_text::Lines lines = yaml_text::split_lines(content);
     bool started = false;  // the first document has begun: a node, or its `---`
     std::size_t offset = 0;
@@ -3356,20 +3341,95 @@ YamlText yaml_text_of(std::string_view content) {
             started = true;  // the first document's own start
             continue;
         }
+        out.offset = offset;
+        // The `---` that opened the document now being read, since the end;
+        // after a `...` none has, and a node starts one where it stands.
+        std::optional<std::size_t> opened;
         for (std::size_t j = i; j < lines.size(); ++j) {
             const std::string_view later = yaml_text::body(lines[j]);
             bool holds = false;
-            const bool marked = !document_marker(later, holds).empty();
-            if (marked ? holds : !yaml_text::is_blank(later) && !yaml_text::is_comment(later)) {
-                throw ConfigEditError("this config holds a second YAML document, after the '" +
-                                      std::string{marker} + "' on line " + std::to_string(i + 1) +
-                                      ", which Apogee never reads -- move what it holds into the "
-                                      "first document, or delete it, by hand");
+            const std::string_view at = document_marker(later, holds);
+            if (at == "---") {
+                opened = j;
+            } else if (at == "...") {
+                opened.reset();
+            }
+            if (!at.empty() ? holds
+                            : !yaml_text::is_blank(later) && !yaml_text::is_comment(later)) {
+                out.later =
+                    LaterDocument{.marker = marker, .marker_line = i, .line = opened.value_or(j)};
+                return out;
             }
         }
-        out.document = content.substr(0, offset);
-        out.rest = content.substr(offset);
         return out;
+    }
+    return out;
+}
+
+}  // namespace
+
+std::optional<LaterDocument> later_yaml_document(std::string_view content) {
+    if (content.starts_with(kUtf8Mark)) {
+        content.remove_prefix(kUtf8Mark.size());
+    }
+    return find_document_end(content).later;
+}
+
+namespace {
+
+/// Refuses a config that is not UTF-8 text (CLI-M44), naming what it is
+/// (`foreign_encoding`). yaml-cpp decodes such a file itself while the editor
+/// edits its bytes, so an edit appended UTF-8 to UTF-16 text and printed a
+/// success the loader never read.
+void refuse_encoding(std::string_view content) {
+    const std::optional<ForeignEncoding> foreign = foreign_encoding(content);
+    if (!foreign.has_value()) {
+        return;
+    }
+    if (!foreign->encoding.empty()) {
+        throw ConfigEditError("this config is " + std::string{foreign->encoding} +
+                              ", and the editor edits UTF-8 alone -- save it as UTF-8; "
+                              "nothing was changed");
+    }
+    throw ConfigEditError("this config holds a NUL byte at offset " + std::to_string(foreign->nul) +
+                          ", which no UTF-8 text does -- save it as UTF-8; nothing was "
+                          "changed");
+}
+
+/// A YAML config's text, cut where the line editor edits it (CLI-M44): a
+/// UTF-8 byte-order mark before it, kept as it is; then its first document,
+/// the one `YAML::Load` reads; then the rest from the marker that ends it --
+/// a `...`, or the `---` starting a second document -- which holds nothing
+/// but blank lines, comments and markers.
+struct YamlText {
+    std::string_view mark;
+    std::string_view document;
+    std::string_view rest;
+};
+
+/// `content` cut into its `YamlText`. A rest holding anything the loader
+/// would read as a later document's content is refused by name, naming the
+/// hand edit -- `config migrate` refuses that shape too: the editor edits the
+/// first document alone, and a key it found or wrote in a later one would
+/// print a success the loader never reads.
+YamlText yaml_text_of(std::string_view content) {
+    YamlText out;
+    if (content.starts_with(kUtf8Mark)) {
+        out.mark = content.substr(0, kUtf8Mark.size());
+        content.remove_prefix(kUtf8Mark.size());
+    }
+    out.document = content;
+    const DocumentEnd end = find_document_end(content);
+    if (end.later.has_value()) {
+        throw ConfigEditError("this config holds a second YAML document, after the '" +
+                              std::string{end.later->marker} + "' on line " +
+                              std::to_string(end.later->marker_line + 1) +
+                              ", which Apogee never reads -- move what it holds into the "
+                              "first document, or delete it, by hand");
+    }
+    if (end.offset != std::string_view::npos) {
+        out.document = content.substr(0, end.offset);
+        out.rest = content.substr(end.offset);
     }
     return out;
 }

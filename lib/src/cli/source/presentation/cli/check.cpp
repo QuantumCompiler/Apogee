@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <system_error>
 #include <tuple>
 
@@ -432,7 +433,15 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
         return;
     }
 
-    if (inputs.config_legacy) {
+    if (inputs.config_legacy && !inputs.config_migrate_refusal.empty()) {
+        // The compat read, which migrate would refuse as it stands (CLI-M47):
+        // said before the run, in the refusal's own words.
+        add(report, Status::Warn, "Config", file,
+            "parses cleanly -- the older YAML format, still read, but migrate refuses it as it "
+            "stands: " +
+                inputs.config_migrate_refusal,
+            "fix that in " + file + " by hand, then apogee config migrate");
+    } else if (inputs.config_legacy) {
         // The compat read (28i): healthy, and on its way out.
         add(report, Status::Ok, "Config", file,
             "parses cleanly -- the older YAML format, still read; migrate converts it to " +
@@ -3296,6 +3305,17 @@ void read_config_state(CheckInputs& state) {
         const std::string content = harness::read_config_file(state.config_path);
         state.config = harness::parse_config(content, state.config_path.string());
         state.config_legacy = !harness::jsonc::looks_like_jsonc(content);
+        if (state.config_legacy) {
+            // The migration tried on the text read, pure: what `config
+            // migrate` would refuse is said now, not promised away (CLI-M47).
+            try {
+                (void)harness::migrate_config_text(content);
+            } catch (const std::runtime_error& e) {
+                // Whatever stops it -- its refusals are ConfigErrors -- is
+                // what the run would print.
+                state.config_migrate_refusal = e.what();
+            }
+        }
         state.config_missing_options = harness::missing_template_options(content);
     } catch (const harness::ConfigError& e) {
         state.config_error = e.what();
