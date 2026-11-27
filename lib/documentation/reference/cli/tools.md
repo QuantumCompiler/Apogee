@@ -24,6 +24,29 @@ neither `run_command` nor any git tool is offered or served, `check`'s `git`
 row is skipped saying why, and `--allow`, `--deny`, `/allow` or a task's
 grant naming one is refused with that reason (57k).
 
+**A run refused for its flags starts no MCP server** (CLI-M38). `--allow`,
+`--deny` and `--allow-host` -- on `chat`, `execute`, `tui`, `complete` and
+each `apogee acp` session -- and a task's grants are judged before any server
+is started, wherever the verdict cannot depend on one: every name that does
+not start with `mcp__`. So a typo, a tool the config denies, the agent or the
+suite's pin leaves out, a tool that never asks, or a name that is not a
+website is refused at once, in the same words as before, with no program of
+yours started and no wait on a server that does not answer. A misspelled
+tool's refusal lists the built-in tools that ask, then each server's by its
+prefix, not started: `...; and mcp__xcode__*, whose server a refused run does
+not start`. A name that starts with `mcp__` waits for the servers, the only
+place that knows whether it exists and writes (and whether `permissions:`
+binds it): they are started, and it is judged then, as before. So when several
+flags are wrong, a refusal of one that is not an `mcp__` name is the one said;
+`chat`'s `--input-format` without the matching `--output-format` is said
+before a bad `-m` or a missing backend; and `complete`'s grant flags before a
+bad `--image`, `--retriever` or `--rag`. On `complete --output-format
+stream-json` a refused non-`mcp__` name comes before the `session` event, an
+`mcp__` one after it. And `task run` and `complete`, whose suite pin is fixed
+for the run, start no server at all when the pin leaves out the `mcp`
+toolset; `chat` starts them as ever, since `/suite` and `/model` can move the
+pin.
+
 **What the gate shows is what it enforces** (57o). The file tools work inside
 `tools.fs_root` (the launch folder when unset), and a path is judged by where
 it lands: every link in it is followed, one whose target does not exist yet

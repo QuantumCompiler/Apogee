@@ -175,8 +175,37 @@ inline constexpr std::size_t kFetchMaxBodyBytes = std::size_t{5} * 1024 * 1024;
 [[nodiscard]] agent::UrlFetcher make_http_fetcher(std::shared_ptr<backends::HttpClient> client);
 
 /// `fetch_url` plus the native toolsets, honouring `tools.disabled`. The one
-/// place that decides which tools a `--tools` run has.
+/// place that decides which tools a `--tools` run has: `make_native_tools`,
+/// then `connect_mcp_tools` -- what `serve` and `analyze`, which take no grant
+/// flags, build in one call.
 [[nodiscard]] agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options);
+
+/// The built-in registry's first phase (CLI-M38): `fetch_url`, `web_search`
+/// and the native toolsets, under the policy -- and no child process, ever:
+/// `options`' MCP fields are not read. A run judges every flag that names no
+/// MCP tool (`mcp::is_namespaced`) over it before any server starts, since
+/// such a name's verdict cannot depend on one; then `connect_mcp_tools`.
+[[nodiscard]] agent::ToolRegistry make_native_tools(const BuiltInToolOptions& options);
+
+/// The second phase: every server `options` names (`mcp_servers_dialled`)
+/// dialled on `options.mcp`, its tools registered into `registry` as
+/// `mcp__<server>__<tool>`, gated by a config `deny` or `ask` whatever their
+/// hint says (57o), and then the policy over the whole registry. Nothing is
+/// dialled without `options.mcp`, or under `None`.
+void connect_mcp_tools(agent::ToolRegistry& registry, const BuiltInToolOptions& options);
+
+/// The servers `connect_mcp_tools` would dial for `options` given a registry,
+/// by name, in dial order: the config's enabled entries -- the agent's list
+/// when it names one -- then an ACP host's, as `session_mcp_specs` takes
+/// them. Empty under `None`. What a refusal decided before the dial names,
+/// by prefix, as not started (`unstarted_servers_clause`). Says nothing.
+[[nodiscard]] std::vector<std::string> mcp_servers_dialled(const BuiltInToolOptions& options);
+
+/// Whether a run on `backend` reaches MCP tools under the active suite's pin
+/// (27d): no pin, or one whose toolset keeps `mcp`. A fixed pin that leaves
+/// it out is why `task run` and `complete` start no server (CLI-M38); chat
+/// dials regardless, since `/suite` and `/model` can move the pin.
+[[nodiscard]] bool pin_keeps_mcp(const harness::Config& config, std::string_view backend);
 
 /// What a surface ranks its tools with (26g): the embedding role's vectors
 /// when it resolves to an embedder that costs nothing to call, cached in

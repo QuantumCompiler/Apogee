@@ -258,12 +258,43 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
                                                     : harness::effort_from_string(flags.effort)});
     const bool attaching = !flags.attach.empty() || !flags.images.empty();
     const std::optional<std::int64_t> max_tokens = shot.options.max_tokens;
-    if (!flags.tools &&
-        !PermissionPresets{
-            .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts}
-             .empty()) {
+    const PermissionPresets presets{
+        .allow = flags.allow, .deny = flags.deny, .allow_hosts = flags.allow_hosts};
+    if (!flags.tools && !presets.empty()) {
         fail_user("--allow, --deny and --allow-host need --tools: without tools, nothing is asked");
     }
+    // The run's tools before any server (CLI-M38): built without dialling,
+    // and the flags judged over them as the run's pin leaves them -- before
+    // the attachments, the retrieval and the session event, so a run refused
+    // for a name that is no MCP tool's starts no program of the person's.
+    // A fixed pin that leaves out `mcp` dials nothing at all: its tools would
+    // be pinned away unoffered. `seeded_approvals`, after the dial, judges
+    // the `mcp__` names.
+    agent::ToolRegistry native_tools;
+    const bool dials_mcp = flags.tools && pin_keeps_mcp(config, model);
+    if (flags.tools) {
+        native_tools =
+            make_native_tools(BuiltInToolOptions{.config = &config, .harness = &harness});
+        if (!presets.empty()) {
+            if (const std::string refused = preflight_presets(
+                    presets, gated_tools(pin_toolset(native_tools, config, model)),
+                    dials_mcp ? mcp_servers_dialled(BuiltInToolOptions{.config = &config})
+                              : std::vector<std::string>{});
+                !refused.empty()) {
+                fail_user(refused);
+            }
+        }
+    }
+    // The second phase on the registry the first built: the servers dialled
+    // (unless the pin leaves them out), then the pin.
+    const auto with_servers = [&config, &model, &native_tools,
+                               dials_mcp](const BuiltInToolOptions& options) {
+        agent::ToolRegistry built = std::move(native_tools);
+        if (dials_mcp) {
+            connect_mcp_tools(built, options);
+        }
+        return pin_toolset(built, config, model);
+    };
 
     // Machine mode: the SAME loop, a different Reporter. Nothing below this
     // point knows which one is in use, which is the Reporter seam's whole
@@ -317,13 +348,11 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
         if (flags.tools) {
             // stdout is the protocol: connection notes go to stderr.
             // The toolset the active suite pins on this backend, if any (27d).
-            machine_registry = pin_toolset(
-                make_built_in_tools(BuiltInToolOptions{
-                    .config = &config,
-                    .harness = &harness,
-                    .mcp = machine_mcp,
-                    .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }}),
-                config, model);
+            machine_registry = with_servers(BuiltInToolOptions{
+                .config = &config,
+                .harness = &harness,
+                .mcp = machine_mcp,
+                .mcp_status = [](std::string_view line) { std::cerr << line << "\n"; }});
             // The consult tool when the suite designates members (27f), after
             // the pin: `consultable:` is the suite's own switch.
             for (const std::string& note :
@@ -497,17 +526,15 @@ harness::ChatResponse run_one(const harness::Harness& harness, const harness::Co
     loop_options.member_calls = consults.get();
     if (flags.tools) {
         // The toolset the active suite pins on this backend, if any (27d).
-        registry = pin_toolset(
-            make_built_in_tools(BuiltInToolOptions{
-                .config = &config,
-                .harness = &harness,
-                .mcp = mcp_registry,
-                .mcp_status = mcp_status_line(reporter.status()),
-                .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                    std::cerr << bytes << std::flush;
-                }}
-                                                : mcp::StderrTail::Sink{}}),
-            config, model);
+        registry = with_servers(BuiltInToolOptions{
+            .config = &config,
+            .harness = &harness,
+            .mcp = mcp_registry,
+            .mcp_status = mcp_status_line(reporter.status()),
+            .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                std::cerr << bytes << std::flush;
+            }}
+                                            : mcp::StderrTail::Sink{}});
         // The consult tool when the suite designates members (27f), after
         // the pin: `consultable:` is the suite's own switch.
         for (const std::string& note :

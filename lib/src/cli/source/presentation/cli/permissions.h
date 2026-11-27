@@ -135,9 +135,19 @@ struct GatedName {
 
 /// `child_processes` is the platform's answer by default; a test sets it to
 /// see either side on any host. Takes every host `--allow-host` takes (57o).
+/// `unstarted` ends the listing of `gated` in a refusal decided before the
+/// MCP servers were started (`unstarted_servers_clause`, CLI-M38).
 [[nodiscard]] GatedName name_gated(std::string_view name, const std::vector<std::string>& gated,
                                    bool websites = true,
-                                   bool child_processes = platform::supports_child_processes());
+                                   bool child_processes = platform::supports_child_processes(),
+                                   std::string_view unstarted = {});
+
+/// What a refusal's listing of the tools that ask ends with when it was
+/// decided before `servers` -- the MCP servers the run would dial -- were
+/// started (CLI-M38): each server's tools by their prefix, said not started
+/// -- `; and mcp__a__* and mcp__b__*, whose servers a refused run does not
+/// start` -- or empty for none. Chat's listing and a task's both end with it.
+[[nodiscard]] std::string unstarted_servers_clause(const std::vector<std::string>& servers);
 
 /// `--allow`, `--allow-host` and `/allow`: allowed for the session, a
 /// denial of it lifted. `--deny` and `/deny`: denied, an allowance lifted.
@@ -146,10 +156,24 @@ void deny_for_session(SessionApprovals& approvals, const GatedName& name);
 /// `/revoke`: the session's own answer forgotten; false when it had none.
 bool revoke_for_session(SessionApprovals& approvals, const GatedName& name);
 
-/// Seeds a run's answers from its flags. The first refusal, or empty.
+/// Seeds a run's answers from its flags. The first refusal, or empty;
+/// `unstarted` as `name_gated` takes it.
 [[nodiscard]] std::string seed_approvals(SessionApprovals& approvals,
                                          const PermissionPresets& presets,
-                                         const std::vector<std::string>& gated);
+                                         const std::vector<std::string>& gated,
+                                         std::string_view unstarted = {});
+
+/// **The flags' verdict before any MCP server starts** (CLI-M38):
+/// `seed_approvals` into answers thrown away, over every `--allow-host` and
+/// each `--allow` and `--deny` name that is no MCP tool's
+/// (`mcp::is_namespaced`), against `gated_native` -- the tools that ask in
+/// the registry built without dialling (`make_native_tools`). Such a name's
+/// verdict cannot depend on a server, so this is the seed's own refusal in
+/// its own words, the listing ending with `servers` by prefix; empty, and
+/// the full seed after the dial judges the MCP names, exactly as before.
+[[nodiscard]] std::string preflight_presets(const PermissionPresets& presets,
+                                            const std::vector<std::string>& gated_native,
+                                            const std::vector<std::string>& servers);
 
 /// `/permissions`: each gated tool's effective answer and where it comes
 /// from -- the config, this session, the mode, or the default -- then the

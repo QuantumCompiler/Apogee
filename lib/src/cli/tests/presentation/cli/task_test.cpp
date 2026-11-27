@@ -101,6 +101,14 @@ bool has(const std::string& text, const std::string& part) {
     return text.find(part) != std::string::npos;
 }
 
+/// An MCP server whose command is nowhere, and an agent that names it: a
+/// dial says `[mcp] warning: gone: connect failed (skipped): ...` on every
+/// platform, and starts nothing (CLI-M38's fixture).
+[[nodiscard]] std::string gone_mcp_server() {
+    return "mcp_servers:\n  gone:\n    command: apogee-m38-no-such-server\n"
+           "agents:\n  narrowmcp:\n    tools: read-only\n    mcp:\n      - gone\n";
+}
+
 }  // namespace
 
 TEST_CASE("task run drives a goal to done with no input, and status and list say so",
@@ -623,17 +631,18 @@ TEST_CASE("a run refused after a stop reached its setup leaves no request or dir
     if (!fs::exists("/bin/sh")) {
         SKIP("no /bin/sh to hold the run in its setup");
     }
-    // The grant is refused once the tools are composed -- after the MCP
-    // server's connection, so after the stop has landed.
-    const Home home{R"({"text": "x"})", slow_mcp_server("permissions:\n  delete_file: deny\n")};
+    // An MCP tool's grant is judged once the tools are composed -- after the
+    // server's connection, so after the stop has landed. (A built-in tool's
+    // is refused before any server starts, CLI-M38.)
+    const Home home{R"({"text": "x"})", slow_mcp_server()};
     const StoppedWhileStarting stopped = stop_while_starting(
-        home, {"task", "run", "Write the report", "--tools", "--allow", "delete_file"});
+        home, {"task", "run", "Write the report", "--tools", "--allow", "mcp__slow__x"});
     REQUIRE_FALSE(stopped.task_id.empty());
     CHECK(stopped.said ==
           "asked task " + stopped.task_id + " to cancel: it stops before it starts");
     CHECK(stopped.request_stood);
     CHECK(stopped.code == 1);
-    CHECK(has(stopped.out, "--allow delete_file: the config says permissions.delete_file: deny"));
+    CHECK(has(stopped.out, "--allow mcp__slow__x: no tool named 'mcp__slow__x' in this task"));
     // Nothing made, nothing left: `task list` sees no stray entry.
     CHECK_FALSE(fs::exists(t::task_dir(home.tasks(), stopped.task_id)));
     std::vector<std::string> problems;
@@ -722,7 +731,10 @@ TEST_CASE("a declared answer lets a question-asking task finish, recorded; witho
 
 TEST_CASE("a grant wider than the config or the agent is refused at task run, naming the rule",
           "[commands][task][policy][ceiling]") {
-    const Home home{kWrites, "permissions:\n  delete_file: deny\n"};
+    // With an MCP server configured whose command is nowhere: dialled, it
+    // says so on an `[mcp] warning:` line, on every platform -- the fixture
+    // that tells a refusal decided before the dial from one after (CLI-M38).
+    const Home home{kWrites, "permissions:\n  delete_file: deny\n" + gone_mcp_server()};
     std::string out;
 
     struct Refusal {
@@ -741,6 +753,9 @@ TEST_CASE("a grant wider than the config or the agent is refused at task run, na
         {{"--tools", "--allow", "fetch_url"},
          "--allow fetch_url: fetch_url is asked about per website, never per tool"},
         {{"--tools", "--allow", "wrte_file"}, "--allow wrte_file: no tool named 'wrte_file'"},
+        {{"--tools", "--agent", "narrowmcp", "--allow", "write_file"},
+         "--allow write_file: the agent 'narrowmcp' runs with tools: read-only, which leaves "
+         "out write_file -- a task's grant is never wider than its agent's policy"},
         {{"--allow", "write_file"}, "--allow needs --tools"},
         {{"--on-question", "answer:blue"}, "--on-question answer: needs --tools"},
         {{"--agent", "security-review"}, "--agent needs --tools"},
@@ -756,10 +771,37 @@ TEST_CASE("a grant wider than the config or the agent is refused at task run, na
         INFO(refusal.says);
         CHECK(home.run(args, &out) == 1);
         CHECK(has(out, refusal.says));
-        // Refused before anything is made.
+        // Refused before anything is made -- and before any server starts.
         CHECK(t::list_tasks(home.tasks()).empty());
+        CHECK_FALSE(has(out, "[mcp]"));
     }
     CHECK_FALSE(fs::exists(home.work() / "out.txt"));
+
+    // A misspelled grant's listing names the built-in tools that ask, then
+    // the server's, by their prefix: it was never started to list them.
+    CHECK(home.run({"task", "run", "Write the report", "--tools", "--allow", "wrte_file"}, &out) ==
+          1);
+    CHECK(has(out, "the ones that ask before they run: delete_file, delete_note, edit_file, "));
+    CHECK(has(out, "write_note; and mcp__gone__*, whose server a refused run does not start\n"));
+    // Under a read-only agent nothing asks, the server's tools included.
+    CHECK(home.run({"task", "run", "Write the report", "--tools", "--agent", "narrowmcp", "--allow",
+                    "wrte_file"},
+                   &out) == 1);
+    CHECK(has(out,
+              "--allow wrte_file: no tool named 'wrte_file' in this task -- none of its tools "
+              "asks before it runs\n"));
+
+    // An MCP tool's grant waits for the servers, the only place that knows
+    // it: dialled, then judged in today's words.
+    CHECK(home.run({"task", "run", "Write the report", "--tools", "--allow", "mcp__gone__x"},
+                   &out) == 1);
+    const std::size_t dialled = out.find("[mcp] warning: gone: connect failed (skipped)");
+    const std::size_t refused =
+        out.find("--allow mcp__gone__x: no tool named 'mcp__gone__x' in this task");
+    CHECK(dialled != std::string::npos);
+    CHECK(refused != std::string::npos);
+    CHECK(dialled < refused);
+    CHECK(t::list_tasks(home.tasks()).empty());
 
     // Under the agent, with nothing granted: its policy holds -- the write is
     // not among its tools, so it is never offered, let alone run.
@@ -772,6 +814,52 @@ TEST_CASE("a grant wider than the config or the agent is refused at task run, na
     CHECK(task.policy.agent == "security-review");
     REQUIRE(home.run({"task", "status", task.id}, &out) == 0);
     CHECK(has(out, "agent:         security-review -- the task runs under its policy\n"));
+}
+
+TEST_CASE("a task under a pin that leaves out mcp starts no MCP server, even one that succeeds",
+          "[commands][task][policy][mcp]") {
+    const Home home{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"},
+                       {"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})",
+                    gone_mcp_server() +
+                        "suites:\n  pinned:\n    members:\n      chat:\n        backend: m\n"
+                        "        toolset: [notes]\n"
+                        "  noted:\n    members:\n      chat:\n        backend: m\n"
+                        "        toolset: [notes, mcp]\n"};
+    std::string out;
+    // A pin that keeps mcp still dials for a run that goes ahead, but the
+    // grant it removes is refused before the dial: the flags' alone, the
+    // server's tools named by prefix as not started.
+    CHECK(home.run({"task", "run", "Find the answer", "--tools", "--suite", "noted", "--allow",
+                    "write_file"},
+                   &out) == 1);
+    CHECK(has(out,
+              "--allow write_file: no tool named 'write_file' in this task -- the ones that "
+              "ask before they run: delete_note, write_note; and mcp__gone__*, whose server "
+              "a refused run does not start\n"));
+    CHECK_FALSE(has(out, "[mcp]"));
+    CHECK(t::list_tasks(home.tasks()).empty());
+    // The pin's refusal is the flags' alone: no server starts for it, and the
+    // listing names no server's tools, which the pin leaves out.
+    CHECK(home.run({"task", "run", "Find the answer", "--tools", "--suite", "pinned", "--allow",
+                    "write_file"},
+                   &out) == 1);
+    CHECK(has(out, "--allow write_file: no tool named 'write_file' in this task"));
+    CHECK_FALSE(has(out, "mcp__gone__"));
+    CHECK_FALSE(has(out, "[mcp]"));
+    CHECK(t::list_tasks(home.tasks()).empty());
+
+    // A run that goes ahead under the pin dials nothing either.
+    REQUIRE(home.run({"task", "run", "Find the answer", "--tools", "--suite", "pinned", "--require",
+                      "42"},
+                     &out) == 0);
+    CHECK(home.task().status == t::kDone);
+    CHECK_FALSE(has(out, "[mcp]"));
+
+    // Unpinned, the same run dials the server, as ever.
+    const Home bare{R"({"text": "1. Answer."}, {"text": "It is 42.\nTASK STATUS: DONE"})",
+                    gone_mcp_server()};
+    REQUIRE(bare.run({"task", "run", "Find the answer", "--tools", "--require", "42"}, &out) == 0);
+    CHECK(has(out, "[mcp] warning: gone: connect failed (skipped)"));
 }
 
 TEST_CASE("an agent that asks no questions is never offered ask_user in a task",
@@ -790,7 +878,7 @@ TEST_CASE("an agent that asks no questions is never offered ask_user in a task",
 
 TEST_CASE("a task resumes under its grants only while the config still allows them",
           "[commands][task][policy][resume]") {
-    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})"};
+    const Home home{R"({"text": "1. Plan."}, {"text": "not yet"})", gone_mcp_server()};
     std::string out;
     REQUIRE(home.run({"task", "run", "goal", "--tools", "--allow", "write_file", "--require", "42",
                       "--rounds", "1"},
@@ -805,6 +893,8 @@ TEST_CASE("a task resumes under its grants only while the config still allows th
     CHECK(has(out, "task " + task.id +
                        " cannot resume: --allow write_file: the config says "
                        "permissions.write_file: deny"));
+    // Refused before any server starts (CLI-M38), as `task run` is.
+    CHECK_FALSE(has(out, "[mcp]"));
     CHECK(home.task().status == t::kHalted);
 
     // Nor under an agent the config no longer has.

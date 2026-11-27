@@ -249,7 +249,53 @@ std::vector<mcp::ServerSpec> session_mcp_specs(
     return configured;
 }
 
+namespace {
+
+/// The servers `options` connects, in dial order -- the config's entries, as
+/// the agent's list chose them, then an ACP host's (56b) -- and each line
+/// their choosing says: a name the agent's list gives that the config has
+/// not, a host's server skipped or displacing an entry.
+[[nodiscard]] std::vector<mcp::ServerSpec> mcp_server_specs(const BuiltInToolOptions& options,
+                                                            std::vector<std::string>& said) {
+    std::vector<mcp::ServerSpec> specs;
+    if (options.policy == harness::AgentToolPolicy::None) {
+        return specs;
+    }
+    const bool configured = options.config != nullptr && !options.config->mcp_servers.empty();
+    if (configured && options.mcp_servers.has_value()) {
+        // Only what the agent named, in the config's own spelling.
+        for (const std::string& wanted : *options.mcp_servers) {
+            const auto it = options.config->mcp_servers.find(wanted);
+            if (it == options.config->mcp_servers.end()) {
+                said.push_back("[mcp] warning: no server named '" + wanted +
+                               "' in mcp_servers (skipped)");
+                continue;
+            }
+            specs.push_back(mcp::ServerSpec{it->first, it->second.command, it->second.args,
+                                            it->second.env, it->second.enabled});
+        }
+    } else if (configured) {
+        for (const auto& [name, server] : options.config->mcp_servers) {
+            specs.push_back(
+                mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
+        }
+    }
+    if (!options.session_mcp_servers.empty()) {
+        specs = session_mcp_specs(std::move(specs), options.session_mcp_servers,
+                                  platform::find_on_path, said);
+    }
+    return specs;
+}
+
+}  // namespace
+
 agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
+    agent::ToolRegistry registry = make_native_tools(options);
+    connect_mcp_tools(registry, options);
+    return registry;
+}
+
+agent::ToolRegistry make_native_tools(const BuiltInToolOptions& options) {
     agent::ToolRegistry registry;
     if (options.policy == harness::AgentToolPolicy::None) {
         // Nothing to register and no server to dial: a `none` agent costs
@@ -285,41 +331,22 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
         toolsets.disabled = options.config->tools.disabled;
     }
     tools::register_native_toolsets(registry, toolsets);
+    return apply_tool_policy(registry, options.policy);
+}
 
+void connect_mcp_tools(agent::ToolRegistry& registry, const BuiltInToolOptions& options) {
+    if (options.policy == harness::AgentToolPolicy::None) {
+        return;
+    }
     // Third-party servers last, so a namespaced name can never shadow a
     // native one -- the registry refuses duplicates either way. The config's
     // entries, then an ACP host's (56b): one list, one dial, one register.
-    const bool configured = options.config != nullptr && !options.config->mcp_servers.empty();
-    if (options.mcp != nullptr && (configured || !options.session_mcp_servers.empty())) {
-        std::vector<mcp::ServerSpec> specs;
-        if (configured && options.mcp_servers.has_value()) {
-            // Only what the agent named, in the config's own spelling.
-            for (const std::string& wanted : *options.mcp_servers) {
-                const auto it = options.config->mcp_servers.find(wanted);
-                if (it == options.config->mcp_servers.end()) {
-                    if (options.mcp_status) {
-                        options.mcp_status("[mcp] warning: no server named '" + wanted +
-                                           "' in mcp_servers (skipped)");
-                    }
-                    continue;
-                }
-                specs.push_back(mcp::ServerSpec{it->first, it->second.command, it->second.args,
-                                                it->second.env, it->second.enabled});
-            }
-        } else if (configured) {
-            for (const auto& [name, server] : options.config->mcp_servers) {
-                specs.push_back(
-                    mcp::ServerSpec{name, server.command, server.args, server.env, server.enabled});
-            }
-        }
-        if (!options.session_mcp_servers.empty()) {
-            std::vector<std::string> said;
-            specs = session_mcp_specs(std::move(specs), options.session_mcp_servers,
-                                      platform::find_on_path, said);
-            if (options.mcp_status) {
-                for (const std::string& line : said) {
-                    options.mcp_status(line);
-                }
+    if (options.mcp != nullptr) {
+        std::vector<std::string> said;
+        const std::vector<mcp::ServerSpec> specs = mcp_server_specs(options, said);
+        if (options.mcp_status) {
+            for (const std::string& line : said) {
+                options.mcp_status(line);
             }
         }
         mcp::RegistryOptions mcp_options;
@@ -350,8 +377,31 @@ agent::ToolRegistry make_built_in_tools(const BuiltInToolOptions& options) {
     }
 
     // The policy last, over everything registered -- native, fetch_url and
-    // MCP alike -- so what the loop advertises IS the policy.
-    return apply_tool_policy(registry, options.policy);
+    // MCP alike -- so what the loop advertises IS the policy. (`All` keeps
+    // the registry whole: nothing to copy.)
+    if (options.policy != harness::AgentToolPolicy::All) {
+        registry = apply_tool_policy(registry, options.policy);
+    }
+}
+
+std::vector<std::string> mcp_servers_dialled(const BuiltInToolOptions& options) {
+    std::vector<std::string> said;
+    std::vector<std::string> names;
+    for (const mcp::ServerSpec& spec : mcp_server_specs(options, said)) {
+        if (spec.enabled) {
+            names.push_back(spec.name);
+        }
+    }
+    return names;
+}
+
+bool pin_keeps_mcp(const harness::Config& config, std::string_view backend) {
+    const std::optional<std::vector<std::string>> toolset =
+        harness::suite_pins(config, backend).toolset;
+    // `toolset_of` files every MCP tool under one word, whatever its server.
+    return !toolset.has_value() ||
+           std::ranges::find(*toolset, tools::toolset_of(mcp::namespaced_name("x", "y"))) !=
+               toolset->end();
 }
 
 std::shared_ptr<const agentloop::ToolRanker> make_tool_ranker(

@@ -167,12 +167,17 @@ struct TaskGate {
 /// do not. `agent` is the entry the task runs under, named `agent_name`, or
 /// null. `compose_task_gate` refuses by it, and `task run --allow`'s
 /// completion (`TASK_GRANT_TOOL`, CLI-M36) offers each writer it leaves
-/// empty: one ceiling, so what Tab offers the verb takes.
+/// empty: one ceiling, so what Tab offers the verb takes. And `drive` holds
+/// every grant that names no MCP tool to it before any server starts
+/// (CLI-M38), over the registry built without dialling, `unstarted` the
+/// servers the run would dial -- named by prefix in a refusal's listing of
+/// the tools that ask, since they were never started to list them.
 [[nodiscard]] std::string task_grant_refusal(
     const harness::Config& config, const std::vector<std::string>& grants,
     const agent::ToolRegistry& available, const agent::ToolRegistry& offered,
     std::string_view agent_name, const harness::AgentConfig* agent,
-    bool child_processes = platform::supports_child_processes());
+    bool child_processes = platform::supports_child_processes(),
+    const std::vector<std::string>& unstarted = {});
 
 /// The backend a new task's turns run on, as `task run` chooses it: `model`
 /// (`-m`) when given, else the chat member of the suite the task runs under

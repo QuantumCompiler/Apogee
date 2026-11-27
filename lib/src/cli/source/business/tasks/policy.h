@@ -88,6 +88,11 @@ struct GrantScope {
     /// empty for none.
     std::string agent{};
     std::string agent_tools{};
+    /// What a refusal's listing of the tools that ask ends with when the
+    /// ceiling is held before the MCP servers start (CLI-M38): their tools,
+    /// by prefix, said not started -- the composition root's words. Empty
+    /// after the dial, when `offered` holds them.
+    std::string unstarted{};
 };
 
 /// **The ceiling**: why `grants` would take a task past what the config and

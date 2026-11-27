@@ -33,9 +33,15 @@ constexpr std::string_view kAnswerPrefix = kOnQuestionForms[1];
     const agent::Tool* tool = scope.available->find(name);
     if (tool == nullptr) {
         const std::string listed = askable(*scope.offered);
-        return flag + "no tool named '" + name + "' in this task -- " +
-               (listed.empty() ? std::string{"none of its tools asks before it runs"}
-                               : "the ones that ask before they run: " + listed);
+        std::string asked;
+        if (!listed.empty()) {
+            asked = "the ones that ask before they run: " + listed;
+        } else if (!scope.unstarted.empty()) {
+            asked = "none of its built-in tools asks before it runs";
+        } else {
+            asked = "none of its tools asks before it runs";
+        }
+        return flag + "no tool named '" + name + "' in this task -- " + asked + scope.unstarted;
     }
     if (!tool->writes) {
         if (tool->outbound) {

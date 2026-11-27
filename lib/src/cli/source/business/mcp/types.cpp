@@ -119,13 +119,22 @@ ToolCallResult parse_tool_call(const nlohmann::json& result) {
     return out;
 }
 
+namespace {
+
+constexpr std::string_view kPrefix = "mcp__";
+
+}  // namespace
+
 std::string namespaced_name(std::string_view server, std::string_view tool) {
-    return "mcp__" + std::string{server} + "__" + std::string{tool};
+    return std::string{kPrefix} + std::string{server} + "__" + std::string{tool};
+}
+
+bool is_namespaced(std::string_view name) noexcept {
+    return name.starts_with(kPrefix);
 }
 
 bool split_namespaced(std::string_view name, std::string& server, std::string& tool) {
-    constexpr std::string_view kPrefix = "mcp__";
-    if (!name.starts_with(kPrefix)) {
+    if (!is_namespaced(name)) {
         return false;
     }
     const std::string_view rest = name.substr(kPrefix.size());

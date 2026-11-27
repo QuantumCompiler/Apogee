@@ -395,6 +395,12 @@ because every session is saved -- a private mode is not offered here, and
 `chats delete` removes a chat. A launch with no backend to chat with is
 refused before the protocol starts.
 
+A bad `--allow`, `--deny` or `--allow-host` is not refused at launch: each
+`session/new`'s child refuses it (`-32603`, in its words), and since CLI-M38
+it does so before any MCP server starts -- neither the config's nor the ones
+the host named -- the host's handover read and removed first. Only an
+`mcp__` name waits for the servers ([tools.md](tools.md)).
+
 ## The fixtures
 
 `cli.acp_conformance` (`tests/scripts/py/acp_host_check.py`) drives the real

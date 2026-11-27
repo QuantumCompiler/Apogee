@@ -7,13 +7,16 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "acp/host_servers.h"
 #include "platform/child_process.h"
 #include "support/cli_home.h"
+#include "support/env_guard.h"
 #include "tools/toolsets.h"
 
 /// Chat's session core, pinned from outside (27s).
@@ -609,4 +612,207 @@ TEST_CASE("/suite to a suite whose member cannot start is refused, the session k
     REQUIRE_FALSE(id.empty());
     CHECK(saved_chat(home, id).at("suite") == "fine");
     CHECK(saved_chat(home, id).at("backend") == "root");
+}
+
+// --- a run refused for its flags starts no MCP server (CLI-M38) ----------------
+
+namespace {
+
+/// A server whose command is nowhere: dialled, it says `[mcp] warning: gone:
+/// connect failed (skipped): ...` on every platform, and starts nothing.
+constexpr const char* kGoneServer =
+    "mcp_servers:\n  gone:\n    command: apogee-m38-no-such-server\n";
+
+/// The battery's config with that server -- and, `pinned`, the default suite
+/// pinning `helper` to the notes toolset.
+struct ServerHome {
+    Home home;
+
+    explicit ServerHome(bool pinned = false, const std::string& servers = kGoneServer) {
+        std::string config = config_with(home.home.home() / "scripts",
+                                         "  pinned:\n    members:\n      chat:\n        backend: "
+                                         "helper\n        toolset: [notes]\n" +
+                                             servers);
+        if (pinned) {
+            config =
+                replaced(config, "  default: root\n", "  default: root\n  default_suite: pinned\n");
+        }
+        std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc} << config;
+    }
+
+    /// `apogee --config <config> <args>` with `input` on stdin: stdout in
+    /// `out`, stderr in `err`.
+    int run(const std::vector<std::string>& args, std::string& out, std::string& err,
+            const std::string& input = "hi\n") const {
+        const std::istringstream fed{input};
+        std::streambuf* old_in = std::cin.rdbuf(fed.rdbuf());
+        const int code = home.home.run(args, &out, &err);
+        std::cin.rdbuf(old_in);
+        std::cin.clear();
+        return code;
+    }
+};
+
+bool contains(const std::string& text, const std::string& part) {
+    return text.find(part) != std::string::npos;
+}
+
+}  // namespace
+
+TEST_CASE("a session refused for its flags says so without starting an MCP server",
+          "[chat][session][permissions][mcp][M38]") {
+    struct Refusal {
+        std::vector<std::string> args;
+        std::string says;
+    };
+
+    const std::vector<Refusal> refusals{
+        {{"complete", "--tools", "--allow", "wrte_file", "hi"},
+         "apogee complete: --allow: 'wrte_file' is not a tool this chat asks about"},
+        {{"complete", "--tools", "--deny", "wrte_file", "hi"},
+         "apogee complete: --deny: 'wrte_file' is not a tool this chat asks about"},
+        {{"complete", "--tools", "--allow-host", "https://x.example/y", "hi"},
+         "apogee complete: --allow-host: 'https://x.example/y' is not a website's name"},
+        {{"chat", "--tools", "--deny", "wrte_file"},
+         "apogee chat: --deny: 'wrte_file' is not a tool this chat asks about"},
+        {{"chat", "--tools", "--allow-host", "https://x.example/y"},
+         "apogee chat: --allow-host: 'https://x.example/y' is not a website's name"},
+        {{"execute", "--tools", "--allow", "wrte_file"},
+         "apogee execute: --allow: 'wrte_file' is not a tool this chat asks about"},
+        {{"chat", "--tools", "--input-format", "stream-json"},
+         "apogee chat: --input-format stream-json cannot be combined with --output-format text; "
+         "a driven chat session speaks the protocol in both directions"},
+        // Refusals that already came first stay first.
+        {{"chat", "--allow", "write_file"},
+         "apogee chat: --allow, --deny and --allow-host need --tools"},
+        {{"chat", "--tools", "--suite", "nope"}, "apogee chat: --suite: no suite named 'nope'"},
+    };
+    const ServerHome home;
+    for (const Refusal& refusal : refusals) {
+        INFO(refusal.says);
+        std::string out;
+        std::string err;
+        CHECK(home.run(refusal.args, out, err) == 1);
+        CHECK(contains(err, refusal.says));
+        CHECK(out.empty());
+        CHECK_FALSE(contains(out + err, "[mcp]"));
+    }
+
+    // A misspelled tool's listing names the built-in tools that ask, then the
+    // server's by their prefix: it was never started to list them.
+    std::string out;
+    std::string err;
+    CHECK(home.run({"chat", "--tools", "--allow", "wrte_file"}, out, err) == 1);
+    CHECK(contains(err, "-- the ones it asks about: delete_file, delete_note, edit_file, "));
+    CHECK(contains(err,
+                   "write_note; and mcp__gone__*, whose server a refused run does not start "
+                   "(a website takes --allow-host)\n"));
+    CHECK_FALSE(contains(err, "[mcp]"));
+
+    // Driven, the refusal comes before the session event, as `--allow`
+    // without `--tools` does: stdout carries nothing.
+    CHECK(home.run({"complete", "--tools", "--allow", "wrte_file", "--output-format", "stream-json",
+                    "hi"},
+                   out, err) == 1);
+    CHECK(out.empty());
+    CHECK(
+        contains(err, "apogee complete: --allow: 'wrte_file' is not a tool this chat asks about"));
+    CHECK_FALSE(contains(err, "[mcp]"));
+}
+
+TEST_CASE("a run that goes ahead, or names an MCP tool, still dials; a pin without mcp does not",
+          "[chat][session][permissions][mcp][M38]") {
+    const ServerHome home;
+    std::string out;
+    std::string err;
+    // A run that goes ahead dials and registers the servers as ever.
+    REQUIRE(home.run({"complete", "--tools", "hi"}, out, err) == 0);
+    CHECK(out == "ROOT<hi>\n");
+    CHECK(contains(err, "[mcp] warning: gone: connect failed (skipped)"));
+
+    // An MCP tool's name waits for the servers, and is judged after the dial
+    // in today's words.
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"complete", "--tools", "--allow", "mcp__gone__x", "hi"},
+          std::vector<std::string>{"chat", "--tools", "--deny", "mcp__gone__x"}}) {
+        INFO(args.front());
+        CHECK(home.run(args, out, err) == 1);
+        const std::size_t dialled = err.find("[mcp] warning: gone: connect failed (skipped)");
+        const std::size_t refused = err.find("'mcp__gone__x' is not a tool this chat asks about");
+        CHECK(dialled != std::string::npos);
+        CHECK(refused != std::string::npos);
+        CHECK(dialled < refused);
+    }
+
+    // A fixed pin that leaves out mcp: no server starts, even for a run that
+    // succeeds, and a refusal's listing names no server's tools.
+    const ServerHome pinned{true};
+    REQUIRE(pinned.run({"complete", "-m", "helper", "--tools", "hi"}, out, err) == 0);
+    CHECK(out == "HELPER<hi>\n");
+    CHECK_FALSE(contains(err, "[mcp]"));
+    CHECK(pinned.run({"complete", "-m", "helper", "--tools", "--allow", "wrte_file", "hi"}, out,
+                     err) == 1);
+    CHECK(contains(err, "--allow: 'wrte_file' is not a tool this chat asks about"));
+    CHECK_FALSE(contains(err, "mcp__gone__"));
+    CHECK_FALSE(contains(err, "[mcp]"));
+}
+
+TEST_CASE("an ACP session's child refused for its flags reads the handover and starts no server",
+          "[chat][session][permissions][mcp][acp][M38]") {
+    const ServerHome home;
+    // The adapter's half: the host's one stdio server, its command nowhere.
+    std::string error;
+    const std::filesystem::path handover = apogee::acp::write_handover(
+        apogee::acp::host_servers(
+            nlohmann::json::array({{{"name", "host"},
+                                    {"command", "apogee-m38-no-such-host-server"},
+                                    {"args", nlohmann::json::array()},
+                                    {"env", nlohmann::json::array()}}})),
+        home.home.home.home(), error);
+    REQUIRE(error.empty());
+    REQUIRE(std::filesystem::exists(handover));
+    // The child's line, as `apogee acp --allow wrte_file` makes it.
+    std::string out;
+    std::string err;
+    CHECK(home.run({"execute", "--input-format", "stream-json", "--output-format", "stream-json",
+                    "--tools", "--allow", "wrte_file", std::string{apogee::acp::kHandoverOption},
+                    handover.string()},
+                   out, err, "") == 1);
+    CHECK(out.empty());
+    CHECK(contains(err, "apogee execute: --allow: 'wrte_file' is not a tool this chat asks about"));
+    // Neither the config's server nor the host's was dialled -- the listing
+    // names both by their prefix -- and the credentials file is gone.
+    CHECK_FALSE(contains(err, "[mcp]"));
+    CHECK(contains(err,
+                   "; and mcp__gone__* and mcp__host__*, whose servers a refused run does not "
+                   "start"));
+    CHECK_FALSE(std::filesystem::exists(handover));
+}
+
+TEST_CASE("a server that records its launch is never started by a refused run",
+          "[chat][session][permissions][mcp][M38]") {
+    if (!apogee::platform::supports_child_processes()) {
+        SKIP("this platform starts no MCP server at all");
+    }
+    // A stub that writes a file the moment it starts, then exits.
+    const apogee::testing::TempDir scratch{"m38-launch-" + std::to_string(std::random_device{}())};
+    const std::filesystem::path launched = scratch.path() / "launched";
+    const std::filesystem::path stub = scratch.path() / "stub.sh";
+    std::ofstream{stub, std::ios::binary} << "#!/bin/sh\necho started > '" << launched.string()
+                                          << "'\n";
+    std::filesystem::permissions(stub, std::filesystem::perms::owner_all);
+    const ServerHome home{false, "mcp_servers:\n  logged:\n    command: " + stub.string() + "\n"};
+    std::string out;
+    std::string err;
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"complete", "--tools", "--allow", "wrte_file", "hi"},
+          std::vector<std::string>{"chat", "--tools", "--deny", "wrte_file"},
+          std::vector<std::string>{"execute", "--tools", "--allow-host", "https://x.example/y"}}) {
+        INFO(args.front());
+        CHECK(home.run(args, out, err) == 1);
+        CHECK_FALSE(std::filesystem::exists(launched));
+    }
+    // The control: a run that goes ahead starts it.
+    REQUIRE(home.run({"complete", "--tools", "hi"}, out, err) == 0);
+    CHECK(std::filesystem::exists(launched));
 }

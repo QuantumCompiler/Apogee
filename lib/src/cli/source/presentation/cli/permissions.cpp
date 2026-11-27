@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -15,6 +16,7 @@
 #include "contracts/host.h"
 #include "contracts/text_diff.h"
 #include "machine/driver_input.h"
+#include "mcp/types.h"
 #include "platform/platform.h"
 #include "tools/toolsets.h"
 
@@ -451,7 +453,7 @@ bool website_shaped(std::string_view name) noexcept {
 }
 
 GatedName name_gated(std::string_view name, const std::vector<std::string>& gated, bool websites,
-                     bool child_processes) {
+                     bool child_processes, std::string_view unstarted) {
     GatedName out;
     if (std::ranges::find(gated, name) != gated.end()) {
         out.key = std::string{name};
@@ -481,11 +483,33 @@ GatedName name_gated(std::string_view name, const std::vector<std::string>& gate
     for (const std::string& tool : gated) {
         listed += (listed.empty() ? "" : ", ") + tool;
     }
-    out.error = "'" + std::string{name} + "' is not a tool this chat asks about" +
-                (gated.empty() ? std::string{" -- it has none (--tools)"}
-                               : " -- the ones it asks about: " + listed) +
+    std::string asked;
+    if (!gated.empty()) {
+        asked = " -- the ones it asks about: " + listed;
+    } else if (!unstarted.empty()) {
+        asked = " -- none of its built-in tools does";
+    } else {
+        asked = " -- it has none (--tools)";
+    }
+    out.error = "'" + std::string{name} + "' is not a tool this chat asks about" + asked +
+                std::string{unstarted} +
                 (websites ? "; or name a website, like docs.python.org" : "");
     return out;
+}
+
+std::string unstarted_servers_clause(const std::vector<std::string>& servers) {
+    if (servers.empty()) {
+        return {};
+    }
+    std::string prefixes;
+    for (std::size_t i = 0; i < servers.size(); ++i) {
+        if (i > 0) {
+            prefixes += i + 1 == servers.size() ? " and " : ", ";
+        }
+        prefixes += mcp::namespaced_name(servers[i], "*");
+    }
+    return "; and " + prefixes + ", whose " + (servers.size() == 1 ? "server" : "servers") +
+           " a refused run does not start";
 }
 
 void allow_for_session(SessionApprovals& approvals, const GatedName& name) {
@@ -516,10 +540,11 @@ bool revoke_for_session(SessionApprovals& approvals, const GatedName& name) {
 }
 
 std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets& presets,
-                           const std::vector<std::string>& gated) {
+                           const std::vector<std::string>& gated, std::string_view unstarted) {
+    const bool child_processes = platform::supports_child_processes();
     for (const std::string& tool : presets.allow) {
         // `--allow` is for tools; a website has `--allow-host`.
-        const GatedName name = name_gated(tool, gated, false);
+        const GatedName name = name_gated(tool, gated, false, child_processes, unstarted);
         if (!name.error.empty()) {
             return "--allow: " + name.error +
                    (name.unoffered ? "" : " (a website takes --allow-host)");
@@ -535,13 +560,33 @@ std::string seed_approvals(SessionApprovals& approvals, const PermissionPresets&
     }
     // Denials last: when a run says both, no wins.
     for (const std::string& entry : presets.deny) {
-        const GatedName name = name_gated(entry, gated);
+        const GatedName name = name_gated(entry, gated, true, child_processes, unstarted);
         if (!name.error.empty()) {
             return "--deny: " + name.error;
         }
         deny_for_session(approvals, name);
     }
     return {};
+}
+
+std::string preflight_presets(const PermissionPresets& presets,
+                              const std::vector<std::string>& gated_native,
+                              const std::vector<std::string>& servers) {
+    // An MCP tool's name waits for its server, the only one that knows
+    // whether it exists and writes, and whether the config's level binds it
+    // (57o). Every other name is the flags' alone.
+    const auto native = [](const std::vector<std::string>& names) {
+        std::vector<std::string> out;
+        std::ranges::copy_if(names, std::back_inserter(out),
+                             [](const std::string& name) { return !mcp::is_namespaced(name); });
+        return out;
+    };
+    SessionApprovals scratch;
+    return seed_approvals(scratch,
+                          PermissionPresets{.allow = native(presets.allow),
+                                            .deny = native(presets.deny),
+                                            .allow_hosts = presets.allow_hosts},
+                          gated_native, unstarted_servers_clause(servers));
 }
 
 std::vector<std::string> describe_permissions(const harness::Config& config,

@@ -986,6 +986,31 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     const std::optional<harness::AttachmentGraphMethod> launch_graph =
         harness::attachment_graph_method_from_string(flags->graph);
 
+    // Unset follows --output-format: a driver asking for machine output is
+    // a machine, and a human asking for text is a human, so the two
+    // ordinary cases need one flag rather than two.
+    const InputFormat input_format = flags->input_format.value_or(
+        flags->output_format == OutputFormat::StreamJson ? InputFormat::StreamJson
+                                                         : InputFormat::Text);
+    // On `chat` the two directions must agree. A JSONL-emitting REPL has no
+    // coherent meaning -- slash commands print through the terminal
+    // reporter and have no protocol event -- and a driven session that
+    // renders prose gives its driver nothing to parse. Saying so is the
+    // point: the alternative is accepting the flag and quietly ignoring it,
+    // which is how a driver ends up debugging output it never asked for.
+    // The flags' own verdict, so said before anything is built for them --
+    // no backend, and no MCP server (CLI-M38).
+    {
+        const bool machine_in = input_format == InputFormat::StreamJson;
+        const bool machine_out = flags->output_format == OutputFormat::StreamJson;
+        if (machine_in != machine_out) {
+            fail_user(mode, std::string{"--input-format "} + std::string{to_string(input_format)} +
+                                " cannot be combined with --output-format " +
+                                std::string{to_string(flags->output_format)} +
+                                "; a driven chat session speaks the protocol in both directions");
+        }
+    }
+
     // Every configured backend is constructed up front, which is what makes
     // /model an instant switch rather than a reconstruction -- and why
     // history has to be neutral IR rather than a vendor transcript.
@@ -1410,6 +1435,38 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
             mcp_warnings->add(line);
         }
     };
+    const BuiltInToolOptions tool_options{
+        .config = &config,
+        .harness = &harness,
+        .review = *live_review,
+        .live_review = live_review,
+        .mcp = mcp_registry,
+        .mcp_status = mcp_status,
+        // A server's stderr never reaches the terminal unless asked
+        // for: with --verbose it is the raw stream, otherwise the
+        // bounded tail rides the connect-failure message.
+        .mcp_server_log = flags->verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+            std::cerr << bytes << std::flush;
+        }}
+                                         : mcp::StderrTail::Sink{},
+        .session_mcp_servers = host_servers};
+    if (flags->tools) {
+        registry = make_native_tools(tool_options);
+        // The launch's answers judged before any server starts (CLI-M38),
+        // the ACP host's handover already read and removed: every name
+        // that is no MCP tool's is the flags' alone, so a run refused for
+        // one starts no program of the person's. The full seed below, after
+        // the dial, judges the `mcp__` names.
+        if (const PermissionPresets presets{
+                .allow = flags->allow, .deny = flags->deny, .allow_hosts = flags->allow_hosts};
+            !presets.empty()) {
+            if (const std::string refused = preflight_presets(presets, gated_tools(registry),
+                                                              mcp_servers_dialled(tool_options));
+                !refused.empty()) {
+                fail_user(mode, refused);
+            }
+        }
+    }
     if (!flags->tools && !host_servers.empty()) {
         host_server_notes.emplace_back(
             "the host's MCP servers are not connected: this session runs without --tools");
@@ -1418,21 +1475,7 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         mcp_status("[mcp] warning: " + note);
     }
     if (flags->tools) {
-        registry = make_built_in_tools(BuiltInToolOptions{
-            .config = &config,
-            .harness = &harness,
-            .review = *live_review,
-            .live_review = live_review,
-            .mcp = mcp_registry,
-            .mcp_status = mcp_status,
-            // A server's stderr never reaches the terminal unless asked
-            // for: with --verbose it is the raw stream, otherwise the
-            // bounded tail rides the connect-failure message.
-            .mcp_server_log = flags->verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                std::cerr << bytes << std::flush;
-            }}
-                                             : mcp::StderrTail::Sink{},
-            .session_mcp_servers = host_servers});
+        connect_mcp_tools(registry, tool_options);
         // The session todo (41d): the plan, kept by the model, drawn by
         // every front end; its board is this session's, set below.
         tools::register_todo_tool(registry);
@@ -1730,29 +1773,8 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
     //
     // No line editor, no slash commands, no typeahead flush: those are all
     // terminal affordances, and a driver has its own UI for every one of
-    // them.
-    // Unset follows --output-format: a driver asking for machine output is
-    // a machine, and a human asking for text is a human, so the two
-    // ordinary cases need one flag rather than two.
-    const InputFormat input_format = flags->input_format.value_or(
-        flags->output_format == OutputFormat::StreamJson ? InputFormat::StreamJson
-                                                         : InputFormat::Text);
-
-    // On `chat` the two directions must agree. A JSONL-emitting REPL has no
-    // coherent meaning -- slash commands print through the terminal
-    // reporter and have no protocol event -- and a driven session that
-    // renders prose gives its driver nothing to parse. Saying so is the
-    // point: the alternative is accepting the flag and quietly ignoring it,
-    // which is how a driver ends up debugging output it never asked for.
-    const bool machine_in = input_format == InputFormat::StreamJson;
-    const bool machine_out = flags->output_format == OutputFormat::StreamJson;
-    if (machine_in != machine_out) {
-        fail_user(mode, std::string{"--input-format "} + std::string{to_string(input_format)} +
-                            " cannot be combined with --output-format " +
-                            std::string{to_string(flags->output_format)} +
-                            "; a driven chat session speaks the protocol in both directions");
-    }
-
+    // them. `input_format` was agreed with the output's at launch, before
+    // anything was built.
     const RagSettings rag_settings{.flag_given = flags->rag_option->count() > 0,
                                    .flag_value = flags->rag,
                                    .limit = flags->rag_limit,

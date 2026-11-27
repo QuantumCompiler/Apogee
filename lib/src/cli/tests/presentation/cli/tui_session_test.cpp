@@ -1114,6 +1114,50 @@ TEST_CASE("apogee tui's flags open that session first, as the same flags open it
     CHECK(saved.at(1).backend == "helper");
 }
 
+TEST_CASE("apogee tui refused for its flags says why and starts no MCP server",
+          "[cli][tui][session][launch][mcp][M38]") {
+    // CLI-M38: the shell's launched conversation opens through chat's one
+    // path, so a flag refused there is refused before any server starts. A
+    // stub that records its launch, where this platform starts programs.
+    const nlohmann::json script = {{"turns", {{{"text", "unused"}}}}};
+    Conversation chat{script};
+    const fs::path launched = chat.home.home() / "launched";
+    const fs::path stub = chat.home.home() / "stub.sh";
+    std::ofstream{stub, std::ios::binary} << "#!/bin/sh\necho started > '" << launched.string()
+                                          << "'\n";
+    fs::permissions(stub, fs::perms::owner_all);
+    nlohmann::json config = nlohmann::json::parse(slurp(chat.home.config_path()));
+    config["mcp_servers"] = {{"logged", {{"command", stub.generic_string()}}}};
+    std::ofstream{chat.home.config_path(), std::ios::binary | std::ios::trunc} << config.dump(2)
+                                                                               << "\n";
+    CLI::App app{"tui"};
+    const std::shared_ptr<apogee::commands::SessionFlags> flags =
+        tui_flags(app, {"--allow", "wrte_file"});
+    std::ostringstream said;
+    {
+        // stderr restored however the wait ends.
+        struct Captured {
+            std::streambuf* old;
+
+            ~Captured() {
+                std::cerr.rdbuf(old);
+            }
+        } const captured{std::cerr.rdbuf(said.rdbuf())};
+
+        apogee::commands::TuiSessionDriver driver{chat.view, chat.pump, chat.context,
+                                                  []() { return apogee::models::MachineBudget{}; }};
+        driver.start(flags, apogee::commands::launch_mode(*flags));
+        // The opening refused, the picker in its place.
+        chat.until([&chat]() { return has(chat.frame(), " › New chat"); }, "the picker");
+        driver.stop();
+    }
+    // The refusal, its listing naming the server it never started -- and,
+    // where this platform starts programs, the stub never ran.
+    CHECK(has(said.str(), "--allow: 'wrte_file' is not a tool this chat asks about"));
+    CHECK(has(said.str(), "; and mcp__logged__*, whose server a refused run does not start"));
+    CHECK_FALSE(fs::exists(launched));
+}
+
 TEST_CASE(
     "a private launch's lines are never recalled into the next conversation, a written one's are",
     "[cli][tui][session][launch][private]") {

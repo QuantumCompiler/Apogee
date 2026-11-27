@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -39,6 +40,7 @@
 #include "logger/operational.h"
 #include "logger/session.h"
 #include "machine/json_reporter.h"
+#include "mcp/types.h"
 #include "modelstore/footprint.h"
 #include "operations/suites.h"
 #include "platform/platform.h"
@@ -763,7 +765,17 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     // --- the tools, and what the task may do with them (27i) --------------------
     // Composed before anything is written: a grant wider than the config or
     // the agent allows is refused with no task made, and a resume is held to
-    // the config and the agent as they are now.
+    // the config and the agent as they are now. And before any MCP server
+    // starts (CLI-M38): every grant that names no MCP tool is held to the
+    // ceiling over the registry built without dialling, so a refusal the
+    // flags alone decide starts no program of the person's; only an `mcp__`
+    // grant waits for the servers, the one place that can judge it.
+    const auto refuse_grants = [&what, &task](const std::string& refusal) {
+        fail_user(what.existing.has_value()
+                      ? "task " + task.id + " cannot resume: " + refusal +
+                            " (its grants are held to the config and its agent as they are now)"
+                      : refusal);
+    };
     const tasks::TurnRecorder recorder;
     agent::ToolRegistry available;
     const auto mcp_registry = std::make_shared<mcp::Registry>();
@@ -778,18 +790,45 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
                           ? std::vector<std::string>{}
                           : agent_entry->mcp;
         }
-        available = pin_toolset(
-            make_built_in_tools(BuiltInToolOptions{
-                .config = &config,
-                .harness = &harness,
-                .mcp_servers = servers,
-                .mcp = mcp_registry,
-                .mcp_status = mcp_status_line(reporter.status()),
-                .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
-                    std::cerr << bytes << std::flush;
-                }}
-                                                : mcp::StderrTail::Sink{}}),
-            config, session.backend);
+        const BuiltInToolOptions tool_options{
+            .config = &config,
+            .harness = &harness,
+            .mcp_servers = servers,
+            .mcp = mcp_registry,
+            .mcp_status = mcp_status_line(reporter.status()),
+            .mcp_server_log = flags.verbose ? mcp::StderrTail::Sink{[](std::string_view bytes) {
+                std::cerr << bytes << std::flush;
+            }}
+                                            : mcp::StderrTail::Sink{}};
+        agent::ToolRegistry assembled = make_native_tools(tool_options);
+        // A fixed pin that leaves out `mcp` dials nothing: its tools would
+        // be pinned away unoffered.
+        const bool dials = pin_keeps_mcp(config, session.backend);
+        {
+            const agent::ToolRegistry native = pin_toolset(assembled, config, session.backend);
+            const agent::ToolRegistry offered =
+                agent_entry.has_value() ? apply_tool_policy(native, agent_entry->tools) : native;
+            std::vector<std::string> grants;
+            std::ranges::copy_if(
+                task.policy.grants, std::back_inserter(grants),
+                [](const std::string& grant) { return !mcp::is_namespaced(grant); });
+            // The servers' tools are named in a listing of what asks only
+            // where a server's writer could be offered at all.
+            const bool servers_ask = dials && (!agent_entry.has_value() ||
+                                               agent_entry->tools == harness::AgentToolPolicy::All);
+            if (const std::string refused = task_grant_refusal(
+                    config, grants, native, offered, task.policy.agent,
+                    agent_entry.has_value() ? &*agent_entry : nullptr,
+                    platform::supports_child_processes(),
+                    servers_ask ? mcp_servers_dialled(tool_options) : std::vector<std::string>{});
+                !refused.empty()) {
+                refuse_grants(refused);
+            }
+        }
+        if (dials) {
+            connect_mcp_tools(assembled, tool_options);
+        }
+        available = pin_toolset(assembled, config, session.backend);
     }
     // The person at the terminal, when there is one: policy adds to the human
     // path, never replaces it -- anything not granted is asked about, as a
@@ -806,10 +845,7 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     TaskGate composed = compose_task_gate(
         config, available, task.policy, agent_entry.has_value() ? &*agent_entry : nullptr, person);
     if (!composed.refusal.empty()) {
-        fail_user(what.existing.has_value()
-                      ? "task " + task.id + " cannot resume: " + composed.refusal +
-                            " (its grants are held to the config and its agent as they are now)"
-                      : composed.refusal);
+        refuse_grants(composed.refusal);
     }
     agent::ToolRegistry registry = std::move(composed.tools);
     agent::ToolRegistry observed;
@@ -1563,7 +1599,8 @@ std::string task_grant_refusal(const harness::Config& config,
                                const std::vector<std::string>& grants,
                                const agent::ToolRegistry& available,
                                const agent::ToolRegistry& offered, std::string_view agent_name,
-                               const harness::AgentConfig* agent, bool child_processes) {
+                               const harness::AgentConfig* agent, bool child_processes,
+                               const std::vector<std::string>& unstarted) {
     // A grant of a native tool this build never offers is refused saying why
     // (57k: a shell or git tool where no program can be started), before the
     // ceiling would call it no tool of the task's.
@@ -1579,7 +1616,8 @@ std::string task_grant_refusal(const harness::Config& config,
                                   .agent = std::string{agent_name},
                                   .agent_tools = agent != nullptr
                                                      ? std::string{harness::to_string(agent->tools)}
-                                                     : std::string{}});
+                                                     : std::string{},
+                                  .unstarted = unstarted_servers_clause(unstarted)});
 }
 
 std::string task_chat_backend(const harness::Config& config, std::string_view model,

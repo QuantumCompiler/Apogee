@@ -90,4 +90,10 @@ struct ToolCallResult {
 [[nodiscard]] std::string namespaced_name(std::string_view server, std::string_view tool);
 [[nodiscard]] bool split_namespaced(std::string_view name, std::string& server, std::string& tool);
 
+/// Whether `name` is shaped as an MCP tool's -- it starts with `mcp__`, the
+/// prefix every server's tool is registered under. Only such a name can
+/// depend on the servers: whether it exists, and whether it writes, is
+/// theirs to say, so a run judges every other name before it dials (CLI-M38).
+[[nodiscard]] bool is_namespaced(std::string_view name) noexcept;
+
 }  // namespace apogee::mcp
