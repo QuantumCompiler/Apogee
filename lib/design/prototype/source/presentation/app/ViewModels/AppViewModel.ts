@@ -11,10 +11,10 @@ import type { ModeRules, Rules } from '../../../infrastructure/process/StandInCh
 import { heatPumpFrame, moviesFolder, passedOver, projects, recordedBrief, recordedEdit } from '../../compose/Previews/ComposeWorlds'
 import { ComposeViewModel } from '../../compose/ViewModels/ComposeViewModel'
 import { ConsoleViewModel } from '../../console/ViewModels/ConsoleViewModel'
-import { graphWorld, overtakenNode } from '../../graph/Previews/GraphWorlds'
+import { graphWorld, notedGraph, overtakenNode } from '../../graph/Previews/GraphWorlds'
 import type { GraphConfirm } from '../../graph/ViewModels/GraphFaces'
 import { GraphViewModel } from '../../graph/ViewModels/GraphViewModel'
-import { collectionQuestion, recordedSearches, recordsQuestion, rejectedRecord } from '../../knowledge/Previews/KnowledgeWorlds'
+import { collectionQuestion, notedCapture, notedIngest, recordedSearches, recordsQuestion, rejectedRecord } from '../../knowledge/Previews/KnowledgeWorlds'
 import { CollectionsViewModel } from '../../knowledge/ViewModels/CollectionsViewModel'
 import type { KnowledgeTab } from '../../knowledge/ViewModels/KnowledgeFaces'
 import { RecordsViewModel } from '../../knowledge/ViewModels/RecordsViewModel'
@@ -221,8 +221,8 @@ export class AppViewModel extends Observable {
     this.review.setForm(reviewForm)
     this.review.sweeps = () => [sweepsFolder]
     // Knowledge and the Code graph (1o) over the same reads and jobs; the graph's world -- the recorded graphs, the questions whose pictures it shows, where a save goes -- handed in, as Review's form is.
-    this.records = new RecordsViewModel(this.reads)
-    this.collections = new CollectionsViewModel(this.reads)
+    this.records = new RecordsViewModel(this.reads, this.jobs)
+    this.collections = new CollectionsViewModel(this.reads, this.jobs)
     this.collections.recordedSearches = recordedSearches
     // What an empty field asks: the old kno.ask's and kno.search's questions, filled in, as the old always shows them asked.
     this.records.emptyQuestion = recordsQuestion
@@ -1170,11 +1170,15 @@ export class AppViewModel extends Observable {
    * `knowledge` Records, the old question asked (knowledge-query.json) and
    * the rejected record open; `knowledge:collections` notes searched
    * (collection-query.txt); `knowledge:mixed` mixed, its Vectors line, nothing
-   * searched. Each is the CLI's own answer through the stand-in.
+   * searched. GUI M22's two: `knowledge:ingested-with-a-note` the recorded
+   * ingest into my notes run, and `knowledge:captured-with-a-note` the
+   * recorded capture its suite validated -- each played to its end by the
+   * start ticks, its note on the said-card. Each is the CLI's own answer
+   * through the stand-in.
    */
   private async openKnowledgePreset(sub: string): Promise<void> {
     await this.openStreaming()
-    this.knowledgeTab = sub === 'collections' || sub === 'mixed' ? 'collections' : 'records'
+    this.knowledgeTab = sub === 'collections' || sub === 'mixed' || sub === 'ingested-with-a-note' ? 'collections' : 'records'
     this.shell.go('knowledge')
     await this.records.appeared()
     await this.collections.appeared()
@@ -1192,6 +1196,12 @@ export class AppViewModel extends Observable {
       case 'mixed':
         await this.collections.select('mixed')
         return
+      case 'ingested-with-a-note':
+        this.collections.runIngest(notedIngest.collection, notedIngest.path)
+        return
+      case 'captured-with-a-note':
+        this.records.runCapture(notedCapture)
+        return
     }
   }
 
@@ -1202,11 +1212,20 @@ export class AppViewModel extends Observable {
    * Runner.run_batch open; `graph:prose` the notes prose graph;
    * `graph:refused` a picture an update elsewhere overtook (the old
    * `gStale`), Runner._fetch clicked and its explain refused by the CLI, the
-   * alert up over the canvas.
+   * alert up over the canvas; GUI M22's `graph:built-with-a-note` the
+   * recorded first build of my notes' graph -- the collection the CLI could
+   * not register -- played to its end by the start ticks, its two notes on
+   * the said-card.
    */
   private async openGraphPreset(sub: string): Promise<void> {
     await this.openStreaming()
     this.shell.go('graph')
+    if (sub === 'built-with-a-note') {
+      this.graph.useWorld({ ...graphWorld, prose: notedGraph })
+      await this.graph.show('prose')
+      this.graph.rebuild()
+      return
+    }
     if (sub === 'prose') {
       await this.graph.show('prose')
       return

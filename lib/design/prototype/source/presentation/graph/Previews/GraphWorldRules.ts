@@ -46,6 +46,12 @@ export const overtakenNode = 'ingest.runner.Runner._fetch'
 /** The Code graph presets, in the old `data-props` order: what the fixture check walks. Each reads the place's answers, every preset's. */
 export const graphPresets = ['graph', 'graph:prose', 'graph:refused'] as const
 
+/** The preset drawn for GUI M22, a rebuild that left a note: it reads the place's answers and the noted sandbox's (`graphNoteRules`). */
+export const graphNotedPresets = ['graph:built-with-a-note'] as const
+
+/** The collection the noted preset rebuilds (GUI M22): `my notes`, a name the config can't hold, in the built CLI's sandbox. */
+export const notedGraph = 'my notes'
+
 const read = (args: readonly string[], stdout: string): Rule => ({ arguments: args, answer: { stdout } })
 const exact = (args: readonly string[], stdout: string): Rule => ({ arguments: args, exact: true, answer: { stdout } })
 const saved = (file: string) => `${graphWorld.documents}/${file}`
@@ -77,6 +83,31 @@ export function graphRules(look: Lookup): Required<Pick<Rules, 'reads' | 'comman
     ],
     jobs: [exact(['graph', 'dedupe', prose], look('graph-dedupe-merged-handmade.txt')), exact(['graph', 'update', code], look('graph-update-demo-handmade.txt'))],
   }
+}
+
+/**
+ * What the noted preset adds (GUI M22): the built CLI's first build of `my
+ * notes`' graph in its sandbox (the Mac's `tests/business/jobs/Fixtures`),
+ * its stdout and stderr -- the two notes, `could not register` and `could not
+ * set graph.enabled` -- and what that sandbox read back after it: the
+ * graph's stats, its report and its busiest entity explained.
+ */
+export function graphNoteRules(look: Lookup): Required<Pick<Rules, 'reads' | 'jobs'>> {
+  return {
+    reads: [
+      read(['graph', 'stats', notedGraph], look('graph-stats-my-notes.json')),
+      read(['graph', 'report', '--graph', notedGraph], look('graph-report-my-notes.json')),
+      exact(['graph', 'explain', '--graph', notedGraph, '--', 'Compressor'], look('graph-explain-my-notes.json')),
+    ],
+    jobs: [{ arguments: ['graph', 'build', notedGraph], exact: true, answer: { stdout: look('graph-build-unregistrable.out'), stderr: look('graph-build-unregistrable.err') } }],
+  }
+}
+
+/** The files the noted preset adds, each once: what the fixture check holds to exist on it. */
+export function graphNoteNames(): string[] {
+  const named = new Set<string>()
+  graphNoteRules((name) => (named.add(name), ''))
+  return [...named]
 }
 
 /** The file names the place's answers look up, each once: what the fixture check holds to exist on every Code graph preset. */

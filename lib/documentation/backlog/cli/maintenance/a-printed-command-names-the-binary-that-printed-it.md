@@ -142,7 +142,7 @@ All measured or read 2026-11-26 with the binary named above. Labels prefixed `c:
 
 ## Constraints
 
-- **The house voice keeps `apogee`.** `apogee <verb>: ` (`graph.cpp:48` and its siblings) and the root's `apogee: ` never take the channel's name or the flag. The Mac app keeps exactly those lines as a run's notes ([APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md); CLI-M46's Constraints, "Every note keeps the house voice on stderr"), and the tests pin the prefix.
+- **The house voice keeps `apogee`.** `apogee <verb>: ` (`graph.cpp:48` and its siblings) and the root's `apogee: ` never take the channel's name or the flag. The Mac app keeps exactly those lines as a run's notes ([APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person); CLI-M46's Constraints, "Every note keeps the house voice on stderr"), and the tests pin the prefix.
 - **The version line keeps `apogee`.** Its first word is the product's: the release scripts read line one (M10's record), and the Mac app accepts a binary only when that word is `apogee` (`BinaryDiscovery.swift:94`).
 - **One answer, in contracts.** The program words come from one function in `paths.h`, beside `channel_flag`. No site spells a channel's binary name. The three names are CMake's `OUTPUT_NAME`s (`source/CMakeLists.txt:106-110`), and `paths_test` holds them at compile time, as it holds the channel names.
 - **The flag is read, never decided again.** The renderer reads `root_flag()`, which the root command already keeps for the run. Nothing new is recorded, and `RootFlag::spelling()` stays the messages' spelling.
@@ -280,7 +280,7 @@ Every test is hermetic. `APOGEE_HOME` is a temp folder, or, for a run under `--d
   - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the TUI's argv builders.
 - **Relates to:**
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose remedy aside started the seam;
-  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), which keeps the house-voice lines this item leaves alone;
+  - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), which keeps the house-voice lines this item leaves alone;
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), whose two `check` remedies M48 builds and this item names the binary in;
   - [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), which says a run's notes as `apogee <verb>: …`, the voice this item doesn't touch;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)) and darwin 7c ([every place against a server](../../darwin/v0.2.4/every-place-against-a-server.md)), where a server's printed commands are read elsewhere;

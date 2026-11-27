@@ -96,6 +96,11 @@ public struct JobProgress: Sendable, Equatable {
     public private(set) var streamed = false
     /// The stderr tail at the end, for the details.
     public private(set) var stderr = ""
+    /// What a run that succeeded said in the CLI's house voice on stderr,
+    /// word for word -- the place it ran in shows them, its toast still the
+    /// outcome line (GUI M22). Empty for a run still going, stopped or
+    /// failed: a failure's words are stderr's last line, as ever.
+    public private(set) var notes = JobNotes()
     /// The stream's own `error` event, when one arrived: the run's failure in
     /// the words the stream gave it -- since the CLI's M29 a media runtime's
     /// refusal among them -- read before stderr's. `nil` from a run that said
@@ -133,6 +138,7 @@ public struct JobProgress: Sendable, Equatable {
             stderr = end.stderrTail.text
             if end.succeeded {
                 status = .done
+                notes = end.notes
             } else if end.interrupted {
                 status = .stopped
             } else if case .failed = status {

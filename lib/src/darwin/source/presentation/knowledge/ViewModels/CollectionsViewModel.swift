@@ -47,6 +47,26 @@ public final class CollectionsViewModel {
         }
     }
 
+    /// What the CLI said of a finished ingest on stderr, in its house voice,
+    /// word for word: kept on the page of the collection the ingest named,
+    /// until Dismiss, the next ingest, another collection chosen, or a
+    /// refresh that drops it (GUI M22). The toast stays the outcome line.
+    public struct DoneNotes: Equatable, Sendable {
+        /// The collection the ingest named, whose page shows them.
+        public let collection: String
+        /// What the ingest said, as `JobNotes` kept it.
+        public let notes: JobNotes
+
+        /// The notes `notes` of an ingest into `collection`.
+        public init(collection: String, notes: JobNotes) {
+            self.collection = collection
+            self.notes = notes
+        }
+
+        /// The card's title.
+        public var title: String { "What the ingest said" }
+    }
+
     /// A delete waiting on the person's word: a whole collection, or one
     /// source in it.
     public struct PendingDelete: Equatable, Sendable {
@@ -72,6 +92,8 @@ public final class CollectionsViewModel {
     public var ingestForm = IngestForm()
     public var ingesting = false
     public private(set) var run: JobProgress?
+    /// The last ingest's notes, on its collection's page (GUI M22).
+    public private(set) var doneNotes: DoneNotes?
     public private(set) var working: String?
     public private(set) var failure: String?
     public var say: (@MainActor (String) -> Void)?
@@ -109,6 +131,7 @@ public final class CollectionsViewModel {
             self.selected = nil
             info = nil
             results = nil
+            doneNotes = nil
         }
         if let selected { await readInfo(selected) }
     }
@@ -118,6 +141,7 @@ public final class CollectionsViewModel {
         selected = collection.name
         info = nil
         results = nil
+        if doneNotes?.collection != collection.name { doneNotes = nil }
         await readInfo(collection.name)
     }
 
@@ -225,11 +249,15 @@ public final class CollectionsViewModel {
     /// `select(_:)` drops them, so no moment holds one collection's results
     /// or heading under another's name (GUI 6h). An ingest into the
     /// collection shown keeps its results: they are its own. The collection
-    /// chosen is the one the line named (GUI M21).
+    /// chosen is the one the line named (GUI M21). What the CLI said of a
+    /// run that succeeded on stderr is kept for that collection's page, its
+    /// toast still stdout's first line; starting drops the last run's (GUI
+    /// M22).
     public func ingest() {
         guard let binary, let arguments = ingestForm.arguments, job == nil else { return }
         ingesting = false
         let name = ingestForm.name
+        doneNotes = nil
         run = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false, folder: nil)
         self.job = job
@@ -243,6 +271,9 @@ public final class CollectionsViewModel {
                 results = nil
             }
             selected = name
+            if let progress, progress.status == .done, !progress.notes.isEmpty {
+                doneNotes = DoneNotes(collection: name, notes: progress.notes)
+            }
             await refresh()
             switch progress?.status {
             case .done: say?(progress?.notices.first ?? "Ingested")
@@ -261,5 +292,10 @@ public final class CollectionsViewModel {
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    /// The notes' card dismissed.
+    public func dismissNotes() {
+        doneNotes = nil
     }
 }

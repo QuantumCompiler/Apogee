@@ -3,6 +3,7 @@ import BusinessJobs
 import BusinessReads
 import DataProtocol
 import Foundation
+import InfrastructureProcess
 
 /// Preview support (ADR 0004). Each module keeps its own copy, as each test
 /// bundle keeps its own scripted support.
@@ -14,8 +15,7 @@ struct PreviewRunner: CommandRunning {
     let reads: [([String], String)]
     let commands: [([String], String)]
     /// Commands the binary refused in its recorded words: answered as a
-    /// refusal, its exit unknown to this module (it links no
-    /// InfrastructureProcess), so a run that could not start.
+    /// refusal, its exit unrecorded, so a run that could not start.
     let refusals: [([String], String)]
     /// Reads the binary refused in its recorded words, answered the same way.
     let readRefusals: [([String], String)]
@@ -53,14 +53,18 @@ struct PreviewRunner: CommandRunning {
 }
 
 /// A job that says what it was given, then keeps running: a run in
-/// progress.
+/// progress -- or, given its `ending`, a run that ended so (GUI M22).
 final class PreviewJob: JobRunning {
     let updates: AsyncStream<JobUpdate>
     private let continuation: AsyncStream<JobUpdate>.Continuation
 
-    init(_ said: [JobUpdate]) {
+    init(_ said: [JobUpdate], ending: JobEnd? = nil) {
         (updates, continuation) = AsyncStream.makeStream(of: JobUpdate.self)
         said.forEach { continuation.yield($0) }
+        if let ending {
+            continuation.yield(.ended(ending))
+            continuation.finish()
+        }
     }
 
     func stop(grace: Duration) async {
@@ -68,13 +72,25 @@ final class PreviewJob: JobRunning {
     }
 }
 
-/// Starts preview jobs, each saying `said`.
+/// Starts preview jobs, each saying `said` -- and ending with `ending`,
+/// when given.
 struct PreviewJobs: JobStarting {
     var said: [JobUpdate] = []
+    var ending: JobEnd? = nil
 
     func startJob(binary: URL, arguments: [String], streaming: Bool, folder: URL?) -> any JobRunning {
-        PreviewJob(said)
+        PreviewJob(said, ending: ending)
     }
+}
+
+/// A recorded run as a preview job plays it: each line of `stdout` said,
+/// then its exit 0, `stderr` the tail it left (GUI M22).
+func recordedRun(stdout: String, stderr: String) -> PreviewJobs {
+    var tail = BoundedTail()
+    tail.append(Data(stderr.utf8))
+    return PreviewJobs(
+        said: stdout.split(separator: "\n").map { .said(String($0)) },
+        ending: JobEnd(exit: ChildExit(reason: .exited, status: 0), stderrTail: tail, interrupted: false))
 }
 
 /// Where a preview says the binary is; never run.

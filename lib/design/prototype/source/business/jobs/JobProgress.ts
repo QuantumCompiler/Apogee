@@ -1,5 +1,6 @@
 import type { JobEvent } from '../../data/protocol/JobEvent'
 import type { JSONValue } from '../../data/protocol/JSONValue'
+import { JobNotes } from './JobNotes'
 import { JobEnd } from './SupervisedJob'
 import type { JobUpdate } from './SupervisedJob'
 
@@ -110,6 +111,8 @@ export class JobProgress {
   stderr = ''
   /** The stream's own `error`, when one came: read before stderr's. */
   error: string | undefined = undefined
+  /** What a run that succeeded said in the CLI's house voice on stderr, word for word; none for one still going, stopped or failed (GUI M22). */
+  notes: JobNotes = JobNotes.none
   /** The pipeline run its stages belong to (55h): a pipeline's own, or the one a cycle pass trains (1j). */
   pipelineRunID: string | undefined = undefined
   /** The trainer's latest iteration (55h, 1j). */
@@ -149,7 +152,10 @@ export class JobProgress {
 
   private end(end: JobEnd): void {
     this.stderr = end.stderrTail.text
-    if (JobEnd.succeeded(end)) this.status = { case: 'done' }
+    if (JobEnd.succeeded(end)) {
+      this.status = { case: 'done' }
+      this.notes = end.notes
+    }
     else if (end.interrupted) this.status = { case: 'stopped' }
     else if (this.status.case !== 'failed') {
       const how = end.exit ? `it ${end.exit.reason === 'exited' ? `exited with status ${end.exit.status}` : `ended by signal ${end.exit.status}`}` : 'it did not start'

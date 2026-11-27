@@ -62,6 +62,30 @@ public final class GraphViewModel {
         case failed(String)
     }
 
+    /// What the CLI said of a finished build, update, communities or merge on
+    /// stderr, in its house voice, word for word -- a collection it could
+    /// not register, `graph.enabled` it could not set, a source tree gone --
+    /// kept for the graph the run named, and shown while that graph is the
+    /// one chosen, until Dismiss, the next run, another graph chosen, or a
+    /// read that no longer lists its graph; never on a node's selection (GUI
+    /// M22). Its toasts -- the run's last line, and a dropped node's -- stay
+    /// apart.
+    public struct DoneNotes: Equatable, Sendable {
+        /// The graph the run named.
+        public let graph: String
+        /// The card's title: which run said them.
+        public let title: String
+        /// What the run said, as `JobNotes` kept it.
+        public let notes: JobNotes
+
+        /// The notes `notes` of a run on `graph`, under `title`.
+        public init(graph: String, title: String, notes: JobNotes) {
+            self.graph = graph
+            self.title = title
+            self.notes = notes
+        }
+    }
+
     /// The graphs this machine has built, as the binary names them.
     public private(set) var graphs: [String] = []
     public private(set) var graph: String?
@@ -77,6 +101,8 @@ public final class GraphViewModel {
     public private(set) var failure: String?
     /// A rebuild or a first build running now.
     public private(set) var building: JobProgress?
+    /// The last run's notes, for its graph (GUI M22).
+    public private(set) var doneNotes: DoneNotes?
     /// The dedupe shown: its dry run, then its merge.
     public private(set) var dedupe: Dedupe?
     /// The graph whose delete waits on the person's word.
@@ -151,6 +177,10 @@ public final class GraphViewModel {
                 .filter { !$0.isEmpty }
         }
         if graph == nil || !graphs.contains(graph!) { graph = graphs.first }
+        // The notes go with their graph: when it is gone from the list. A
+        // graph chosen while the run went keeps them for theirs, which the
+        // card shows once that graph is chosen again (GUI M22).
+        if let notes = doneNotes, !graphs.contains(notes.graph) { doneNotes = nil }
         guard let graph else {
             stats = nil
             result = nil
@@ -177,6 +207,7 @@ public final class GraphViewModel {
     }
 
     public func choose(_ graph: String) async {
+        if doneNotes?.graph != graph { doneNotes = nil }
         self.graph = graph
         result = nil
         selected = nil
@@ -259,14 +290,14 @@ public final class GraphViewModel {
     public func rebuild() {
         guard let graph else { return }
         let sourced = !(stats?.sources.isEmpty ?? true)
-        run(Argv.line(["graph", sourced ? "update" : "build"], names: [graph]))
+        run(Argv.line(["graph", sourced ? "update" : "build"], names: [graph]), saying: "What the rebuild said")
     }
 
     /// A collection graph's communities, detected and summarised by the
     /// utility model (`graph communities -- <graph>`), supervised.
     public func findCommunities() {
         guard let graph, stats?.isProse == true else { return }
-        run(Argv.line(["graph", "communities"], names: [graph]))
+        run(Argv.line(["graph", "communities"], names: [graph]), saying: "What finding communities said")
     }
 
     /// A new graph of a folder's code: `graph build --source <folder> --graph
@@ -277,7 +308,7 @@ public final class GraphViewModel {
         let name = name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         graph = name
-        run(Self.buildArguments(name: name, folder: folder))
+        run(Self.buildArguments(name: name, folder: folder), saying: "What the build said")
     }
 
     /// `graph build --source <folder> --graph <name>`: New graph's line, and
@@ -286,8 +317,13 @@ public final class GraphViewModel {
         Argv.line(["graph", "build"], options: [.value("--source", folder.path), .value("--graph", name)])
     }
 
-    private func run(_ arguments: [String], finished: (@MainActor (JobProgress?) -> Void)? = nil) {
-        guard let binary, job == nil else { return }
+    /// Runs `arguments` supervised, then reads again. What a run that
+    /// succeeded said on stderr is kept under `title` for the graph it named
+    /// -- before the read-back, which drops it should the read fall to
+    /// another graph -- and starting drops the last run's (GUI M22).
+    private func run(_ arguments: [String], saying title: String, finished: (@MainActor (JobProgress?) -> Void)? = nil) {
+        guard let binary, let named = graph, job == nil else { return }
+        doneNotes = nil
         building = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false)
         self.job = job
@@ -296,6 +332,9 @@ public final class GraphViewModel {
             self.job = nil
             let progress = building
             building = nil
+            if let progress, progress.status == .done, !progress.notes.isEmpty {
+                doneNotes = DoneNotes(graph: named, title: title, notes: progress.notes)
+            }
             let dropped = await reread()
             if let finished {
                 finished(progress)
@@ -371,7 +410,7 @@ public final class GraphViewModel {
     public func confirmDedupe() {
         guard let graph, dedupeMerges else { return }
         dedupe = .merging
-        run(Self.dedupeArguments(graph, dryRun: false)) { [weak self] progress in
+        run(Self.dedupeArguments(graph, dryRun: false), saying: "What the merge said") { [weak self] progress in
             guard let self else { return }
             switch progress?.status {
             case .done: dedupe = .merged(progress?.notices.joined(separator: "\n") ?? "")
@@ -449,6 +488,11 @@ public final class GraphViewModel {
     }
 
     public var isBuilding: Bool { building != nil }
+
+    /// The notes' card dismissed.
+    public func dismissNotes() {
+        doneNotes = nil
+    }
 
     /// The edges to draw, between nodes the layout placed.
     public var edges: [GraphEdge] { result?.edges ?? [] }

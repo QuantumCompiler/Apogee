@@ -1,0 +1,11 @@
+150 file(s), 150 chunk(s)
+
+[graph] entity vectors skipped for "fresh one" -- backend 'extractor' cannot embed; entity search will be full-text only.
+Building the knowledge graph for "fresh one" with extractor...
+Graph build complete for "fresh one":
+  Files extracted:   150 of 150 planned
+  Chunks extracted:  150
+  Nodes upserted:    2
+  Edges upserted:    150
+  Mentions linked:   300
+Run `apogee graph stats fresh one` for the graph's shape.

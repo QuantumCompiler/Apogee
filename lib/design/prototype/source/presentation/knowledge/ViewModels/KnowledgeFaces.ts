@@ -53,6 +53,23 @@ export interface RecordsFace {
   readonly record: RecordFace
   /** What the pane says with no record open; `''` when one is. */
   readonly noSelection: string
+  /** A capture running (GUI M22). */
+  readonly run: RunFace
+  /** The last capture's notes (GUI M22). */
+  readonly notes: NotesFace
+}
+
+/** What the CLI said of a finished run on stderr, on the said-card (GUI M22): the Mac's `doneNotes`, each line as printed. */
+export interface NotesFace {
+  readonly shown: boolean
+  readonly title: string
+  readonly lines: readonly string[]
+}
+
+/** A run going now: its busy line or what it said last, and Stop (the Mac's `RunLine`). */
+export interface RunFace {
+  readonly shown: boolean
+  readonly text: string
 }
 
 /** One collection in the list. */
@@ -84,4 +101,8 @@ export interface CollectionsFace {
   /** Why there is no list, said; `''`. */
   readonly note: string
   readonly page: CollectionPageFace
+  /** An ingest running (GUI M22). */
+  readonly run: RunFace
+  /** The last ingest's notes, shown on its collection's page while that page is the one shown (GUI M22). */
+  readonly notes: NotesFace
 }

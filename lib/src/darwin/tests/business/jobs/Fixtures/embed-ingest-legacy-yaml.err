@@ -1,0 +1,1 @@
+apogee: /Users/someone/.apogee/config/config.yaml is in the older YAML format and still loads -- 'apogee config migrate' converts it to config.json

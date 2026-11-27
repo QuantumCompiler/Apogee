@@ -7,10 +7,12 @@ import Synchronization
 /// held -- downloads, clips, compositions, speeches.
 ///
 /// It spawns `apogee <arguments>`, reads its stdout -- the 52b stream's
-/// events, or, on a build before it, the lines it prints for people -- and
+/// events, or, on a build before it, the lines it prints for people --
 /// samples the last line of its stderr for the busy line a person would see
-/// (shown, never decided on). Stop is the interrupt a person's Ctrl-C is,
-/// to the run's whole process group; how it ended is the exit and the
+/// (shown, never decided on), and reads its stderr as lines for the notes
+/// the CLI says there in its house voice, every one from the first (GUI
+/// M22: a run's 8 KiB tail can lose its head). Stop is the interrupt a
+/// person's Ctrl-C is, to the run's whole process group; how it ended is the exit and the
 /// stream's own last word. Started with a registry, it is listed there from
 /// its spawn to its end (GUI 4c).
 public actor SupervisedJob {
@@ -23,6 +25,9 @@ public actor SupervisedJob {
     private let streaming: Bool
     private var interrupted = false
     private var ended = false
+    /// The notes its stderr's lines carry, read as they come; `nil` for a
+    /// child that frames no stderr, whose tail is read at the end instead.
+    private let notes: Task<JobNotes, Never>?
     /// Its place in the children registry, from its spawn until its end.
     private nonisolated let registration = Mutex<ChildRegistry.Registration?>(nil)
 
@@ -38,6 +43,8 @@ public actor SupervisedJob {
         spawner: any ChildSpawner, command: ChildCommand, streaming: Bool, registry: ChildRegistry?
     ) -> SupervisedJob {
         do {
+            var command = command
+            command.framesErrors = true
             let child = try spawner.spawn(command)
             child.closeInput()
             let job = SupervisedJob(child: child, streaming: streaming)
@@ -64,6 +71,13 @@ public actor SupervisedJob {
         self.child = child
         processIdentifier = child?.processIdentifier
         self.streaming = streaming
+        notes = child?.errorLines.map { lines in
+            Task {
+                var notes = JobNotes()
+                for await line in lines { notes.take(line) }
+                return notes
+            }
+        }
     }
 
     private func pump() async {
@@ -72,13 +86,15 @@ public actor SupervisedJob {
             continuation.yield(streaming ? .event(JobEvent.decode(line: line)) : .said(line))
         }
         let exit = await child.waitForExit()
+        // The lines finish before the exit is answered: their last note is in.
+        let notes = await notes?.value
         ended = true
         // Off the monitor before any screen hears the end.
         registration.withLock { registration in
             registration?.leave()
             registration = nil
         }
-        continuation.yield(.ended(JobEnd(exit: exit, stderrTail: child.stderrTail, interrupted: interrupted)))
+        continuation.yield(.ended(JobEnd(exit: exit, stderrTail: child.stderrTail, interrupted: interrupted, notes: notes)))
         continuation.finish()
     }
 
@@ -146,12 +162,20 @@ public struct JobEnd: Sendable, Equatable {
     public let interrupted: Bool
     /// Why it never started.
     public let detail: String?
+    /// What its stderr said in the CLI's house voice, every note from the
+    /// first: read as lines by the supervisor, or -- for an end made without
+    /// them, a scripted child's -- from `stderrTail` (GUI M22). A screen
+    /// shows them only for a run that succeeded (`JobProgress.notes`).
+    public let notes: JobNotes
 
-    public init(exit: ChildExit?, stderrTail: BoundedTail, interrupted: Bool, detail: String? = nil) {
+    /// `notes`, when not given, are read from `stderrTail` -- resolved here,
+    /// since a default value can't read another parameter.
+    public init(exit: ChildExit?, stderrTail: BoundedTail, interrupted: Bool, detail: String? = nil, notes: JobNotes? = nil) {
         self.exit = exit
         self.stderrTail = stderrTail
         self.interrupted = interrupted
         self.detail = detail
+        self.notes = notes ?? JobNotes(in: stderrTail)
     }
 
     public var succeeded: Bool { exit?.succeeded ?? false }

@@ -115,7 +115,7 @@ struct StoreTable: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let narration = store.narration {
-                    DeleteNarrationCard(narration: narration) { store.dismissNarration() }
+                    SaidCard(title: narration.title, lines: narration.lines) { store.dismissNarration() }
                         .padding(.horizontal, Spacing.l)
                         .padding(.top, Spacing.m)
                 }
@@ -1050,5 +1050,51 @@ struct StepsList: View {
     StoreTable(store: store)
         .frame(width: 900, height: 600)
         .task { await ModelsPreview.deleteWithBackends(store, runner) }
+}
+
+// What the CLI said of a delete beyond what it removed -- a backend kept,
+// pointing at nothing, with its two doors; the backends removed with it;
+// the roles it cleared -- and since GUI M16 what a registration or a
+// removal said of a role the CLI moved, on `styles`' said-card (GUI 4e;
+// promoted GUI M22). Stored weights and the Backends tab both draw it.
+#Preview("A delete's words: its backend kept, with the CLI's two doors") {
+    if let narration = DeleteNarration(title: "Deleted \(ModelsPreview.deleteGemmaQ4)", said: ModelsDocuments.deleteKept) {
+        SaidCard(title: narration.title, lines: narration.lines) {}
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("A delete's words: the backend removed with it") {
+    if let narration = DeleteNarration(title: "Deleted \(ModelsPreview.deleteLlamaQ4)", said: ModelsDocuments.deleteAndBackends) {
+        SaidCard(title: narration.title, lines: narration.lines) {}
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+#Preview("A removal's words: the default it named, cleared") {
+    if let narration = DeleteNarration(title: "Removed the backend Gemma4-12B-4bit", movingRoles: ModelsDocuments.deleteBackendClears) {
+        SaidCard(title: narration.title, lines: narration.lines) {}
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("A delete's words: the backend removed with it, both roles it held cleared") {
+    if let narration = DeleteNarration(title: "Deleted Qwen3-8B-4bit", said: ModelsDocuments.deleteRolesAndBackends) {
+        SaidCard(title: narration.title, lines: narration.lines) {}
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
+}
+
+#Preview("Register all's words: the default it set among what it registered") {
+    if let narration = DeleteNarration(
+        title: "Registered what the scan found", movingRoles: StoreViewModel.registration(in: ModelsDocuments.registerAllDefault))
+    {
+        SaidCard(title: narration.title, lines: narration.lines) {}
+            .padding(Spacing.xl)
+            .frame(width: 860)
+    }
 }
 #endif

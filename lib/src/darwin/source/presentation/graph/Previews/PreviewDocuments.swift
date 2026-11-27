@@ -461,5 +461,31 @@ apogee graph: graph 'spare' has not been built yet -- run: apogee graph build sp
     static let dedupeDocument = #"""
 {"code_entities":9,"code_identity_merges":0,"dry_run":true,"groups":[],"merged_nodes":0,"prose_skipped":"no prose entities -- nothing to compare by vector","threshold":0.92}
 """#
+    /// tests/business/jobs/Fixtures/graph-stats-my-notes.json
+    static let statsMyNotes = #"""
+{"built":true,"chunks_with_mentions":1,"code_files":0,"code_files_by_language":{},"code_mentions":0,"communities":0,"communities_unsummarised":0,"edges":1,"edges_extracted":0,"edges_inferred":1,"extract_model":"extractor","failed_chunks":0,"graph":"my notes","kind":"collection","mentions":2,"nodes":2,"nodes_by_type":{"component":1,"system":1},"nodes_with_vectors":0,"object":"graph.stats","stale_files":0,"total_chunks":1,"unresolved_names":0}
+"""#
+    /// tests/business/jobs/Fixtures/graph-report-my-notes.json
+    static let reportMyNotes = #"""
+{"communities":{"shown":[],"total":0,"unsummarised":0},"decisions":{"shown":[],"total":0},"graph":"my notes","hubs":{"metric":"degree","ranked":2,"shown":[{"degree":{"in":1,"out":0,"total":1},"mentions":1,"node":{"name":"Compressor","type":"component"},"relations":[{"direction":"in","neighbors":[{"name":"Heat pump","origin":"inferred","type":"system","weight":1}],"relation":"contains","total":1}]},{"degree":{"in":0,"out":1,"total":1},"mentions":1,"node":{"name":"Heat pump","type":"system"},"relations":[{"direction":"out","neighbors":[{"name":"Compressor","origin":"inferred","type":"component","weight":1}],"relation":"contains","total":1}]}]},"human_summary":"Graph \"my notes\" holds 2 entities and 1 relation. Every relation was asserted by a model. Its busiest entity is Compressor (component), with 1 relation. No communities are stored.","object":"graph.report","origin":{"extracted":0,"inferred":1,"relations":1},"orphans":{"shown":[],"total":0},"overview":{"by_type":{"component":1,"system":1},"entities":2,"members":[""],"relations":1,"unresolved_names":0}}
+"""#
+    /// tests/business/jobs/Fixtures/graph-build-unregistrable.out
+    static let buildUnregistrableOut = #"""
+[graph] entity vectors skipped for "my notes" -- backend 'extractor' cannot embed; entity search will be full-text only.
+Building the knowledge graph for "my notes" with extractor...
+Graph build complete for "my notes":
+  Files extracted:   1 of 1 planned
+  Chunks extracted:  1
+  Nodes upserted:    2
+  Edges upserted:    1
+  Mentions linked:   2
+Run `apogee graph stats my notes` for the graph's shape.
+"""#
+    /// tests/business/jobs/Fixtures/graph-build-unregistrable.err
+    static let buildUnregistrableErr = #"""
+[graph] extracting a note.txt (file 1/1, chunk 1/1)
+apogee graph: could not register 'my notes' in config -- collection name 'my notes' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null
+apogee graph: could not set graph.enabled on 'my notes' -- collection 'my notes' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null
+"""#
 }
 #endif

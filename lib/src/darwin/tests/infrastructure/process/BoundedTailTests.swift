@@ -20,4 +20,14 @@ struct BoundedTailTests {
         tail.append(Data("loading\nfatal: the model went away  \n\n".utf8))
         #expect(tail.lastLine == "fatal: the model went away")
     }
+
+    @Test("a tail says when it dropped bytes, and never before (GUI M22)")
+    func cut() {
+        var tail = BoundedTail(limit: 8)
+        tail.append(Data("01234567".utf8))
+        #expect(!tail.cut, "exactly the limit drops nothing")
+        tail.append(Data("8".utf8))
+        #expect(tail.cut)
+        #expect(tail.text == "12345678")
+    }
 }

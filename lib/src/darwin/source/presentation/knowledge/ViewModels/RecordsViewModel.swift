@@ -62,6 +62,23 @@ public final class RecordsViewModel {
         public let state: Raw
     }
 
+    /// What the CLI said of a finished capture or reindex on stderr, in its
+    /// house voice, word for word -- a verifier's verdict on the record, a
+    /// collection it could not register -- shown on Records until Dismiss or
+    /// the next run (GUI M22). The toast stays the outcome line.
+    public struct DoneNotes: Equatable, Sendable {
+        /// The card's title: which run said them.
+        public let title: String
+        /// What the run said, as `JobNotes` kept it.
+        public let notes: JobNotes
+
+        /// The notes `notes` of a run, under `title`.
+        public init(title: String, notes: JobNotes) {
+            self.title = title
+            self.notes = notes
+        }
+    }
+
     /// A question as it was asked: its text and the branch it was asked
     /// under (nil for every branch) -- what the matches shown answer, and
     /// what a Branch change asks again (GUI 6h).
@@ -85,6 +102,8 @@ public final class RecordsViewModel {
     public var capturing = false
     /// A capture or a reindex running now.
     public private(set) var run: JobProgress?
+    /// The last capture's or reindex's notes (GUI M22).
+    public private(set) var doneNotes: DoneNotes?
     /// A command running now, by what it is doing.
     public private(set) var working: String?
     public private(set) var failure: String?
@@ -331,12 +350,12 @@ public final class RecordsViewModel {
     public func capture() {
         guard let arguments = captureForm.arguments else { return }
         capturing = false
-        start(arguments)
+        start(arguments, saying: "What the capture said")
     }
 
     /// `knowledge reindex`: the vectors made again after an embedding change.
     public func reindex() {
-        start(["knowledge", "reindex"])
+        start(["knowledge", "reindex"], saying: "What the reindex said")
     }
 
     public var isRunning: Bool { job != nil }
@@ -345,8 +364,11 @@ public final class RecordsViewModel {
         await job?.stop(grace: .seconds(10))
     }
 
-    private func start(_ arguments: [String]) {
+    /// Runs `arguments` supervised; what a run that succeeded said on stderr
+    /// is kept under `title`, and starting drops the last run's (GUI M22).
+    private func start(_ arguments: [String], saying title: String) {
         guard let binary, job == nil else { return }
+        doneNotes = nil
         run = JobProgress()
         let job = starter.startJob(binary: binary, arguments: arguments, streaming: false, folder: nil)
         self.job = job
@@ -355,6 +377,9 @@ public final class RecordsViewModel {
             self.job = nil
             let progress = run
             run = nil
+            if let progress, progress.status == .done, !progress.notes.isEmpty {
+                doneNotes = DoneNotes(title: title, notes: progress.notes)
+            }
             await refresh()
             switch progress?.status {
             case .done: say?(progress?.notices.first ?? "Done")
@@ -367,5 +392,10 @@ public final class RecordsViewModel {
 
     public func dismissFailure() {
         failure = nil
+    }
+
+    /// The notes' card dismissed.
+    public func dismissNotes() {
+        doneNotes = nil
     }
 }

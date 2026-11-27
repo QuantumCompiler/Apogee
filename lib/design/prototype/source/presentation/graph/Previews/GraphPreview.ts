@@ -5,13 +5,16 @@ import { JobStarter } from '../../../business/jobs/SupervisedJob'
 import { ReadRunner } from '../../../business/reads/ReadRunner'
 import { Clock } from '../../../infrastructure/clock/Clock'
 import { StandInChild } from '../../../infrastructure/process/StandInChild'
-import type { ApogeeMode } from '../../../infrastructure/process/StandInChild'
+import type { ApogeeMode, Rules } from '../../../infrastructure/process/StandInChild'
 import { GraphViewModel } from '../ViewModels/GraphViewModel'
 import { graphPlaceRules, graphWorld } from './GraphWorlds'
+import type { GraphWorld } from '../ViewModels/GraphViewModel'
 
-/** How a preview's place is set up: its mode, what the person does once it has read, and what is done once the clock has started -- each act, then the ticks it plays. */
+/** How a preview's place is set up: its mode, its answers and world (the place's unless named), what the person does once it has read, and what is done once the clock has started -- each act, then the ticks it plays. */
 export interface GraphPreviewOptions {
   readonly apogee?: ApogeeMode
+  readonly rules?: Rules
+  readonly world?: GraphWorld
   readonly then?: (graph: GraphViewModel) => void | Promise<void>
   readonly script?: ReadonlyArray<readonly [(graph: GraphViewModel) => void | Promise<void>, number]>
 }
@@ -29,10 +32,10 @@ async function settle(): Promise<void> {
  */
 export function useGraphPreview(options: GraphPreviewOptions = {}): GraphViewModel {
   const [model] = useState(() => {
-    const child = new StandInChild({ rules: graphPlaceRules(), apogee: options.apogee ?? 'installed' }, { configTypoRefusal: agentsListBadConfig })
+    const child = new StandInChild({ rules: options.rules ?? graphPlaceRules(), apogee: options.apogee ?? 'installed' }, { configTypoRefusal: agentsListBadConfig })
     const clock = new Clock({ still: true })
     const graph = new GraphViewModel(new ReadRunner(child), new JobStarter(child, clock, new ChildRegistry()))
-    graph.useWorld(graphWorld)
+    graph.useWorld(options.world ?? graphWorld)
     graph.connect(child.locateBinary().case === 'found' ? StandInChild.binary : undefined)
     return { graph, clock, setUp: undefined as Promise<void> | undefined }
   })

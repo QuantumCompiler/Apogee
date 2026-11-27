@@ -245,5 +245,5 @@ Each case fails on today's binary unless marked as a guard. The child cases run 
   - [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md), whose create rule stops new dash-led datasets, while existing ones still need this item;
   - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), whose completion offers a dash-led name only after `--`;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), the Mac app's version of this bug class, and [APP-M23](../../darwin/macos/maintenance/every-name-the-app-passes-is-read-as-a-name.md), its other sites;
-  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose probes' CLI asides, with APP-M21's, started the investigation that found this.
+  - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose probes' CLI asides, with APP-M21's, started the investigation that found this.
 - **Follows from:** 37f and 37g (MILESTONES, 2026-10-10), the views and their "the command run as the shell's child" record; [ADR 0010](../../../adrs/cli/the-shell-is-a-mode.md), the shell is a mode.

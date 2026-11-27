@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { KnowledgeTab } from '../ViewModels/KnowledgeFaces'
 import { KnowledgeScreen } from '../Views/KnowledgeScreen'
-import { collectionQuestion, recordedRawRules, recordsQuestion, rejectedRecord } from './KnowledgeWorlds'
+import { collectionQuestion, knowledgeNotedRules, knowledgePlaceRules, notedCapture, notedIngest, recordedRawRules, recordsQuestion, rejectedRecord } from './KnowledgeWorlds'
 import { useKnowledgePreview } from './KnowledgePreview'
 import type { KnowledgePreviewOptions } from './KnowledgePreview'
 
@@ -103,3 +103,26 @@ export const MixedVectors = () => <Screen options={mixed} tab="collections" />
 const collectionsMissing: KnowledgePreviewOptions = { apogee: 'missing' }
 /** No apogee: no collections, no page and no words, as the old Collections tab has no missing state. */
 export const CollectionsNoApogee = () => <Screen options={collectionsMissing} tab="collections" />
+
+/** The place's answers with the noted sandbox's over them (GUI M22), as the noted presets compose them. */
+function notedRules() {
+  const place = knowledgePlaceRules()
+  const noted = knowledgeNotedRules()
+  return { reads: [...place.reads, ...noted.reads], commands: place.commands, jobs: noted.jobs }
+}
+
+const ingested: KnowledgePreviewOptions = {
+  rules: notedRules(),
+  ticks: 3,
+  then: ({ collections }) => collections.runIngest(notedIngest.collection, notedIngest.path),
+}
+/** `knowledge:ingested-with-a-note` (GUI M22): the recorded ingest into my notes, toasted as stdout's line, its note on the page as the CLI printed it. */
+export const IngestedWithANote = () => <Screen options={ingested} tab="collections" />
+
+const captured: KnowledgePreviewOptions = {
+  rules: notedRules(),
+  ticks: 16,
+  then: ({ records }) => records.runCapture(notedCapture),
+}
+/** `knowledge:captured-with-a-note` (GUI M22): the recorded capture its suite's verifier validated, the verdict on Records as the CLI printed it. */
+export const CapturedWithANote = () => <Screen options={captured} tab="records" />

@@ -14,8 +14,8 @@ describe("the contract page's data (design 1r): BuildContract at 1c's frozen rev
     expect(contractCalls.map((call) => call.lead)).toEqual(['Which gaps land before the app’s first release?', 'The lowest macOS version', 'If the CLI isn’t installed'])
   })
 
-  test("the board's 108 rows, then the 8 the shipped items handed it (1e's six, 1h's two), each at the end of its part", () => {
-    expect(contractRows).toHaveLength(116)
+  test("the board's 108 rows, then the 8 the shipped items handed it (1e's six, 1h's two), each at the end of its part, and GUI M22's two ready rows", () => {
+    expect(contractRows).toHaveLength(118)
     const handed = contractRows.filter((row) => row.status === 'gap' && Number(row.gap.slice(1)) > 24)
     expect(handed.map((row) => [row.part, row.status === 'gap' ? row.gap : ''])).toEqual([
       ['MODELS', 'G31'],
@@ -53,9 +53,9 @@ describe("the contract page's data (design 1r): BuildContract at 1c's frozen rev
 })
 
 describe('the stat cards, counted (design 1r’s guardrail)', () => {
-  test('the rows counted by status, and the gaps open by their when: 87 ready, 13 app, 16 gaps open, 0 assumed', () => {
+  test('the rows counted by status, and the gaps open by their when: 89 ready, 13 app, 16 gaps open, 0 assumed', () => {
     expect(counts(contract())).toEqual([
-      ['ready', 87],
+      ['ready', 89],
       ['app', 13],
       ['gap', 16],
       ['verify', 0],
@@ -71,7 +71,7 @@ describe('the stat cards, counted (design 1r’s guardrail)', () => {
   test('a planted extra ready row raises the ready card by one, with no other edit', () => {
     const planted: ContractRow = { part: 'MODELS', shows: 'A planted part', how: '`models planted`', status: 'ready' }
     expect(counts(contract([...contractRows, planted]))).toEqual([
-      ['ready', 88],
+      ['ready', 90],
       ['app', 13],
       ['gap', 16],
       ['verify', 0],
@@ -83,7 +83,7 @@ describe('the stat cards, counted (design 1r’s guardrail)', () => {
     const gap: Gap = { id: 'G33', title: 'A planted gap', change: 'a planted change', when: 'Later', fallback: 'a planted fallback' }
     const naming: ContractRow = { part: 'TASKS', shows: 'Another planted part', how: 'none yet', status: 'gap', gap: 'G33' }
     expect(counts(contract([...contractRows, verify, naming], [...contractGaps, gap]))).toEqual([
-      ['ready', 87],
+      ['ready', 89],
       ['app', 13],
       ['gap', 17],
       ['verify', 1],
@@ -93,7 +93,7 @@ describe('the stat cards, counted (design 1r’s guardrail)', () => {
   test('the gaps card counts the gaps open, not the rows naming them: a second row naming G25 leaves it at 16', () => {
     const second: ContractRow = { part: 'MODELS', shows: 'A second part needing G25', how: 'none yet', status: 'gap', gap: 'G25' }
     expect(counts(contract([...contractRows, second]))).toEqual([
-      ['ready', 87],
+      ['ready', 89],
       ['app', 13],
       ['gap', 16],
       ['verify', 0],
@@ -105,8 +105,8 @@ describe('the contract map (design 1r)', () => {
   test("the rows grouped by part, in the parts' order, each part's rows in table order", () => {
     const parts = contract().parts()
     expect(parts.map((part) => part.part)).toEqual([...contractParts])
-    // The frozen board's 24, 17, 2, 9, 6, 3, 10, 4, 7, 16 and 10, with Models' two and Settings and system's six handed in.
-    expect(parts.map((part) => part.rows.length)).toEqual([24, 19, 2, 9, 6, 3, 10, 4, 7, 16, 16])
+    // The frozen board's 24, 17, 2, 9, 6, 3, 10, 4, 7, 16 and 10, with Models' two and Settings and system's six handed in, and the Code graph's and Knowledge's one each from GUI M22.
+    expect(parts.map((part) => part.rows.length)).toEqual([24, 19, 2, 9, 7, 4, 10, 4, 7, 16, 16])
     expect(parts.flatMap((part) => part.rows.map((row) => row.shows))).toEqual(contractRows.map((row) => row.shows))
   })
 

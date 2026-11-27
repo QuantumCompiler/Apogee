@@ -3,7 +3,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import type { GraphConfirm } from '../ViewModels/GraphFaces'
 import type { GraphViewModel } from '../ViewModels/GraphViewModel'
 import { GraphScreen } from '../Views/GraphScreen'
-import { overtakenNode } from './GraphWorlds'
+import { graphNotedRules, graphPlaceRules, graphWorld, notedGraph, overtakenNode } from './GraphWorlds'
 import { useGraphPreview } from './GraphPreview'
 import type { GraphPreviewOptions } from './GraphPreview'
 
@@ -92,3 +92,19 @@ export const NoApogee = () => <Screen options={missing} />
 const typo: GraphPreviewOptions = { apogee: 'config-typo' }
 /** A config typo: the CLI's refusal where the canvas stands. */
 export const ConfigTypo = () => <Screen options={typo} />
+
+/** The place's answers with the noted sandbox's over them (GUI M22), as the noted preset composes them. */
+function notedRules() {
+  const place = graphPlaceRules()
+  const noted = graphNotedRules()
+  return { reads: [...place.reads, ...noted.reads], commands: place.commands, jobs: [...place.jobs, ...noted.jobs] }
+}
+
+const builtWithANote: GraphPreviewOptions = {
+  rules: notedRules(),
+  world: { ...graphWorld, prose: notedGraph },
+  then: (graph) => graph.show('prose'),
+  script: [[(graph) => graph.rebuild(), 12]],
+}
+/** `graph:built-with-a-note` (GUI M22): my notes' graph rebuilt, its last line the toast, the CLI's two notes on the said-card. */
+export const BuiltWithANote = () => <Screen options={builtWithANote} />

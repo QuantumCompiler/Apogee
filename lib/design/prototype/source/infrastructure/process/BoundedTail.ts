@@ -8,6 +8,8 @@ const decoder = new TextDecoder()
  */
 export class BoundedTail {
   private bytes = new Uint8Array(0)
+  /** Whether bytes were dropped to keep the limit: the text then starts wherever the cut fell (GUI M22, the Mac's `cut`). */
+  cut = false
 
   constructor(readonly limit = 8 * 1024) {}
 
@@ -23,6 +25,7 @@ export class BoundedTail {
     const joined = new Uint8Array(this.bytes.length + added.length)
     joined.set(this.bytes)
     joined.set(added, this.bytes.length)
+    if (joined.length > this.limit) this.cut = true
     this.bytes = joined.length > this.limit ? joined.slice(joined.length - this.limit) : joined
   }
 

@@ -1,0 +1,7 @@
+Updating the code of "code" from [src, src2] -- tree-sitter, no model...
+[graph] source tree /Users/someone/src2 is not a directory -- it contributes nothing, and what it contributed is forgotten.
+Code graph for "code" (no model):
+  Files used:       1 (python 1) -- 0 parsed, 1 unchanged since the last build
+  Files forgotten:  1
+  References:       1 resolved, 0 unresolved (calls 1/1, types 0/0, imports 0/0, bases 0/0) -- an unresolved one is a name node, never a guess
+  Code graph:       3 node(s), 3 edge(s) (nodes +0 ~0 -2; edges +0 -1)

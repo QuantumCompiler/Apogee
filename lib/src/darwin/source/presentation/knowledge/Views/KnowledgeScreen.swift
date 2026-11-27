@@ -105,6 +105,13 @@ struct RecordsView: View {
                 if let run = model.run {
                     RunLine(progress: run) { Task { await model.stop() } }
                 }
+                // What the last capture or reindex said on stderr, as printed
+                // (GUI M22); its toast is the outcome line.
+                if let said = model.doneNotes {
+                    SaidCard(title: said.title, lines: said.notes.shown) { model.dismissNotes() }
+                        .padding(.horizontal, Spacing.m)
+                        .padding(.bottom, Spacing.s)
+                }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         if let query = model.query {
@@ -357,6 +364,11 @@ struct CollectionPage: View {
                     Spacer()
                     Button("Ingest more…") { model.newIngest(into: info.name) }.disabled(model.isRunning)
                     Button("Delete…", role: .destructive) { model.pendingDelete = .init(collection: info.name, source: nil) }
+                }
+                // What the last ingest into this collection said on stderr,
+                // as printed (GUI M22); its toast is the outcome line.
+                if let said = model.doneNotes, said.collection == info.name {
+                    SaidCard(title: said.title, lines: said.notes.shown) { model.dismissNotes() }
                 }
                 HStack(spacing: Spacing.xl) {
                     fact("Chunks", "\(info.chunks)")
@@ -668,6 +680,25 @@ struct IngestSheet: View {
             collections.newIngest(into: "notes")
             collections.ingestForm.path = "/Users/someone/notes"
             collections.ingest()
+        }
+}
+
+#Preview("Collections after an ingest that left a note") {
+    let collections = KnowledgePreview.ingestedWithANote()
+    CollectionsView(model: collections)
+        .frame(width: 1000, height: 620)
+        .task { await KnowledgePreview.ingestTheNote(collections) }
+}
+
+#Preview("Records after a capture that left a note") {
+    let records = KnowledgePreview.capturedWithANote()
+    RecordsView(model: records)
+        .frame(width: 900, height: 620)
+        .task {
+            await records.connect(binary: previewBinary)
+            records.newCapture()
+            records.captureForm.text = "Ada: testers kept mistaking the cancel button for back, so we removed it. Shipped in PROJ-42."
+            records.capture()
         }
 }
 

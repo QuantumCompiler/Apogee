@@ -1,0 +1,12 @@
+Captured kr-20261127T043715Z-be8a6d
+Intent:      Testers kept mistaking the cancel button for back.
+Decision:    Remove the cancel button.
+Status:      shipped
+Discipline:  ux
+Link:        PROJ-42
+Source:      meeting
+Attribution: -
+Raw:         /Users/someone/.apogee/knowledge/raw/kr-20261127T043715Z-be8a6d.md
+
+Stored in "knowledge" (retriever: lexical) -- searchable by text; no vector written
+registered 'knowledge' in /Users/someone/.apogee/config/config.json

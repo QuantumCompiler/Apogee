@@ -3,8 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 // The rules alone, never the `?raw` imports: a fixture missing on disk fails its presets' tests here, not this file's load.
-import { graphPlaceNames, graphPresets } from '../../../source/presentation/graph/Previews/GraphWorldRules'
-import { knowledgePlaceNames, knowledgePresets } from '../../../source/presentation/knowledge/Previews/KnowledgeWorldRules'
+import { graphNotedPresets, graphNoteNames, graphPlaceNames, graphPresets } from '../../../source/presentation/graph/Previews/GraphWorldRules'
+import { knowledgeNotedPresets, knowledgeNoteNames, knowledgePlaceNames, knowledgePresets } from '../../../source/presentation/knowledge/Previews/KnowledgeWorldRules'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const prototype = resolve(here, '..', '..', '..')
@@ -50,6 +50,9 @@ const mac = (path: string) => readFileSync(resolve(recorded, path), 'utf8')
 describe('every file a Knowledge or Code graph preset reads exists, and traces to a recording or a *-handmade* file (design 1o)', () => {
   for (const preset of knowledgePresets) test(preset, () => expect(problems(preset, knowledgePlaceNames(), imported(worlds.knowledge))).toEqual([]))
   for (const preset of graphPresets) test(preset, () => expect(problems(preset, graphPlaceNames(), imported(worlds.graph))).toEqual([]))
+  // GUI M22's: the place's files and the noted sandbox's, every one the Mac's recording.
+  for (const preset of knowledgeNotedPresets) test(preset, () => expect(problems(preset, [...knowledgePlaceNames(), ...knowledgeNoteNames()], imported(worlds.knowledge))).toEqual([]))
+  for (const preset of graphNotedPresets) test(preset, () => expect(problems(preset, [...graphPlaceNames(), ...graphNoteNames()], imported(worlds.graph))).toEqual([]))
 
   test('the names are the rules’ own: every file the answers look up, each once, the hand-made ones among them', () => {
     expect(knowledgePlaceNames()).toEqual(['knowledge-list.json', 'collections-list-handmade.json', 'collection-info-knowledge-handmade.json', 'collection-info-vectors-mixed.json', 'collection-info.json', 'knowledge-query.json', 'knowledge-info-raw-1e2354-handmade.txt', 'collection-query.txt'])

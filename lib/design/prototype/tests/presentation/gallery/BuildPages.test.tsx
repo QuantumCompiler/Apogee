@@ -67,8 +67,8 @@ describe('the contract page, drawn (design 1r)', () => {
     expect(markup).toMatch(/<span class="mono"[^>]*>chats list --output-format json<\/span>/)
   })
 
-  test('the stat cards show the counts: 87, 13, 16 and 0', () => {
-    expect(markup.match(/data-card="[a-z]+"[^>]*>[^<]*<span[^>]*>\d+<\/span>/g)?.map((card) => /data-card="([a-z]+)"/.exec(card)?.[1] + ' ' + />(\d+)<\/span>$/.exec(card)?.[1])).toEqual(['ready 87', 'app 13', 'gap 16', 'verify 0'])
+  test('the stat cards show the counts: 89, 13, 16 and 0', () => {
+    expect(markup.match(/data-card="[a-z]+"[^>]*>[^<]*<span[^>]*>\d+<\/span>/g)?.map((card) => /data-card="([a-z]+)"/.exec(card)?.[1] + ' ' + />(\d+)<\/span>$/.exec(card)?.[1])).toEqual(['ready 89', 'app 13', 'gap 16', 'verify 0'])
     expect(words).toContain('16gaps open, each an additive CLI change')
   })
 

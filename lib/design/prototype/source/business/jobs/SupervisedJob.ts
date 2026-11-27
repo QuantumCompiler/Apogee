@@ -8,6 +8,7 @@ import type { AskedStop, CapturedRun, StandInChild } from '../../infrastructure/
 import type { FolderFile, FolderWrite } from '../../infrastructure/process/StandInFolders'
 import { LineFramer } from '../../infrastructure/process/LineFramer'
 import { ChildRegistry } from './ChildRegistry'
+import { JobNotes } from './JobNotes'
 
 /** How a job ended: the Mac app's `JobEnd` (`SupervisedJob.swift:140-176`). */
 export interface JobEnd {
@@ -18,16 +19,19 @@ export interface JobEnd {
   readonly interrupted: boolean
   /** Why it never started. */
   readonly detail: string | undefined
+  /** What its stderr said in the CLI's house voice, every note from the first: its lines' (the replay's), else its tail's (GUI M22). */
+  readonly notes: JobNotes
 }
 
 export const JobEnd = {
-  of(exit: ChildExit | undefined, stderrTail: BoundedTail, interrupted: boolean, detail?: string): JobEnd {
-    return { exit, stderrTail, interrupted, detail }
+  /** `notes`, when not given, read from `stderrTail`, as the Mac's `JobEnd` resolves them. */
+  of(exit: ChildExit | undefined, stderrTail: BoundedTail, interrupted: boolean, detail?: string, notes?: JobNotes): JobEnd {
+    return { exit, stderrTail, interrupted, detail, notes: notes ?? JobNotes.inTail(stderrTail) }
   },
 
   /** A run that never started, `detail` saying why. */
   notStarted(detail: string): JobEnd {
-    return { exit: undefined, stderrTail: new BoundedTail(), interrupted: false, detail }
+    return { exit: undefined, stderrTail: new BoundedTail(), interrupted: false, detail, notes: JobNotes.none }
   },
 
   succeeded(end: JobEnd): boolean {
@@ -91,7 +95,7 @@ export class JobStarter implements JobStarting {
       writes: answer.replay.writes,
       resumeFrom: answer.replay.resumeFrom,
       write: (folder, file) => folders.write(folder, file),
-    })
+    }, answer.replay.errors)
     // The stops another call may ask of it while it runs (design 1p): `task halt` and `task cancel`.
     for (const stop of answer.replay.asked) {
       if (job.finished) break
@@ -154,6 +158,8 @@ export class SupervisedJob implements JobRunning {
   lastWrite: FolderWrite | undefined = undefined
   /** Resumed: once its first line has played, on from this write's line, its file written again first. */
   private resumeFrom: FolderWrite | undefined
+  /** Its stderr's notes, read from every line, as the Mac's supervisor reads them as they come (GUI M22). */
+  private readonly notes: JobNotes
 
   private constructor(
     private readonly run: CapturedRun | undefined,
@@ -162,7 +168,9 @@ export class SupervisedJob implements JobRunning {
     busy = false,
     holdAt?: number,
     files: JobFiles = {},
+    errors: readonly string[] = [],
   ) {
+    this.notes = JobNotes.fromLines(errors)
     this.writes = files.writes ?? []
     this.write = files.write ?? (() => {})
     this.resumeFrom = files.resumeFrom
@@ -188,8 +196,8 @@ export class SupervisedJob implements JobRunning {
   }
 
   /** `run`, replayed on `clock`; in a still frame, as many ticks in as the frame, however late it opened. With `busy`, its stderr first, a busy line a tick (design 1j); with `holdAt`, its `exitAfter` ticks waited after that many lines (design 1k). */
-  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false, holdAt?: number, files: JobFiles = {}): SupervisedJob {
-    const job = new SupervisedJob(run, streaming, exitAfter, busy, holdAt, files)
+  static replay(run: CapturedRun, streaming: boolean, clock: Clock, exitAfter = 0, busy = false, holdAt?: number, files: JobFiles = {}, errors: readonly string[] = []): SupervisedJob {
+    const job = new SupervisedJob(run, streaming, exitAfter, busy, holdAt, files, errors)
     // What it has written before its first line (design 1l: the composer's project, beside the video from Render on), there as it starts -- never on a resume, whose own write comes after its first line.
     if (files.resumeFrom === undefined) job.writeThrough()
     job.leave = clock.onTick(() => job.step(clock.linesPerTick))
@@ -248,7 +256,7 @@ export class SupervisedJob implements JobRunning {
       return
     }
     if (this.next >= this.lines.length) {
-      if (this.run) this.end(JobEnd.of(this.askedExit ?? this.run.exit, this.run.stderrTail, false))
+      if (this.run) this.end(JobEnd.of(this.askedExit ?? this.run.exit, this.run.stderrTail, false, undefined, this.notes))
       return
     }
     // Never past the hold in one tick: the wait stands right after its line.

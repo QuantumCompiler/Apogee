@@ -29,7 +29,7 @@ test('the contract page opens from disk at its address: its stat cards counted, 
   const board = page.getByRole('region', { name: 'Build · how the app talks to Apogee' })
   await expect(board.getByRole('heading', { name: 'How the app talks to Apogee', exact: true })).toBeVisible()
   for (const [status, count] of [
-    ['ready', '87'],
+    ['ready', '89'],
     ['app', '13'],
     ['gap', '16'],
     ['verify', '0'],

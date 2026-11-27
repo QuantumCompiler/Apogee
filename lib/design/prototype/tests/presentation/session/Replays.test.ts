@@ -317,7 +317,7 @@ describe('no counter remains: every line of the transcript is a replayed eventâ€
 describe("every stream's provenance: each file a preset names exists, and is a recording or named *-handmade*", () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const prototype = resolve(here, '..', '..', '..')
-  // The Models place's too (design 1h): its worlds, its preview's mode recording and the narration card's.
+  // The Models place's too (design 1h): its worlds and its preview's mode recording; and the said-card's, promoted to styles from the Models narration card (GUI M22).
   const previews = [
     'source/presentation/session/Previews/SessionPresets.ts',
     'source/presentation/session/Previews/ScenarioStreams.ts',
@@ -325,7 +325,7 @@ describe("every stream's provenance: each file a preset names exists, and is a r
     'source/presentation/app/Previews/ModeRules.ts',
     'source/presentation/models/Previews/ModelsWorlds.ts',
     'source/presentation/models/Previews/ModelsPreview.ts',
-    'source/presentation/models/Previews/DeleteNarrationCard.preview.tsx',
+    'source/presentation/styles/Previews/SaidCard.preview.tsx',
     // The Training place's (design 1j): its recordings (`TrainingWorlds.ts`; its worlds' rules, `TrainingWorldRules.ts`, import none) and its preview's mode recording.
     'source/presentation/training/Previews/TrainingWorlds.ts',
     'source/presentation/training/Previews/TrainingPreview.ts',

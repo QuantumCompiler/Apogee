@@ -1,0 +1,1 @@
+apogee embed: could not register 'my notes' in config -- collection name 'my notes' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null

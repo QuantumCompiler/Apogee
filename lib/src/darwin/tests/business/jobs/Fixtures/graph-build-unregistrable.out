@@ -1,0 +1,9 @@
+[graph] entity vectors skipped for "my notes" -- backend 'extractor' cannot embed; entity search will be full-text only.
+Building the knowledge graph for "my notes" with extractor...
+Graph build complete for "my notes":
+  Files extracted:   1 of 1 planned
+  Chunks extracted:  1
+  Nodes upserted:    2
+  Edges upserted:    1
+  Mentions linked:   2
+Run `apogee graph stats my notes` for the graph's shape.

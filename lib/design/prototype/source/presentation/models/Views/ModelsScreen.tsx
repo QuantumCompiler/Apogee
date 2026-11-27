@@ -1,7 +1,7 @@
 import { ModelGlyph } from '../../styles/Components/ModelGlyph'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { BackendRow, ModelsViewModel } from '../ViewModels/ModelsViewModel'
-import { DeleteNarrationCard } from './DeleteNarrationCard'
+import { SaidCard } from '../../styles/Components/SaidCard'
 import { DownloadsView } from './DownloadsView'
 import { StoreView } from './StoreView'
 import { Icon } from '../../styles/Components/Icon'
@@ -118,7 +118,7 @@ export function BackendsTab({ model }: { readonly model: ModelsViewModel }) {
   return (
     <div style={{ flex: '1 1 0', minHeight: 0, display: 'flex' }}>
       <div style={{ flex: '1 1 0', minWidth: 0, overflow: 'auto', padding: '8px 24px 24px' }}>
-        {face.narration.shown ? <DeleteNarrationCard title={face.narration.title} text={face.narration.text} dismiss={() => model.dismissNarration()} /> : null}
+        {face.narration.shown ? <SaidCard title={face.narration.title} lines={face.narration.text.split('\n')} dismiss={() => model.dismissNarration()} /> : null}
         <div className="lbl" style={{ display: 'grid', gridTemplateColumns: columns, columnGap: 12, alignItems: 'center', height: 34, borderBottom: '1px solid var(--line-strong)' }}>
           <span>NAME</span>
           <span>FORMAT</span>

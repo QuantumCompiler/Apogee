@@ -2,9 +2,10 @@ import Foundation
 import Synchronization
 
 /// Starts children with Foundation's `Process`: three pipes, the stdout
-/// framed into lines, the stderr kept as a bounded tail, the person's
-/// shell's `PATH` under the command's own variables, and each child the
-/// leader of a process group of its own, which its signals reach.
+/// framed into lines, the stderr kept as a bounded tail -- and framed into
+/// capped lines as well for a command that asks (`framesErrors`, GUI M22) --
+/// the person's shell's `PATH` under the command's own variables, and each
+/// child the leader of a process group of its own, which its signals reach.
 ///
 /// Every child the app starts comes through here -- a session, a read, a
 /// command, a job, a version probe -- so every one gets that `PATH` (GUI M6).
@@ -12,18 +13,23 @@ public struct ProcessSpawner: ChildSpawner {
     /// How many bytes of stderr each child keeps.
     public let stderrLimit: Int
 
+    /// The longest stderr line a child that frames its stderr keeps, in
+    /// bytes: a longer one is cut there (GUI M22).
+    public let errorLineLimit: Int
+
     /// Where each child's `PATH` comes from: the app's resolver unless given
     /// another -- the login shell's once it has answered, the fallback until
     /// then, read at each spawn and never waited for.
     public let path: ShellPath
 
-    public init(stderrLimit: Int = 8 * 1024, path: ShellPath = .app) {
+    public init(stderrLimit: Int = 8 * 1024, errorLineLimit: Int = 4 * 1024, path: ShellPath = .app) {
         self.stderrLimit = stderrLimit
+        self.errorLineLimit = errorLineLimit
         self.path = path
     }
 
     public func spawn(_ command: ChildCommand) throws -> any RunningChild {
-        try FoundationChild(command, path: path.current.path, stderrLimit: stderrLimit)
+        try FoundationChild(command, path: path.current.path, stderrLimit: stderrLimit, errorLineLimit: errorLineLimit)
     }
 }
 
@@ -53,10 +59,15 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
     private let errors = Pipe()
     let lines: AsyncStream<String>
     private let linesContinuation: AsyncStream<String>.Continuation
+    /// stderr as lines, for a command that framed it (GUI M22); else nil.
+    let errorLines: AsyncStream<String>?
+    private let errorLinesContinuation: AsyncStream<String>.Continuation?
 
     private struct State {
         var framer = LineFramer()
         var tail: BoundedTail
+        /// stderr's framer, for a command that framed it.
+        var errorFramer: LineFramer?
         var exit: ChildExit?
         var stdoutFinished = false
         var stderrClosed = false
@@ -72,9 +83,18 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
 
     private let state: Mutex<State>
 
-    init(_ command: ChildCommand, path: String, stderrLimit: Int) throws {
-        state = Mutex(State(tail: BoundedTail(limit: stderrLimit)))
+    init(_ command: ChildCommand, path: String, stderrLimit: Int, errorLineLimit: Int) throws {
+        state = Mutex(
+            State(
+                tail: BoundedTail(limit: stderrLimit),
+                errorFramer: command.framesErrors ? LineFramer(maxLine: errorLineLimit) : nil))
         (lines, linesContinuation) = AsyncStream.makeStream(of: String.self)
+        if command.framesErrors {
+            let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+            (errorLines, errorLinesContinuation) = (stream, continuation)
+        } else {
+            (errorLines, errorLinesContinuation) = (nil, nil)
+        }
 
         process.executableURL = command.executable
         process.arguments = command.arguments
@@ -115,7 +135,15 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
                 closeErrors()
                 return
             }
-            state.withLock { $0.tail.append(chunk) }
+            state.withLock { state in
+                state.tail.append(chunk)
+                // Said under the lock, so no line can follow the close's
+                // last one, nor land after the stream is finished.
+                guard !state.stderrClosed, let lines = state.errorFramer?.push(chunk) else { return }
+                for line in lines {
+                    errorLinesContinuation?.yield(line)
+                }
+            }
         }
         process.terminationHandler = { [weak self] process in
             process.terminationHandler = nil
@@ -144,6 +172,7 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
             errors.fileHandleForReading.readabilityHandler = nil
             process.terminationHandler = nil
             linesContinuation.finish()
+            errorLinesContinuation?.finish()
             throw ChildError.couldNotStart(
                 executable: command.executable.path, reason: error.localizedDescription)
         }
@@ -158,6 +187,7 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
         output.fileHandleForReading.readabilityHandler = nil
         errors.fileHandleForReading.readabilityHandler = nil
         linesContinuation.finish()
+        errorLinesContinuation?.finish()
     }
 
     /// stdout is over -- its end read, or the failsafe passed: its handler
@@ -177,10 +207,15 @@ final class FoundationChild: RunningChild, @unchecked Sendable {
     }
 
     /// stderr is over -- its end read, or the failsafe passed: its handler
-    /// cleared, and the exit's waiters answered once the child has exited.
+    /// cleared, its lines' last unended one said and their stream finished,
+    /// once, and then the exit's waiters answered once the child has exited.
     private func closeErrors() {
         errors.fileHandleForReading.readabilityHandler = nil
         let (exit, ready) = state.withLock { state -> (ChildExit?, [CheckedContinuation<ChildExit, Never>]) in
+            if !state.stderrClosed, let last = state.errorFramer?.finish() {
+                errorLinesContinuation?.yield(last)
+            }
+            errorLinesContinuation?.finish()
             state.stderrClosed = true
             guard let exit = state.exit else { return (nil, []) }
             return (exit, state.take())

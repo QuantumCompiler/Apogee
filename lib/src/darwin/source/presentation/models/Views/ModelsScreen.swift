@@ -47,7 +47,7 @@ public struct ModelsScreen<Downloads: View>: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         if let narration = model.narration {
-                            DeleteNarrationCard(narration: narration) { model.dismissNarration() }
+                            SaidCard(title: narration.title, lines: narration.lines) { model.dismissNarration() }
                                 .padding(.horizontal, Spacing.l)
                                 .padding(.top, Spacing.m)
                         }

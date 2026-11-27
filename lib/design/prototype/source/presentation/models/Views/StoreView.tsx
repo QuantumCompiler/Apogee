@@ -3,7 +3,7 @@ import { useObserved } from '../../styles/Observation/useObserved'
 import { ConvertForm, QuantizeForm, RegisterForm } from '../ViewModels/StoreForms'
 import { Estimate } from '../ViewModels/StoreForms'
 import type { StoreViewModel } from '../ViewModels/StoreViewModel'
-import { DeleteNarrationCard } from './DeleteNarrationCard'
+import { SaidCard } from '../../styles/Components/SaidCard'
 import { Icon } from '../../styles/Components/Icon'
 
 const columns = 'minmax(190px, 1fr) 100px 92px 72px minmax(170px, 210px)'
@@ -23,7 +23,7 @@ export function StoreView({ model }: { readonly model: StoreViewModel }) {
   return (
     <div style={{ flex: '1 1 0', minHeight: 0, display: 'flex' }}>
       <div style={{ flex: '1 1 0', minWidth: 0, overflow: 'auto', padding: '12px 24px 24px' }}>
-        {face.narration.shown ? <DeleteNarrationCard title={face.narration.title} text={face.narration.text} dismiss={() => model.dismissNarration()} /> : null}
+        {face.narration.shown ? <SaidCard title={face.narration.title} lines={face.narration.text.split('\n')} dismiss={() => model.dismissNarration()} /> : null}
         {face.failure !== '' ? (
           <p role="alert" style={{ margin: '0 0 10px', fontSize: 'var(--t-small)', color: 'var(--status-error)', overflowWrap: 'anywhere' }}>
             {`That didn’t work: ${face.failure}`}

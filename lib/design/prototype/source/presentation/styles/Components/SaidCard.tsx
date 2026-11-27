@@ -1,10 +1,13 @@
 /**
- * What a delete said beyond what it removed, kept until dismissed (design
- * 1h): the old prototype's "Deleted …" card (`main.html` at `b375fac9`,
- * `mdl.hasNarr`, `st.hasNarr`), every line as the CLI printed it -- the Mac
- * app's `DeleteNarrationCard`.
+ * The said-card (GUI M22): what the CLI said, every line as printed, under a
+ * title, until dismissed -- the Mac app's `SaidCard` (`PresentationStyles`).
+ * Neutral -- secondary text in the code font on the code background, never a
+ * warning colour -- since the same voice carries bad news, plain notes and
+ * good news. Promoted from Models' delete narration card (design 1h, the old
+ * prototype's "Deleted …" card, `main.html` at `b375fac9`, `mdl.hasNarr`,
+ * `st.hasNarr`) once Knowledge and the Code graph drew a run's notes on it.
  */
-export function DeleteNarrationCard({ title, text, dismiss }: { readonly title: string; readonly text: string; readonly dismiss: () => void }) {
+export function SaidCard({ title, lines, dismiss }: { readonly title: string; readonly lines: readonly string[]; readonly dismiss: () => void }) {
   return (
     <div className="card" role="status" style={{ margin: '8px 0 6px', padding: '14px 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -14,7 +17,7 @@ export function DeleteNarrationCard({ title, text, dismiss }: { readonly title: 
         </button>
       </div>
       <div className="mono" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 'var(--radius-control)', background: 'var(--surface-code)', fontSize: 'var(--t-meta)', lineHeight: 1.6, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-        {text}
+        {lines.join('\n')}
       </div>
     </div>
   )

@@ -1,10 +1,13 @@
+import type { JobNotes } from '../../../business/jobs/JobNotes'
+import { JobProgress } from '../../../business/jobs/JobProgress'
+import type { JobRunning, JobStarting } from '../../../business/jobs/SupervisedJob'
 import { CommandOutcome } from '../../../business/reads/CommandRunning'
 import type { CommandRunning } from '../../../business/reads/CommandRunning'
 import { KnowledgeQuery, KnowledgeRecord, RawConversation } from '../../../business/reads/Knowledge'
 import { ReadOutcome } from '../../../business/reads/ReadRunner'
 import { ReadDocument } from '../../../data/protocol/ReadDocument'
 import { Observable } from '../../styles/Observation/Observable'
-import type { RawFace, RecordFace, RecordsFace } from './KnowledgeFaces'
+import type { NotesFace, RawFace, RecordFace, RecordsFace } from './KnowledgeFaces'
 
 /** Where the list stands: the Mac app's `RecordsViewModel.Listing`. */
 type Listing = { readonly case: 'notRead' } | { readonly case: 'read' } | { readonly case: 'missing' } | { readonly case: 'failed'; readonly message: string }
@@ -17,6 +20,8 @@ const branchWords: ReadonlyArray<readonly [string, string]> = [
   ...KnowledgeRecord.statuses.map((status): readonly [string, string] => [status, status.charAt(0).toUpperCase() + status.slice(1)]),
 ]
 
+const noNotes: NotesFace = { shown: false, title: '', lines: [] }
+
 const noRaw: RawFace = { shown: false, open: false, text: '', note: '', failure: '', command: '' }
 
 /**
@@ -27,8 +32,11 @@ const noRaw: RawFace = { shown: false, open: false, text: '', note: '', failure:
  * as the old prototype's Records tab draws them. As the old one does, a
  * branch picked clears a standing question (the Mac asks it again: its 6h),
  * and capture, export, link, move and delete stay the old toasts, naming the
- * command (the document's default; the Mac's forms are new design). Plain
- * TypeScript.
+ * command (the document's default; the Mac's forms are new design). The
+ * capture sheet's run is the Mac's (GUI M22): `knowledge capture -- <text>`
+ * supervised, its toast stdout's first line, and what the CLI said on stderr
+ * in its house voice -- a verifier's verdict on the record among it -- kept
+ * on Records until Dismiss or the next run. Plain TypeScript.
  */
 export class RecordsViewModel extends Observable {
   records: readonly KnowledgeRecord[] = []
@@ -44,6 +52,11 @@ export class RecordsViewModel extends Observable {
   /** The old branch choices, its words: `Every branch`, then the three `knowledge status` takes. */
   readonly branches = branchWords
 
+  /** A capture running now (GUI M22). */
+  run: JobProgress | undefined = undefined
+  /** The last capture's notes (GUI M22). */
+  doneNotes: { readonly title: string; readonly notes: JobNotes } | undefined = undefined
+
   /** The toast, the composition's. */
   say?: (text: string) => void
   /** What Ask asks with nothing typed, the composition's: the old `kno.ask`'s question, filled in, where the Mac asks nothing. */
@@ -53,7 +66,12 @@ export class RecordsViewModel extends Observable {
   /** Counts the questions asked: a reply lands only if none was asked, or cleared, since. */
   private asks = 0
 
-  constructor(private readonly runner: CommandRunning) {
+  private job: JobRunning | undefined = undefined
+
+  constructor(
+    private readonly runner: CommandRunning,
+    private readonly starter: JobStarting,
+  ) {
     super()
   }
 
@@ -176,6 +194,51 @@ export class RecordsViewModel extends Observable {
     this.say?.('apogee knowledge capture: the clerk distils the conversation (prototype)')
   }
 
+  /**
+   * The capture sheet's run, the Mac's `capture()` (GUI M22): `knowledge
+   * capture -- <text>`, supervised; when it ends the records are read again,
+   * a run that succeeded toasts stdout's first line and keeps what it said on
+   * stderr in the CLI's house voice, a failure says stderr's last line.
+   */
+  runCapture(text: string): void {
+    const binary = this.binary
+    if (binary === undefined || this.job !== undefined) return
+    this.doneNotes = undefined
+    const progress = new JobProgress()
+    this.run = progress
+    const job = this.starter.startJob(binary, ['knowledge', 'capture', '--', text], false)
+    this.job = job
+    this.changed()
+    void (async () => {
+      for await (const update of job.updates) {
+        progress.apply(update)
+        this.changed()
+      }
+      this.job = undefined
+      this.run = undefined
+      if (progress.status.case === 'done' && !progress.notes.isEmpty) this.doneNotes = { title: 'What the capture said', notes: progress.notes }
+      this.changed()
+      await this.refresh()
+      const status = progress.status
+      if (status.case === 'done') this.say?.(progress.notices[0] ?? 'Done')
+      else if (status.case === 'failed') {
+        this.failure = status.message
+        this.changed()
+      } else if (status.case === 'stopped') this.say?.('Stopped')
+    })()
+  }
+
+  /** Stop, as the run line's button: the run interrupted. */
+  async stop(): Promise<void> {
+    await this.job?.stop()
+  }
+
+  /** The notes' card dismissed. */
+  dismissNotes(): void {
+    this.doneNotes = undefined
+    this.changed()
+  }
+
   /** Export…: the old toast. */
   exportRecords(): void {
     this.say?.('apogee knowledge export --format markdown -o knowledge.md (prototype)')
@@ -232,6 +295,8 @@ export class RecordsViewModel extends Observable {
       empty: this.emptyText,
       record: record ? this.recordFace(record) : { shown: false, id: '', decision: '', facts: [], raw: noRaw },
       noSelection: record ? '' : 'Choose a record to read its reasoning and its decision.',
+      run: this.run ? { shown: true, text: this.run.busy ?? this.run.notices.at(-1) ?? 'Working' } : { shown: false, text: '' },
+      notes: this.doneNotes ? { shown: true, title: this.doneNotes.title, lines: this.doneNotes.notes.shown } : noNotes,
     }
   }
 

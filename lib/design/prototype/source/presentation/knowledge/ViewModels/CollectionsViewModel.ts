@@ -1,14 +1,19 @@
+import type { JobNotes } from '../../../business/jobs/JobNotes'
+import { JobProgress } from '../../../business/jobs/JobProgress'
+import type { JobRunning, JobStarting } from '../../../business/jobs/SupervisedJob'
 import { CommandOutcome } from '../../../business/reads/CommandRunning'
 import type { CommandRunning } from '../../../business/reads/CommandRunning'
 import { CollectionInfo, CollectionRow } from '../../../business/reads/Knowledge'
 import { ReadOutcome } from '../../../business/reads/ReadRunner'
 import { Observable } from '../../styles/Observation/Observable'
-import type { CollectionPageFace, CollectionsFace } from './KnowledgeFaces'
+import type { CollectionPageFace, CollectionsFace, NotesFace } from './KnowledgeFaces'
 
 /** The collection the old page shows with none chosen (`knName`'s fallback): notes. */
 const fallback = 'notes'
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+
+const noNotes: NotesFace = { shown: false, title: '', lines: [] }
 
 const noPage: CollectionPageFace = { shown: false, name: '', chunks: '', index: '', vectors: '', question: '', searched: false, results: [], failure: '', sourceCount: 0, sources: [] }
 
@@ -23,7 +28,10 @@ const noPage: CollectionPageFace = { shown: false, name: '', chunks: '', index: 
  * collection's delete the old toasts, naming the command (the document's
  * default). A search of a collection whose search the CLI never recorded
  * says the old toast too (`kno.search`), as the old one does for every
- * collection but notes. Plain TypeScript.
+ * collection but notes. The ingest sheet's run is the Mac's (GUI M22):
+ * `embed ingest -- <c> <path>` supervised, its toast stdout's first line, and
+ * what the CLI said on stderr in its house voice kept on the collection's
+ * page. Plain TypeScript.
  */
 export class CollectionsViewModel extends Observable {
   collections: readonly CollectionRow[] = []
@@ -37,6 +45,10 @@ export class CollectionsViewModel extends Observable {
   results: readonly string[] | undefined = undefined
   /** Why the last search or page read did not land, in the CLI's words. */
   failure: string | undefined = undefined
+  /** An ingest running now (GUI M22). */
+  run: JobProgress | undefined = undefined
+  /** The last ingest's notes, for the collection it named (GUI M22). */
+  doneNotes: { readonly collection: string; readonly notes: JobNotes } | undefined = undefined
 
   /** The toast, the composition's. */
   say?: (text: string) => void
@@ -46,8 +58,12 @@ export class CollectionsViewModel extends Observable {
   emptyQuestions: Readonly<Record<string, string>> = {}
 
   private binary: string | undefined = undefined
+  private job: JobRunning | undefined = undefined
 
-  constructor(private readonly runner: CommandRunning) {
+  constructor(
+    private readonly runner: CommandRunning,
+    private readonly starter: JobStarting,
+  ) {
     super()
   }
 
@@ -81,6 +97,7 @@ export class CollectionsViewModel extends Observable {
       this.selected = undefined
       this.info = undefined
       this.results = undefined
+      this.doneNotes = undefined
     }
     this.changed()
     const shown = this.shownName
@@ -97,6 +114,7 @@ export class CollectionsViewModel extends Observable {
       this.results = undefined
       this.failure = undefined
     }
+    if (this.doneNotes?.collection !== name) this.doneNotes = undefined
     this.changed()
     await this.readInfo(name)
   }
@@ -151,9 +169,61 @@ export class CollectionsViewModel extends Observable {
     this.changed()
   }
 
-  /** Ingest… and Ingest more…: the old toast. */
+  /** Ingest… and Ingest more…: the old toast -- the sheet itself is a follow-up's; its run is `runIngest`. */
   ingest(): void {
     this.say?.('apogee embed ingest: chosen in a sheet, run supervised (prototype)')
+  }
+
+  /**
+   * The ingest sheet's run, the Mac's `ingest()` (GUI M22): `embed ingest --
+   * <collection> <path>`, supervised. When it ends, its collection is chosen
+   * and read; a run that succeeded toasts stdout's first line and keeps what
+   * it said on stderr in the CLI's house voice for that collection's page,
+   * until Dismiss, the next ingest, another collection, or a refresh that
+   * drops it. A failure is stderr's last line, as ever.
+   */
+  runIngest(collection: string, path: string): void {
+    const binary = this.binary
+    if (binary === undefined || this.job !== undefined) return
+    this.doneNotes = undefined
+    const progress = new JobProgress()
+    this.run = progress
+    const job = this.starter.startJob(binary, ['embed', 'ingest', '--', collection, path], false)
+    this.job = job
+    this.changed()
+    void (async () => {
+      for await (const update of job.updates) {
+        progress.apply(update)
+        this.changed()
+      }
+      this.job = undefined
+      this.run = undefined
+      if (this.shownName !== collection) {
+        this.info = undefined
+        this.results = undefined
+      }
+      this.selected = collection
+      if (progress.status.case === 'done' && !progress.notes.isEmpty) this.doneNotes = { collection, notes: progress.notes }
+      this.changed()
+      await this.refresh()
+      const status = progress.status
+      if (status.case === 'done') this.say?.(progress.notices[0] ?? 'Ingested')
+      else if (status.case === 'failed') {
+        this.failure = status.message
+        this.changed()
+      } else if (status.case === 'stopped') this.say?.('Stopped: what was read stays')
+    })()
+  }
+
+  /** Stop, as the run line's button: the run interrupted. */
+  async stop(): Promise<void> {
+    await this.job?.stop()
+  }
+
+  /** The notes' card dismissed. */
+  dismissNotes(): void {
+    this.doneNotes = undefined
+    this.changed()
   }
 
   /** A source's Remove…: the old toast. */
@@ -177,7 +247,11 @@ export class CollectionsViewModel extends Observable {
   face(): CollectionsFace {
     const info = this.info
     const name = this.shownName
+    const run = this.run
+    const notes = this.doneNotes
     return {
+      run: run ? { shown: true, text: run.busy ?? run.notices.at(-1) ?? 'Working' } : { shown: false, text: '' },
+      notes: notes !== undefined && notes.collection === name && info !== undefined ? { shown: true, title: 'What the ingest said', lines: notes.notes.shown } : noNotes,
       // The shown collection's row is current, chosen or not: the old kn.coll starts at notes, as shownName falls back to it.
       rows: this.collections.map((row) => ({ name: row.name, meta: `${plural(row.sources, 'source')} · ${plural(row.chunks, 'chunk')}`, current: row.name === name })),
       note: this.note,

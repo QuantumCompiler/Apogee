@@ -1,6 +1,7 @@
+import { SaidCard } from '../../styles/Components/SaidCard'
 import { useObserved } from '../../styles/Observation/useObserved'
 import type { CollectionsViewModel } from '../ViewModels/CollectionsViewModel'
-import type { CollectionPageFace, KnowledgeTab, RecordFace } from '../ViewModels/KnowledgeFaces'
+import type { CollectionPageFace, KnowledgeTab, NotesFace, RecordFace, RunFace } from '../ViewModels/KnowledgeFaces'
 import type { RecordsViewModel } from '../ViewModels/RecordsViewModel'
 
 export interface KnowledgeScreenProps {
@@ -59,6 +60,25 @@ export function KnowledgeScreen({ records, collections, tab, pickTab }: Knowledg
   )
 }
 
+/** A capture or an ingest running: its busy line and Stop, the Mac's `RunLine` (GUI M22). */
+function RunLine({ run, stop }: { readonly run: RunFace; readonly stop: () => void }) {
+  return (
+    <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 16px' }}>
+      <span className="mono" style={{ flex: '1 1 auto', minWidth: 0, fontSize: 'var(--t-meta)', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {run.text}
+      </span>
+      <button type="button" className="btn-g" onClick={stop} style={{ height: 24, fontSize: 'var(--t-small)' }}>
+        Stop
+      </button>
+    </div>
+  )
+}
+
+/** What the last run said on stderr, on the said-card (GUI M22); its toast is the outcome line. */
+function Notes({ notes, dismiss }: { readonly notes: NotesFace; readonly dismiss: () => void }) {
+  return notes.shown ? <SaidCard title={notes.title} lines={notes.lines} dismiss={dismiss} /> : null
+}
+
 /** Records: the question and the branch over the list, and the record's pane. */
 function RecordsTab({ model }: { readonly model: RecordsViewModel }) {
   const face = model.face()
@@ -89,6 +109,12 @@ function RecordsTab({ model }: { readonly model: RecordsViewModel }) {
             ))}
           </select>
         </div>
+        {face.run.shown ? <RunLine run={face.run} stop={() => void model.stop()} /> : null}
+        {face.notes.shown ? (
+          <div style={{ padding: '0 16px' }}>
+            <Notes notes={face.notes} dismiss={() => model.dismissNotes()} />
+          </div>
+        ) : null}
         {face.found !== '' ? <div style={{ padding: '0 18px 6px', ...meta }}>{face.found}</div> : null}
         {face.failure !== '' ? <div style={{ padding: '0 18px 6px', fontSize: 'var(--t-meta)', color: 'var(--status-error)', overflowWrap: 'anywhere' }}>{face.failure}</div> : null}
         <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '0 10px 12px' }}>
@@ -186,6 +212,7 @@ function CollectionsTab({ model }: { readonly model: CollectionsViewModel }) {
   return (
     <div style={{ flex: '1 1 0', minHeight: 0, display: 'flex' }}>
       <nav aria-label="Collections" style={{ flex: '0 0 280px', minHeight: 0, overflowY: 'auto', padding: '12px 10px', background: 'var(--surface-sidebar)', borderRight: '1px solid var(--line-border)' }}>
+        {face.run.shown ? <RunLine run={face.run} stop={() => void model.stop()} /> : null}
         {face.rows.map((row) => (
           <button
             key={row.name}
@@ -201,13 +228,13 @@ function CollectionsTab({ model }: { readonly model: CollectionsViewModel }) {
         ))}
         {face.note !== '' ? <p style={{ margin: '6px 12px', fontSize: 'var(--t-small)', color: 'var(--text-tertiary)' }}>{face.note}</p> : null}
       </nav>
-      <div style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', padding: '22px 28px 32px' }}>{face.page.shown ? <CollectionPane model={model} page={face.page} /> : null}</div>
+      <div style={{ flex: '1 1 0', minWidth: 0, overflowY: 'auto', padding: '22px 28px 32px' }}>{face.page.shown ? <CollectionPane model={model} page={face.page} notes={face.notes} /> : null}</div>
     </div>
   )
 }
 
 /** A collection's page: its health, its Vectors line, its search and its sources. */
-function CollectionPane({ model, page }: { readonly model: CollectionsViewModel; readonly page: CollectionPageFace }) {
+function CollectionPane({ model, page, notes }: { readonly model: CollectionsViewModel; readonly page: CollectionPageFace; readonly notes: NotesFace }) {
   return (
     <div style={{ maxWidth: 880 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -219,6 +246,7 @@ function CollectionPane({ model, page }: { readonly model: CollectionsViewModel;
           Delete…
         </button>
       </div>
+      <Notes notes={notes} dismiss={() => model.dismissNotes()} />
       <div style={{ display: 'flex', gap: 32, marginTop: 14 }}>
         <div style={{ flex: '0 0 auto' }}>
           <div className="lbl">CHUNKS</div>

@@ -20,16 +20,24 @@ public struct ChildCommand: Sendable, Equatable {
     /// The child's working directory; the parent's when `nil`.
     public var workingDirectory: URL?
 
+    /// Whether its stderr is also wanted as lines (`RunningChild.errorLines`),
+    /// every one of them, beside the bounded tail every child keeps. Off
+    /// unless asked: only the jobs core asks, for a run's notes (GUI M22);
+    /// every other child's stderr is the tail alone, as it always was.
+    public var framesErrors: Bool
+
     public init(
         executable: URL,
         arguments: [String] = [],
         environment: [String: String] = [:],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        framesErrors: Bool = false
     ) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
+        self.framesErrors = framesErrors
     }
 
     /// The child's whole environment: the parent's, with this command's

@@ -66,6 +66,13 @@ public struct GraphScreen: View {
                 }
             }
             Divider()
+            // What the last run on this graph said on stderr, as printed (GUI
+            // M22); its toasts are the run's last line and a dropped node's.
+            if let said = model.doneNotes, said.graph == model.graph {
+                SaidCard(title: said.title, lines: said.notes.shown) { model.dismissNotes() }
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.top, Spacing.m)
+            }
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     HStack {
@@ -527,6 +534,16 @@ struct NewGraphSheet: View {
     let graph = GraphPreview.graph()
     GraphScreen(model: graph, shell: GraphPreview.shell())
         .frame(width: 1100, height: 520)
+        .task {
+            await graph.connect(binary: previewBinary)
+            graph.rebuild()
+        }
+}
+
+#Preview("A rebuild that left a note") {
+    let graph = GraphPreview.builtWithANote()
+    GraphScreen(model: graph, shell: GraphPreview.shell())
+        .frame(width: 1100, height: 620)
         .task {
             await graph.connect(binary: previewBinary)
             graph.rebuild()

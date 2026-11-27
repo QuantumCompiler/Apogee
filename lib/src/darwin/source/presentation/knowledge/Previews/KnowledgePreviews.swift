@@ -126,6 +126,36 @@ enum KnowledgePreview {
         CollectionsViewModel(runner: runner, starter: PreviewJobs(said: said))
     }
 
+    /// The recorded ingest into `my notes`, a name the config can't hold, in
+    /// its sandbox: its store listed and read back, and the run that said so
+    /// on stderr (GUI M22).
+    static func ingestedWithANote() -> CollectionsViewModel {
+        let runner = PreviewRunner(reads: [
+            (["embed", "list"], KnowledgeDocuments.embedListMyNotes),
+            (["embed", "info", "--", "my notes"], KnowledgeDocuments.embedInfoMyNotes),
+        ])
+        return CollectionsViewModel(
+            runner: runner,
+            starter: recordedRun(stdout: KnowledgeDocuments.ingestUnregistrableOut, stderr: KnowledgeDocuments.ingestUnregistrableErr))
+    }
+
+    /// That ingest, run as its sheet runs it, and its end landed.
+    static func ingestTheNote(_ collections: CollectionsViewModel) async {
+        await collections.connect(binary: previewBinary)
+        collections.newIngest()
+        collections.ingestForm.collection = "my notes"
+        collections.ingestForm.path = "/Users/someone/docs/a note.txt"
+        collections.ingest()
+    }
+
+    /// The records over the recorded capture its suite's verifier validated,
+    /// listed after it as that sandbox listed them (GUI M22).
+    static func capturedWithANote() -> RecordsViewModel {
+        RecordsViewModel(
+            runner: PreviewRunner(reads: [(["knowledge", "list"], KnowledgeDocuments.knowledgeListValidated)]),
+            starter: recordedRun(stdout: KnowledgeDocuments.captureValidatedOut, stderr: KnowledgeDocuments.captureValidatedErr))
+    }
+
     /// The collections read, and `notes` -- the recorded one -- chosen.
     static func openNotes(_ collections: CollectionsViewModel) async {
         await collections.connect(binary: previewBinary)

@@ -1,8 +1,9 @@
 import type { Preset } from '../../../infrastructure/process/Preset'
+import type { Rules } from '../../../infrastructure/process/StandInChild'
 import { composeFiles, composePlaceRules, tidesFiles, withComposeFiles } from '../../compose/Previews/ComposeWorlds'
 import { consoleRules } from '../../console/Previews/ConsolePreset'
-import { graphPlaceRules } from '../../graph/Previews/GraphWorlds'
-import { knowledgePlaceRules } from '../../knowledge/Previews/KnowledgeWorlds'
+import { graphNotedRules, graphPlaceRules } from '../../graph/Previews/GraphWorlds'
+import { knowledgeNotedRules, knowledgePlaceRules } from '../../knowledge/Previews/KnowledgeWorlds'
 import { libraryPlaceRules, playTicks, withLibraryFolders, withLibraryWorld } from '../../library/Previews/LibraryWorlds'
 import type { LibraryPreset } from '../../library/Previews/LibraryWorlds'
 import { saveTicks } from '../../library/ViewModels/DefinitionEditor'
@@ -176,6 +177,21 @@ function placePreset(route: string): (options: PresetOptions) => Preset {
 }
 
 /**
+ * A preset of GUI M22's: a Knowledge or Code graph run that left a note --
+ * the place over every preset's answers and the noted sandbox's (`noted`,
+ * the built CLI's run and what its sandbox read back after it), the
+ * Streaming session at its starting frame behind it. `start` is how many
+ * ticks a still frame stands in: the run's recording played to its end.
+ */
+function notedPreset(route: string, start: number, noted: () => Required<Pick<Rules, 'reads' | 'jobs'>>): (options: PresetOptions) => Preset {
+  return ({ still, apogee }) => {
+    const behind = streamingRules('start')
+    const rules = noted()
+    return { rules: { ...behind, reads: [...behind.reads, ...rules.reads], jobs: rules.jobs }, route, clock: { start, still }, apogee }
+  }
+}
+
+/**
  * The Suites preset (design 1p): the place over every preset's answers, the
  * Streaming session at its starting frame behind it, as the Knowledge and
  * Code graph presets keep it (composed here, since `suites` may not import
@@ -284,7 +300,8 @@ function modelling(build: (options: PresetOptions) => Preset): (options: PresetO
  * the five Compose presets in the old order, `compose:differs` among them;
  * 1m's `voice`; 1n's six Library and four Review presets in the old
  * order; 1o's three Knowledge and three Code graph presets in the old order,
- * `knowledge:mixed` and `graph:refused` among them; 1p's Suites preset and
+ * `knowledge:mixed` and `graph:refused` among them, each place's followed by
+ * GUI M22's runs that left a note; 1p's Suites preset and
  * its eight Tasks and New task presets in the old order; each feature item
  * adds its own here. Every one
  * carries the Sessions place's reads, since the list shows on every screen
@@ -362,9 +379,12 @@ export const presets: Readonly<Record<string, (options: PresetOptions) => Preset
   knowledge: listing(placePreset('knowledge')),
   'knowledge:collections': listing(placePreset('knowledge:collections')),
   'knowledge:mixed': listing(placePreset('knowledge:mixed')),
+  'knowledge:ingested-with-a-note': listing(notedPreset('knowledge:ingested-with-a-note', 3, knowledgeNotedRules)),
+  'knowledge:captured-with-a-note': listing(notedPreset('knowledge:captured-with-a-note', 16, knowledgeNotedRules)),
   graph: listing(placePreset('graph')),
   'graph:prose': listing(placePreset('graph:prose')),
   'graph:refused': listing(placePreset('graph:refused')),
+  'graph:built-with-a-note': listing(notedPreset('graph:built-with-a-note', 12, graphNotedRules)),
   suites: listing(suitesPreset),
   tasks: listing(tasksPreset('tasks')),
   'tasks:denied': listing(tasksPreset('tasks:denied', 36)),

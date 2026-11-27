@@ -343,14 +343,15 @@ describe('the presets', () => {
     const baseline = JSON.parse(readFileSync(join(prototype, 'parity/baseline.json'), 'utf8')) as { presets: string[] }
     const presets = newPresets()
     expect(counterpartProblems(baseline.presets, presets)).toEqual([])
-    expect(presets.filter((preset) => !baseline.presets.includes(preset))).toEqual(['training:regimes', 'settings:roles', 'settings:web', 'settings:memory', 'settings:keyboard'])
+    expect(presets.filter((preset) => !baseline.presets.includes(preset))).toEqual(['training:regimes', 'knowledge:ingested-with-a-note', 'knowledge:captured-with-a-note', 'graph:built-with-a-note', 'settings:roles', 'settings:web', 'settings:memory', 'settings:keyboard'])
   })
 
   test('the pairs: each preset in each mode 1c kept, the new presets at installed, and the 10 rebuilt boards at each prop value 1c shot', () => {
     const baseline = JSON.parse(readFileSync(join(prototype, 'parity/baseline.json'), 'utf8')) as Pick<Baseline, 'presets' | 'modes'>
     const pairs = pairsOf(baseline, newPresets())
     const screens = pairs.filter((pair) => pair.kind === 'screen')
-    expect(screens).toHaveLength(97 + 5)
+    // 1c's 97, then the presets the new app adds: 1j's and 1i's five, and GUI M22's three runs that left a note.
+    expect(screens).toHaveLength(97 + 8)
     expect(pairs.find((pair) => pair.id === 'library@config-typo')).toMatchObject({ preset: 'library', mode: 'config-typo', old: { image: 'screens/library@config-typo.png' } })
     expect(pairs.find((pair) => pair.id === 'training:regimes@installed')).toMatchObject({ old: { start: 'training', click: 'Regimes' } })
     expect(pairs.find((pair) => pair.id === 'settings:roles@installed')?.old.image).toBeUndefined()

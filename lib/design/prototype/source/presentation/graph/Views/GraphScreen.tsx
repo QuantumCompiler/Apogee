@@ -4,6 +4,7 @@ import type { CodeFace, ProseFace } from '../ViewModels/GraphFaces'
 import { GraphLayout } from '../ViewModels/GraphLayout'
 import type { GraphViewModel } from '../ViewModels/GraphViewModel'
 import { Icon } from '../../styles/Components/Icon'
+import { SaidCard } from '../../styles/Components/SaidCard'
 
 const mono = { fontSize: 'var(--t-meta)', color: 'var(--text-tertiary)' } as const
 const accent = { color: 'var(--status-accent)' } as const
@@ -72,6 +73,12 @@ export function GraphScreen({ model }: { readonly model: GraphViewModel }) {
           ) : null}
         </div>
       </header>
+      {/* What the last run on this graph said on stderr, as printed (GUI M22); its toast is the run's last line. */}
+      {face.notes.shown ? (
+        <div style={{ padding: '4px 16px 0' }}>
+          <SaidCard title={face.notes.title} lines={face.notes.lines} dismiss={() => model.dismissNotes()} />
+        </div>
+      ) : null}
       {face.gone.shown ? (
         <div style={{ flex: '1 1 0', display: 'grid', placeItems: 'center', padding: 32, textAlign: 'center' }}>
           {/* With no apogee the canvas stands empty: the old place has no missing state. */}

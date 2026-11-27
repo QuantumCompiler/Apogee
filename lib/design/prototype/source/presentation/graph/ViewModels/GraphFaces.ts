@@ -110,9 +110,18 @@ export interface MoreItemFace {
 }
 
 /** The place. */
+/** What the CLI said of a finished run on stderr, on the said-card (GUI M22): the Mac's `doneNotes`, each line as printed. */
+export interface NotesFace {
+  readonly shown: boolean
+  readonly title: string
+  readonly lines: readonly string[]
+}
+
 export interface GraphFace {
   /** The header's line: the graph's counts, as the old header says them; `''` with none read. */
   readonly header: { readonly line: string }
+  /** The last run's notes, for the graph shown (GUI M22). */
+  readonly notes: NotesFace
   readonly views: ReadonlyArray<{ readonly view: GraphView; readonly label: string; readonly current: boolean }>
   readonly rebuild: { readonly enabled: boolean }
   readonly findCommunities: boolean

@@ -1,5 +1,6 @@
 import { BoundedTail } from './BoundedTail'
 import { ChildExit } from './ChildExit'
+import { LineFramer } from './LineFramer'
 import { StandInFolders } from './StandInFolders'
 import type { FolderWrite, Folders } from './StandInFolders'
 
@@ -136,6 +137,8 @@ export interface ReplayRules {
   readonly resumeFrom: FolderWrite | undefined
   /** The stops another call may ask of it (design 1p); none unless named. */
   readonly asked: readonly AskedStop[]
+  /** Its stderr as lines, every one, as the Mac's supervisor frames a job's stderr beside its tail (GUI M22): where a job's notes are read. */
+  readonly errors: readonly string[]
 }
 
 /**
@@ -300,7 +303,8 @@ export class StandInChild {
     if (this.apogee === 'config-typo' && !StandInChild.configFree.some((prefix) => prefix.every((word, index) => args[index] === word))) {
       const verb = args[0]
       const refusal = verb === undefined ? this.modes.configTypoRefusal : this.modes.configTypoRefusal.replace(/^apogee [^:\s]+:/, `apogee ${verb}:`)
-      return { started: true, run: StandInChild.captured({ stderr: refusal, exit: 1 }), replay: StandInChild.replay({}) }
+      const refused: Answer = { stderr: refusal, exit: 1 }
+      return { started: true, run: StandInChild.captured(refused), replay: StandInChild.replay(refused) }
     }
     const rule = StandInChild.longestPrefix(this.rules[kind] ?? [], args)
     if (!rule) {
@@ -356,7 +360,7 @@ export class StandInChild {
 
   /** An answer's replay rules, each as 1d replayed it unless the answer names it. */
   static replay(answer: Answer): ReplayRules {
-    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false, writes: answer.writes ?? [], resumeFrom: undefined, asked: answer.asked ?? [] }
+    return { exitAfter: answer.exitAfter ?? 0, holdAt: answer.holdAt, freeze: answer.freeze, continuations: answer.continuations, cancelled: answer.cancelled, busy: answer.busy ?? false, writes: answer.writes ?? [], resumeFrom: undefined, asked: answer.asked ?? [], errors: LineFramer.lines(answer.stderr ?? '') }
   }
 
   /** Logs what nobody recorded, as `<kind>: <what>`: a call, or a chat's turn past its recording. */

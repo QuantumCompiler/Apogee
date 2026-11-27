@@ -264,5 +264,44 @@ Raw conversation: (unavailable)
     static let knowledgeInfoRawNull = #"""
 {"decision":"Remove the cancel button from checkout.","discipline":"ux","downstream_link":"","id":"kr-20261027T015935Z-e9ccd8","intent":"We dropped the cancel button because testers kept mistaking it for back.","provenance":{"attribution":"Ada Lovelace","source":"meeting"},"raw":null,"raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261027T015935Z-e9ccd8.md","status":"shipped","timestamp":"2026-10-27T01:59:35.223139Z"}
 """#
+    /// tests/business/jobs/Fixtures/embed-list-my-notes.json
+    static let embedListMyNotes = #"""
+{"data":[{"chunks":1,"name":"my notes","sources":1},{"chunks":1,"name":"notes","sources":1}],"object":"list"}
+"""#
+    /// tests/business/jobs/Fixtures/embed-info-my-notes.json
+    static let embedInfoMyNotes = #"""
+{"chunks":1,"collection":"my notes","index":"ok","path":"/Users/someone/.apogee/embeddings/my notes.db","schema":8,"sources":["a note.txt"],"vectors":null}
+"""#
+    /// tests/business/jobs/Fixtures/embed-ingest-unregistrable.out
+    static let ingestUnregistrableOut = #"""
+1 file(s), 1 chunk(s)
+"""#
+    /// tests/business/jobs/Fixtures/embed-ingest-unregistrable.err
+    static let ingestUnregistrableErr = #"""
+apogee embed: could not register 'my notes' in config -- collection name 'my notes' is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not null
+"""#
+    /// tests/business/jobs/Fixtures/knowledge-capture-validated.out
+    static let captureValidatedOut = #"""
+Captured kr-20261127T043715Z-be8a6d
+Intent:      Testers kept mistaking the cancel button for back.
+Decision:    Remove the cancel button.
+Status:      shipped
+Discipline:  ux
+Link:        PROJ-42
+Source:      meeting
+Attribution: -
+Raw:         /Users/someone/.apogee/knowledge/raw/kr-20261127T043715Z-be8a6d.md
+
+Stored in "knowledge" (retriever: lexical) -- searchable by text; no vector written
+registered 'knowledge' in /Users/someone/.apogee/config/config.json
+"""#
+    /// tests/business/jobs/Fixtures/knowledge-capture-validated.err
+    static let captureValidatedErr = #"""
+apogee knowledge: validated by utility (checker): the record agrees with its source
+"""#
+    /// tests/business/jobs/Fixtures/knowledge-list-validated.json
+    static let knowledgeListValidated = #"""
+{"data":[{"decision":"Remove the cancel button.","discipline":"ux","downstream_link":"PROJ-42","id":"kr-20261127T043715Z-be8a6d","intent":"Testers kept mistaking the cancel button for back.","provenance":{"source":"meeting"},"raw_ref":"/Users/someone/.apogee/knowledge/raw/kr-20261127T043715Z-be8a6d.md","status":"shipped","timestamp":"2026-11-27T04:37:15.227671Z"}],"db":"knowledge","object":"list"}
+"""#
 }
 #endif

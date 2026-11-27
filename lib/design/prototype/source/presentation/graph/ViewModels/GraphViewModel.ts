@@ -1,3 +1,4 @@
+import type { JobNotes } from '../../../business/jobs/JobNotes'
 import { JobProgress } from '../../../business/jobs/JobProgress'
 import type { JobRunning, JobStarting } from '../../../business/jobs/SupervisedJob'
 import { CommandOutcome } from '../../../business/reads/CommandRunning'
@@ -109,6 +110,8 @@ export class GraphViewModel extends Observable {
   refused: string | undefined = undefined
   /** A rebuild or a merge running now. */
   building: JobProgress | undefined = undefined
+  /** What the last run said on stderr in the CLI's house voice, for the graph it named, until Dismiss, the next run or another graph shown (GUI M22). */
+  doneNotes: { readonly graph: string; readonly title: string; readonly notes: JobNotes } | undefined = undefined
   moreOpen = false
   /** The save panel's kind and file, while it is open. */
   saving: { readonly kind: SaveKind; readonly graph: string; readonly file: string } | undefined = undefined
@@ -223,6 +226,7 @@ export class GraphViewModel extends Observable {
   async show(view: GraphView): Promise<void> {
     this.closeMore()
     this.view = view
+    if (this.doneNotes?.graph !== this.graph) this.doneNotes = undefined
     this.selected = view === 'functions' ? this.world?.functionsStart : view === 'files' ? this.world?.filesStart : undefined
     this.changed()
     await this.refresh()
@@ -249,6 +253,12 @@ export class GraphViewModel extends Observable {
     this.refused = name
     this.changed()
     this.ask?.('explainRefused')
+  }
+
+  /** The notes' card dismissed (GUI M22). */
+  dismissNotes(): void {
+    this.doneNotes = undefined
+    this.changed()
   }
 
   /** The alert's OK: the refusal's Clear -- the refused node's selection goes with it, the picture stays. */
@@ -396,7 +406,7 @@ export class GraphViewModel extends Observable {
     if (!this.dedupeMerges || binary === undefined) return
     this.dedupe = { case: 'merging' }
     this.changed()
-    this.run(['graph', 'dedupe', this.dedupeGraph], (progress) => {
+    this.run(['graph', 'dedupe', this.dedupeGraph], this.dedupeGraph, 'What the merge said', (progress) => {
       const status = progress.status
       this.dedupe = status.case === 'done' ? { case: 'merged', text: progress.notices.join('\n') } : { case: 'failed', message: status.case === 'failed' ? status.message : 'the merge was stopped' }
     })
@@ -444,7 +454,7 @@ export class GraphViewModel extends Observable {
   rebuild(): void {
     const graph = this.graph
     const sourced = (this.stats.get(graph)?.sources.length ?? 0) > 0
-    this.run(sourced ? ['graph', 'update', graph] : ['graph', 'build', graph], (progress) => {
+    this.run(sourced ? ['graph', 'update', graph] : ['graph', 'build', graph], graph, 'What the rebuild said', (progress) => {
       if (progress.status.case === 'done') {
         this.deleted.delete(graph)
         this.isOvertaken = false
@@ -453,10 +463,11 @@ export class GraphViewModel extends Observable {
     })
   }
 
-  /** Runs `args` supervised, then reads the graph again and lands what it said. */
-  private run(args: readonly string[], ended: (progress: JobProgress) => void): void {
+  /** Runs `args` supervised, then reads the graph again and lands what it said; a run that succeeded keeps its stderr's notes under `title` for `named`, the graph it ran on (GUI M22). */
+  private run(args: readonly string[], named: string, title: string, ended: (progress: JobProgress) => void): void {
     const binary = this.binary
     if (binary === undefined || this.job !== undefined) return
+    this.doneNotes = undefined
     const progress = new JobProgress()
     this.building = progress
     const job = this.starter.startJob(binary, args, false)
@@ -469,6 +480,7 @@ export class GraphViewModel extends Observable {
       }
       this.job = undefined
       this.building = undefined
+      if (progress.status.case === 'done' && !progress.notes.isEmpty) this.doneNotes = { graph: named, title, notes: progress.notes }
       ended(progress)
       await this.refresh()
     })()
@@ -506,6 +518,7 @@ export class GraphViewModel extends Observable {
     const prose = this.world?.prose ?? ''
     return {
       header: { line: this.headerLine },
+      notes: this.doneNotes !== undefined && this.doneNotes.graph === this.graph ? { shown: true, title: this.doneNotes.title, lines: this.doneNotes.notes.shown } : { shown: false, title: '', lines: [] },
       views: views.map(([view, label]) => ({ view, label: view === 'prose' ? `${label} · ${prose}` : label, current: view === this.view })),
       rebuild: { enabled: this.binary !== undefined && this.building === undefined },
       findCommunities: this.view === 'prose' && gone === undefined,

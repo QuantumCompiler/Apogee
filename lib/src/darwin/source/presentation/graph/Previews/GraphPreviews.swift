@@ -94,6 +94,20 @@ enum GraphPreview {
         reads: [(["graph", "stats"], #"{"built":false,"graph":"notes","kind":"collection","object":"graph.stats"}"#)],
         commands: [(["__complete", "graph", "stats"], "notes\n")])
 
+    /// The collection `my notes`, a name the config can't hold, in the
+    /// recorded sandbox: its graph built by the recorded run, then read back
+    /// -- its stats and its report -- as the place reads them (GUI M22).
+    static func builtWithANote() -> GraphViewModel {
+        let runner = PreviewRunner(
+            reads: [
+                (["graph", "stats"], GraphDocuments.statsMyNotes),
+                (["graph", "report"], GraphDocuments.reportMyNotes),
+            ],
+            commands: [(["__complete", "graph", "stats"], "my notes\n")])
+        return GraphViewModel(
+            runner: runner, starter: recordedRun(stdout: GraphDocuments.buildUnregistrableOut, stderr: GraphDocuments.buildUnregistrableErr))
+    }
+
     /// No graph built: the completion names none.
     static let none = PreviewRunner(reads: [], commands: [(["__complete", "graph", "stats"], "")])
 

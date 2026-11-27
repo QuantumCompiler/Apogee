@@ -11,7 +11,8 @@ function unread(value: unknown, at: string, depth = 0): string[] {
   if (depth > 9) return []
   if (value === undefined || value === null) return [at]
   if (typeof value === 'number') return Number.isNaN(value) ? [at] : []
-  if (typeof value === 'string') return /undefined|NaN|null/.test(value) ? [`${at} = ${value.slice(0, 60)}`] : []
+  // A note on the said-card is the CLI's own sentence, printed (GUI M22): its `and not null` is the CLI's word, never an unread value.
+  if (typeof value === 'string') return /undefined|NaN|null/.test(value) && !/\.notes\.lines\.\d+$/.test(at) ? [`${at} = ${value.slice(0, 60)}`] : []
   if (typeof value === 'object') return Object.entries(value).flatMap(([key, inner]) => unread(inner, `${at}.${key}`, depth + 1))
   return []
 }
@@ -126,7 +127,7 @@ async function walk(app: AppViewModel, name: string, pressSuite = false): Promis
 }
 
 describe("the presets: the old prototype's 30-tick check's successor", () => {
-  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, 1n’s six Library and four Review presets in the old order, 1o’s three Knowledge and three Code graph presets in the old order, and 1p’s Suites preset and eight Tasks and New task presets in the old order', () => {
+  test('the table holds the monitor, the session’s thirteen in the old data-props order -- 1u’s four plain ones and 1v’s nine scenarios and states -- 1g’s execute and console, 1h’s nine Models presets, 1i’s nine Settings presets in the old order and its four new ones, 1j’s nine Training presets in the old order and its new training:regimes, 1k’s four Video presets in the old order, 1l’s five Compose presets in the old order, 1m’s voice, 1n’s six Library and four Review presets in the old order, 1o’s three Knowledge and three Code graph presets in the old order, each place’s followed by GUI M22’s runs that left a note, and 1p’s Suites preset and eight Tasks and New task presets in the old order', () => {
     expect(Object.keys(presets)).toEqual([
       'monitor',
       'chat',
@@ -199,9 +200,12 @@ describe("the presets: the old prototype's 30-tick check's successor", () => {
       'knowledge',
       'knowledge:collections',
       'knowledge:mixed',
+      'knowledge:ingested-with-a-note',
+      'knowledge:captured-with-a-note',
       'graph',
       'graph:prose',
       'graph:refused',
+      'graph:built-with-a-note',
       'suites',
       'tasks',
       'tasks:denied',

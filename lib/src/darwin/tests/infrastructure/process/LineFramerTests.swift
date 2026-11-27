@@ -29,4 +29,21 @@ struct LineFramerTests {
         #expect(framer.finish() == "tail")
         #expect(framer.finish() == nil)
     }
+
+    @Test("a line past the cap is cut to its first bytes, its rest dropped up to its newline, and the next line whole (GUI M22)")
+    func capped() {
+        var framer = LineFramer(maxLine: 4)
+        #expect(framer.push(Data("abcdefgh".utf8)) == [])
+        #expect(framer.push(Data("ij\nkl\n".utf8)) == ["abcd", "kl"])
+        #expect(framer.push(Data("mnopqrs".utf8)) == [])
+        #expect(framer.finish() == "mnop")
+        #expect(framer.push(Data("tu\n".utf8)) == ["tu"], "a finished framer starts again whole")
+    }
+
+    @Test("with no cap, a long line is kept whole")
+    func uncapped() {
+        var framer = LineFramer()
+        let long = String(repeating: "x", count: 100_000)
+        #expect(framer.push(Data((long + "\n").utf8)) == [long])
+    }
 }

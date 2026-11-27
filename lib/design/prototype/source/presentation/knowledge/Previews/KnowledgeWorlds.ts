@@ -1,3 +1,10 @@
+import embedInfoMyNotes from '@recorded/business/jobs/Fixtures/embed-info-my-notes.json?raw'
+import ingestUnregistrableErr from '@recorded/business/jobs/Fixtures/embed-ingest-unregistrable.err?raw'
+import ingestUnregistrableOut from '@recorded/business/jobs/Fixtures/embed-ingest-unregistrable.out?raw'
+import embedListMyNotes from '@recorded/business/jobs/Fixtures/embed-list-my-notes.json?raw'
+import captureValidatedErr from '@recorded/business/jobs/Fixtures/knowledge-capture-validated.err?raw'
+import captureValidatedOut from '@recorded/business/jobs/Fixtures/knowledge-capture-validated.out?raw'
+import knowledgeListValidated from '@recorded/business/jobs/Fixtures/knowledge-list-validated.json?raw'
 import collectionInfo from '@recorded/business/reads/Fixtures/collection-info.json?raw'
 import collectionInfoMixed from '@recorded/business/reads/Fixtures/collection-info-vectors-mixed.json?raw'
 import collectionQuery from '@recorded/business/reads/Fixtures/collection-query.txt?raw'
@@ -9,7 +16,7 @@ import collectionInfoKnowledge from '../../../../fixtures/business/reads/collect
 import collectionsList from '../../../../fixtures/business/reads/collections-list-handmade.json?raw'
 import knowledgeInfoRaw from '../../../../fixtures/business/reads/knowledge-info-raw-1e2354-handmade.txt?raw'
 import type { Rules } from '../../../infrastructure/process/StandInChild'
-import { knowledgeRules } from './KnowledgeWorldRules'
+import { knowledgeNoteRules, knowledgeRules } from './KnowledgeWorldRules'
 import type { Lookup } from './KnowledgeWorldRules'
 
 export * from './KnowledgeWorldRules'
@@ -44,6 +51,14 @@ const recordings: Readonly<Record<string, string>> = {
   'knowledge-info-raw-1e2354-handmade.txt': knowledgeInfoRaw,
   'collections-list-handmade.json': collectionsList,
   'collection-info-knowledge-handmade.json': collectionInfoKnowledge,
+  // GUI M22: the built CLI's runs that left a note, and what their sandboxes read back after them.
+  'embed-ingest-unregistrable.out': ingestUnregistrableOut,
+  'embed-ingest-unregistrable.err': ingestUnregistrableErr,
+  'embed-list-my-notes.json': embedListMyNotes,
+  'embed-info-my-notes.json': embedInfoMyNotes,
+  'knowledge-capture-validated.out': captureValidatedOut,
+  'knowledge-capture-validated.err': captureValidatedErr,
+  'knowledge-list-validated.json': knowledgeListValidated,
 }
 
 /** A file's text, by its name; a name no import holds is refused, naming it. */
@@ -56,6 +71,11 @@ export function recording(name: string): string {
 /** What Knowledge reads and runs on every preset (`Presets.ts`' `modelling`). */
 export function knowledgePlaceRules(look: Lookup = recording): Required<Pick<Rules, 'reads' | 'commands'>> {
   return knowledgeRules(look)
+}
+
+/** What a noted preset reads and runs beside the place's (GUI M22): `Presets.ts`' `knowledge:ingested-with-a-note` and `knowledge:captured-with-a-note`. */
+export function knowledgeNotedRules(look: Lookup = recording): Required<Pick<Rules, 'reads' | 'jobs'>> {
+  return knowledgeNoteRules(look)
 }
 
 /** The one raw conversation the CLI recorded, of another record: its list and its `knowledge info --raw`, for the preview of a recorded conversation. */

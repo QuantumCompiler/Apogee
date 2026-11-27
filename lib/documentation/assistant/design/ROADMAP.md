@@ -39,3 +39,7 @@ Opened 2026-11-14 (the user's idea): the design rebuilt in React and TypeScript 
 ## In progress
 
 *(Nothing planned for the design in v0.2.2 yet.)*
+
+## Unspecced ideas
+
+- **Knowledge's ingest and capture sheets** — the Apple apps' M22 ([their MILESTONES](../darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person)) ported Collections' ingest and Records' capture runs to supervised runs over the stand-in (`runIngest`, `runCapture`), drawn by the presets `knowledge:ingested-with-a-note` and `knowledge:captured-with-a-note`; the header's Ingest… and Capture… still say the old sheet toasts, since the old prototype drew no sheet. Drawing the Mac's two sheets would make the runs reachable by click.

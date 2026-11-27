@@ -44,8 +44,10 @@ public enum ChildError: Error, Equatable, CustomStringConvertible {
 
 /// A child process, held by its three pipes and nothing else.
 ///
-/// Its stdout arrives as lines; its stderr is captured into a bounded tail,
-/// never shown; its exit is awaited. Stopping it is the caller's escalation:
+/// Its stdout arrives as lines; its stderr is captured into a bounded tail
+/// -- and, when its command asks, framed into lines as well, for a reader
+/// that decides what of it to show (GUI M22) -- never shown raw; its exit is
+/// awaited. Stopping it is the caller's escalation:
 /// close its input first, then `terminate`, then `kill` -- each signal to
 /// its whole process group, as a terminal's reach its foreground job's
 /// (GUI 4c), so what the child started ends with it.
@@ -57,6 +59,13 @@ public protocol RunningChild: AnyObject, Sendable {
 
     /// The last of what it wrote to stderr.
     var stderrTail: BoundedTail { get }
+
+    /// Every line it wrote to stderr, in order, each capped -- `nil` unless
+    /// its command asked (`ChildCommand.framesErrors`). Finished when stderr
+    /// closes, or shortly after the exit when something it started holds it
+    /// open, its last unended line said first, and always before
+    /// `waitForExit` answers (GUI M22).
+    var errorLines: AsyncStream<String>? { get }
 
     var processIdentifier: Int32 { get }
 
@@ -90,6 +99,9 @@ extension RunningChild {
     /// A child with no group of its own to watch: nothing of it runs beyond
     /// what `waitForExit` says.
     public var groupRunning: Bool { false }
+
+    /// A child that frames no stderr: its tail is all there is (GUI M22).
+    public var errorLines: AsyncStream<String>? { nil }
 }
 
 /// Starts children. The app's is `ProcessSpawner`; a test may hand in its own.

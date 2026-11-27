@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Presentation › a finished run's notes in `graph build`/`update`/`communities`, `embed ingest`, `knowledge capture`/`reindex` and `agents delete`, and the one writer (`cli/notes.h`) |
 | **Labels** | `house-voice` `stderr` `graph` `knowledge` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [darwin M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md) |
+| **Blocked by** | — |
 | **Blocks** | [M60](the-models-verbs-say-their-notes-on-stderr.md) |
 | **Reporter** | The APP-M21 and APP-M22 probes' CLI asides (2026-11-26), then a sandboxed investigation, two skeptics and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -355,7 +355,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
 | How is the paid-embedder note tested at CLI level? | `[default]` | The factory honours `"metered": true` in a mock embedder's `model_path` script, as it already does for a generator mock (`factory.cpp:133`). This is the purpose `mock.h:245-246` states. |
 | How is the rule enforced? | `[default]` | The per-site stdout/stderr tests are the guard. A narrow source check covers the `[tag] ` voice and the `warning:` literal on `std::cout`, with a named allow-list. A literal check can't see notes written from variables (`embed.cpp:419`, `:422`; `knowledge.cpp:549`), so it is a backstop only. |
 | How do a text job's notes reach a remote device under CLI-59d? | `[default]` | CLI-59d's text relay also relays `apogee <verb>: ` stderr lines as `notice` events as they arrive. This needs no protocol change, and the stdout lines are already relayed. It is recorded in CLI-59d's document as a constraint (2026-11-26), because a 64 KiB tail loses a head note after roughly 1,150 chunks (extrapolated from `b1`). |
-| How does the Mac app show a moved note? | `(consumed decision)` | [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md): its jobs core keeps a successful run's `apogee <verb>: ` stderr lines, and Collections, Records and Graph show them on a card. The toast stays the outcome line. |
+| How does the Mac app show a moved note? | `(consumed decision)` | [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person): its jobs core keeps a successful run's `apogee <verb>: ` stderr lines, and Collections, Records and Graph show them on a card. The toast stays the outcome line. |
 | What do the HTTP graph jobs say for the same facts? | `(consumed decision)` | [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md): an additive `warnings` field on the job results, in the CLI's words from one producer. |
 | What does the writer do while a job stream is open? | `(consumed decision)` | [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md): it says the note as a `notice` instead of on stderr. |
 
@@ -375,7 +375,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
 
 - **The HTTP graph jobs' missing facts and the mixed-graph 404**: [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md).
 - **The models family** (`models pull`, `convert`, `quantize`, `migrate`, the chain summary) **and the writer's job-stream branch**: [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md).
-- **The app's card** for these notes, and every other done path in the app: [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md) and its follow-up. Re-recording APP-M22's `graph-update-source-gone` guard fixture as a note is the app queue's chore; its rule needs no code change.
+- **The app's card** for these notes, and every other done path in the app: [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person) and its follow-up. Re-recording APP-M22's `graph-update-source-gone` guard fixture as a note is the app queue's chore; its rule needs no code change.
 - **Notes already on stderr but not in the house voice**, which APP-M22's rule won't keep. Their stream is right; their voice is a separate seam, not in this item:
   - `analyze.cpp:763`, `[apogee] warning: could not save the report -- `;
   - `review_cmd.cpp:81`, `[review] skipped: `;
@@ -393,7 +393,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
 
 ## Links
 
-- **Blocked by:** [darwin M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md) · **Blocks:** [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md)
+- **Blocked by:** — (darwin M22 [shipped 2026-11-26](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person)) · **Blocks:** [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md)
 - **Sibling:**
   - [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), the same seam's HTTP half;
   - [CLI-M60](the-models-verbs-say-their-notes-on-stderr.md), the models family on this item's writer;
@@ -401,7 +401,7 @@ Hermetic: mock backends, a scratch home, no real model and no network. Each fixt
 - **Relates to:**
   - [CLI-M46](a-collection-the-config-cannot-hold-is-refused-before-it-is-written.md), built one after the other with this item: its notes keep the house voice, and they are routed through `say_note` by whichever lands second;
   - [CLI-M45](a-collection-is-named-not-pathed-at-every-reader.md), which shares `embed.cpp` and `graph.cpp` with no gate;
-  - [APP-M22](../../darwin/macos/maintenance/a-jobs-notes-reach-the-person.md), whose deferred stdout question this item answers, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
+  - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose deferred stdout question this item answers, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [APP-7c](../../darwin/v0.2.4/every-place-against-a-server.md), which reads a remote job's notes;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose Constraints carry the relay rule (2026-11-26);
   - CLI-58b (v0.2.2, [graphs and knowledge served](../v0.2.2/mcp-serve-graphs-and-knowledge.md)), which adds `graph list` to `graph.cpp` and shares the file, not the seam.
