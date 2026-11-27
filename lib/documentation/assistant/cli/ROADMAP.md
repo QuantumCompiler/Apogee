@@ -342,7 +342,7 @@ Opened 2026-11-07 from that day's spike (the user's idea: a Claude mod or MCP se
 
 The release's self-update track *(track 64, opened 2026-11-26, the user's call, placed here)*: `apogee update`, deferred out of v0.1.0 (2026-09-01) and carried in this file's ideas until now, becomes the third install path beside the two installers.
 
-- [ ] **`apogee update`** *(64a — [backlog](../../backlog/cli/v0.2.2/apogee-update.md))* — this target's archive from the latest release (or the one `--version` names), checked against GitHub's published sha256, replaced in place, the install repaired through the new binary's `check --fix` and `bootstrap` as the installers end; `--check` reports without changing anything; a once-a-day notice on a terminal of the release channel, whose default is the user's call.
+- [ ] **`apogee update`** *(64a — [backlog](../../backlog/cli/v0.2.2/apogee-update.md))* — this target's archive from the latest release (or the one `--version` names), checked against GitHub's published sha256, replaced in place, the install repaired through the new binary's `check --fix` and `bootstrap` as the installers end; `--check` reports without changing anything; a once-a-day notice on a terminal of the release channel, on by default (the user's call, 2026-11-26).
 
 ---
 

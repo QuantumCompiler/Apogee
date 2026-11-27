@@ -73,7 +73,7 @@ The shape, in brief:
 - [ ] **Given** Windows, where the binary starts no program, **when** the binary is replaced, **then** the update ends by naming the two commands to run, `apogee check --fix` and `apogee bootstrap`, rather than running them.
 - [ ] **Given** a `dev` or `test` channel binary, **then** `apogee update` is refused, naming `make install MODE=<channel>` as that channel's way to update.
 - [ ] **Given** a binary in a folder the person cannot write, **then** the update is refused naming the path and the installer line, and nothing changes.
-- [ ] **Given** an interactive terminal of the release channel with the notifier on, **when** any command but those on the skip-list ends, **then** at most once in 24 hours it checks for a newer release, and when one is out prints one line on stderr naming it and `apogee update`. It never prints in machine mode, under `--output-format json`, in `serve`, `mcp serve` or `acp`, for `update` or `version`, or off a terminal, and the setting that turns it off is honoured.
+- [ ] **Given** an interactive terminal of the release channel with the notifier on, **when** any command but those on the skip-list ends, **then** at most once in 24 hours it checks for a newer release, and when one is out prints one line on stderr naming it and `apogee update`. It never prints in machine mode, under `--output-format json`, in `serve`, `mcp serve` or `acp`, for `update` or `version`, or off a terminal, and the setting that turns it off is honoured. It is on by default (the Decision log, 2026-11-26).
 - [ ] **Given** the full-screen shell, **then** `update` is carved out with its reason and refused by the exec line in its words; **and given** completion, **then** `update`'s flags complete as every command's do (ADR 0007), `--version` offering nothing rather than making a network read.
 - [ ] **Given** the install-parity gate, **then** a tree updated from the previous release's archive by `apogee update` equals a fresh install's tree.
 
@@ -138,7 +138,6 @@ Hermetic, as every CLI test: a fake release host through an injected client, pla
 
 | Question | Status | Answer |
 |---|---|---|
-| Is the update notifier on by default? | `[user]` | It is the one automatic network read Apogee would make, so it touches the SPEC's "Local by default". **Recommended: on**, only on an interactive terminal of the release channel, at most once a day, one line on stderr; off with `apogee config set update.check false` or `APOGEE_NO_UPDATE_CHECK=1`; said in the README. The other answer is off until the person turns it on, so it never asks. |
 | Does an update run the bootstrap? | `[default]` | Yes, after `check --fix`, as both installers end, skipped by `--minimal` and by `APOGEE_MINIMAL_INSTALL=1`, the installers' own switch. A bootstrap failure is a note, as the installers make it. |
 | May `--version` name an older release? | `[default]` | Yes. At a terminal it asks first; `--yes` answers; with nobody to ask it is refused. The installers already install any named release. |
 | How is the archive unpacked? | `[default]` | In the binary, with no new dependency where the build can avoid one: the `.tar.gz` through a zlib the build already links (libcurl's), and the `.zip`'s stored or deflated entry the same way. If no linked inflater is usable on every CI target, the build raises the dependency as a `[user]` call before adding one. |
@@ -155,6 +154,7 @@ Hermetic, as every CLI test: a fake release host through an injected client, pla
 | 2026-11-26 | Placed in v0.2.2 as its own track, 64, ungated. | the user (asked, of v0.2.2, Maintenance or v0.2.3) |
 | 2026-11-26 | It repairs through the new binary's `check --fix` and seeds nothing itself, and the notifier rides with it, as the ROADMAP's note recorded. | the spec, from the user's recorded note |
 | 2026-11-26 | The download is checked against the sha256 GitHub publishes for each asset before anything is replaced: no release ships a checksum, and the installers check none. | the spec |
+| 2026-11-26 | **The update notifier is on by default**: only on an interactive terminal of the release channel, at most once a day, one line on stderr, naming `apogee update`; off with `apogee config set update.check false` or `APOGEE_NO_UPDATE_CHECK=1`; said in the README. It is the one automatic network read Apogee makes, a request for the release document that sends nothing of the person's. | the user (asked at the start of the v0.2.2 maintenance run) |
 
 ## Out of scope
 

@@ -27,7 +27,7 @@ Outside the release, 28 maintenance items can be picked up any time: the CLI's M
 | 58c | [A lighter tool set for coding hosts](cli/v0.2.2/mcp-serve-coding-host-profile.md) | — |
 | 58d | [Claude can refresh what you list](cli/v0.2.2/mcp-serve-opt-in-refresh.md) | — |
 
-**Track 64, self-update:** `apogee update`, the third install path beside the two installers, with a once-a-day notice. Its one call for you: whether that notice is on by default.
+**Track 64, self-update:** `apogee update`, the third install path beside the two installers, with a once-a-day notice, on by default on a terminal (your call, 2026-11-26).
 
 | # | Item | Waits on |
 |---|---|---|
