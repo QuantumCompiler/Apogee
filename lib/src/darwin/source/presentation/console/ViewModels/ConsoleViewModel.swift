@@ -200,7 +200,8 @@ public final class ConsoleViewModel {
     /// The arguments a line runs: every word the exec line would pass --
     /// the last one too whenever it was begun, an empty `''` or `""` among
     /// them (`say ''` runs `say` with an empty argument) -- without a
-    /// leading `apogee`.
+    /// leading program name: `apogee`, or `apogee-dev` or `apogee-test`, a
+    /// command a dev or test build printed (`Argv.programNames`).
     public static func arguments(_ line: String) -> [String]? {
         try? runs(line).get()
     }
@@ -210,7 +211,8 @@ public final class ConsoleViewModel {
         tokens(line).map { split in
             let begun = split.partialStart < line.unicodeScalars.count
             var all = split.words + (begun ? [split.partial] : [])
-            if all.first == "apogee" { all.removeFirst() }
+            // A command any channel's build printed, pasted (the CLI's M49, M61).
+            if let first = all.first, Argv.programNames.contains(first) { all.removeFirst() }
             return all
         }
     }

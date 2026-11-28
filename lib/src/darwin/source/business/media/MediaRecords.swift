@@ -256,8 +256,9 @@ public enum MediaLibrary {
     /// only at a terminal, which the app is not, and the app's sheet is the
     /// person's answer.
     public static func installCommand(in text: String) -> [String]? {
-        guard let range = text.range(of: "apogee train setup") else { return nil }
-        var words = text[range.lowerBound...].split(whereSeparator: { $0 == " " || $0.isNewline }).map(String.init).dropFirst(3)
+        // The CLI's own binary, whichever channel's it is (its M49, M61).
+        guard let range = Argv.printed(["train", "setup"], in: text) else { return nil }
+        var words = ArraySlice(text[range.upperBound...].split(whereSeparator: { $0 == " " || $0.isNewline }).map(String.init))
         let rebuild = words.first == "--rebuild"
         if rebuild { words = words.dropFirst() }
         guard words.count >= 2, words.first == "--with" else { return nil }

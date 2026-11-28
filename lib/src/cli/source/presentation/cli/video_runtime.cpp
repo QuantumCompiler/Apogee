@@ -8,6 +8,7 @@
 #include "cli/helpers.h"
 #include "cli/job_stream.h"
 #include "cli/train.h"
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::commands {
@@ -21,7 +22,8 @@ std::string install_runtime_set(training::PythonEnv& env, training::RequirementS
         return unfit;
     }
     const std::string name{training::to_string(set)};
-    const std::string remedy = "apogee train setup --with " + name;
+    const std::string remedy = harness::render(
+        {.verbs = {"train", "setup"}, .parts = {harness::option("--with", name, /*greedy=*/true)}});
     std::string packages;
     for (const std::string_view package : training::packages_for(set)) {
         packages += (packages.empty() ? "" : " ") + std::string{package};

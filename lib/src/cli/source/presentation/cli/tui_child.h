@@ -76,6 +76,13 @@ struct ChildOutput {
                                    const std::filesystem::path& binary,
                                    std::vector<std::string> words, std::string heading);
 
+/// `apogee <group> <line>` as the command it would run, said back by the one
+/// renderer (CLI-M61, `render_typed`): the line split by the one splitter,
+/// each word as the renderer says it, in the person's order -- or, for a
+/// line the splitter refuses, the line as typed, which the run then refuses
+/// with its reason.
+[[nodiscard]] std::string typed_command(const std::string& group, const std::string& line);
+
 /// `apogee <group> <line>` from an input row, in `progress`: the line split
 /// by the one splitter. Returns what to say -- that it runs, or why not.
 [[nodiscard]] std::string run_typed(tui::Progress& progress, const RootContext& context,

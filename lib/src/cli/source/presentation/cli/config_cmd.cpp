@@ -820,10 +820,12 @@ void bind_scan(CLI::App& parent, const RootContext& context) {
                 return std::move(added.text);
             });
             std::cout << "added backend '" << row.name << "'"
-                      << (row.embeds ? " -- an embedding model, which answers no chat: 'apogee "
-                                       "config set-default-embedding " +
-                                           row.name + "' points the embedding role at it"
-                                     : std::string{})
+                      << (row.embeds
+                              ? " -- an embedding model, which answers no chat: '" +
+                                    harness::render({.verbs = {"config", "set-default-embedding"},
+                                                     .parts = {harness::operand(row.name)}}) +
+                                    "' points the embedding role at it"
+                              : std::string{})
                       << "\n";
             if (default_set) {
                 std::cout << default_set_words(row.name) << "\n";

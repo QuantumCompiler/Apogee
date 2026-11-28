@@ -70,6 +70,24 @@
 namespace apogee::commands {
 namespace {
 
+/// The train commands this file prints, each by the one renderer (CLI-M61):
+/// a run id or a backend's name is one word, with its `--` when it starts
+/// with a dash.
+[[nodiscard]] std::string chat_with(const std::string& backend) {
+    return harness::render({.verbs = {"chat"}, .parts = {harness::option("-m", backend)}});
+}
+
+[[nodiscard]] std::string rollback_command(const std::string& backend) {
+    return harness::render({.verbs = {"train", "rollback"}, .parts = {harness::operand(backend)}});
+}
+
+/// `train promote <run> --as <backend>`: the person names the backend.
+[[nodiscard]] std::string promote_as_backend(const std::string& run) {
+    return harness::render(
+        {.verbs = {"train", "promote"},
+         .parts = {harness::operand(run), harness::option_placeholder("--as", "<backend>")}});
+}
+
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee train: " << message << "\n";
     // A run streaming (55h) says it as its error too.
@@ -189,9 +207,10 @@ struct Providers {
         name == "mlx" ? training::RequirementSet::Mlx : training::RequirementSet::Peft;
     if (!env.status().has(set)) {
         fail_user("the '" + std::string{name} +
-                  "' requirement set is not installed in the Python environment -- run "
-                  "'apogee train setup --trainer " +
-                  std::string{name} + "'");
+                  "' requirement set is not installed in the Python environment -- run '" +
+                  harness::render({.verbs = {"train", "setup"},
+                                   .parts = {harness::option("--trainer", std::string{name})}}) +
+                  "'");
     }
     const std::filesystem::path scripts = harness::training_scripts_dir();
     const std::filesystem::path script =
@@ -498,9 +517,14 @@ struct PromoteChecks {
                 " has nothing to act on: this promote is gated on run " + manifest.run_id +
                 "'s recorded eval -- only an adapter promote onto an entry whose base is "
                 "quantized scores its candidate where it will serve. Drop it, or score the "
-                "run with 'apogee train eval " +
-                manifest.run_id +
-                (request.suite.empty() ? " --judge <backend>'" : " --suite <path|name>'");
+                "run with '" +
+                harness::render(
+                    {.verbs = {"train", "eval"},
+                     .parts = {harness::operand(manifest.run_id),
+                               request.suite.empty()
+                                   ? harness::option_placeholder("--judge", "<backend>")
+                                   : harness::option_placeholder("--suite", "<path|name>")}}) +
+                "'";
             return checks;
         }
     }
@@ -544,11 +568,13 @@ struct PromoteChecks {
             checks.error =
                 "an adapter promote registers the adapter on an entry that runs the base it "
                 "was trained over, and '" +
-                request.backend +
-                "' is not configured -- add it first ('apogee config add-backend " +
-                request.backend +
-                " --type llamacpp --model-path <base.gguf>', or --type mlx with the base's MLX "
-                "directory), then promote --adapter into it";
+                request.backend + "' is not configured -- add it first ('" +
+                harness::render(
+                    {.verbs = {"config", "add-backend"},
+                     .parts = {harness::operand(request.backend),
+                               harness::option("--type", "llamacpp"),
+                               harness::option_placeholder("--model-path", "<base.gguf>")}}) +
+                "', or --type mlx with the base's MLX directory), then promote --adapter into it";
             return checks;
         }
         if (existing->model_path.empty()) {
@@ -1025,8 +1051,11 @@ struct PromotionHold {
     std::string error;
     if (training::valid_run_id(target.run_id) &&
         training::read_manifest(store.run_dir(target.run_id), error).has_value()) {
-        again = "; promote its run again over these weights: apogee train promote " +
-                target.run_id + " --as " + key + " --adapter";
+        again = "; promote its run again over these weights: " +
+                harness::render(
+                    {.verbs = {"train", "promote"},
+                     .parts = {harness::operand(target.run_id), harness::option("--as", key),
+                               harness::option("--adapter")}});
     }
     if (target.base_sha256.empty()) {
         return version + "'s adapter " + target.adapter_path +
@@ -1405,10 +1434,10 @@ void run_adapter_promote(const harness::Config& config, const std::filesystem::p
     for (const std::string& failed : result.pruned.failed) {
         std::cerr << "apogee train: warning: could not prune " << failed << "\n";
     }
-    std::cout << "\nChat with it:\n  apogee chat -m " << result.backend_key << "\n";
+    std::cout << "\nChat with it:\n  " << chat_with(result.backend_key) << "\n";
     const std::optional<training::VersionLedger> ledger = store.list_versions(result.backend_key);
     if (ledger.has_value() && ledger->kept() > 1) {
-        std::cout << "Roll back if needed:\n  apogee train rollback " << result.backend_key << "\n";
+        std::cout << "Roll back if needed:\n  " << rollback_command(result.backend_key) << "\n";
     }
 }
 
@@ -1494,11 +1523,13 @@ struct ResumeCommand {
     const training::ResumeSpec spec =
         training::find_resume_spec(manifest, config.training.pipelines);
     ResumeCommand out;
-    out.command = "apogee train pipeline resume " + manifest.pipeline_run_id;
+    harness::SuggestedCommand command{.verbs = {"train", "pipeline", "resume"},
+                                      .parts = {harness::operand(manifest.pipeline_run_id)}};
     if (spec.ref.empty()) {
-        out.command += " --pipeline <spec>";
+        command.parts.push_back(harness::option_placeholder("--pipeline", "<spec>"));
         out.problem = spec.problem;
     }
+    out.command = harness::render(command);
     return out;
 }
 
@@ -1551,8 +1582,8 @@ void print_pipeline_summary(const training::PipelineRunManifest& manifest,
     }
     const std::string promotable = manifest.promote_run_id();
     if (!promotable.empty() && manifest.complete()) {
-        std::cout << "\nPromote the last passing stage:\n  apogee train promote " << promotable
-                  << " --as <backend>\n";
+        std::cout << "\nPromote the last passing stage:\n  " << promote_as_backend(promotable)
+                  << "\n";
     }
     // Where its resume starts (57h), unless another process runs it now.
     if (config != nullptr && !operations::resume_stage_text(manifest).empty() &&
@@ -1598,8 +1629,8 @@ void print_pipeline_table(const training::PipelineRunManifest& manifest,
     const bool cycle_pass = training::is_cycle_pass(manifest.pipeline_run_id);
     const std::string promotable = manifest.promote_run_id();
     if (!promotable.empty() && !cycle_pass) {
-        std::cout << "\nPromote the last passing stage:\n  apogee train promote " << promotable
-                  << " --as <backend>\n";
+        std::cout << "\nPromote the last passing stage:\n  " << promote_as_backend(promotable)
+                  << "\n";
     }
     // A live holder's run is its to finish: no resume is offered while it
     // runs (57g).
@@ -2559,8 +2590,13 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
                   << "  adapter:  " << manifest.adapter_dir << "\n"
                   << "  manifest: " << training::manifest_path(request.output_dir).string()
                   << "\n\nGate it, then promote it:\n"
-                  << "  apogee train eval " << request.run_id << " --suite <path|name>\n"
-                  << "  apogee train promote " << request.run_id << " --as <backend>\n";
+                  << "  "
+                  << harness::render(
+                         {.verbs = {"train", "eval"},
+                          .parts = {harness::operand(request.run_id),
+                                    harness::option_placeholder("--suite", "<path|name>")}})
+                  << "\n"
+                  << "  " << promote_as_backend(request.run_id) << "\n";
     });
 
     // ---- eval --------------------------------------------------------------
@@ -2700,11 +2736,14 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         std::cout << "  recorded in "
                   << training::manifest_path(store.run_dir(manifest.run_id)).string() << "\n";
         if (result.results.passed) {
-            std::cout << "\nReady to promote:\n  apogee train promote " << manifest.run_id
-                      << " --as <backend>\n";
+            std::cout << "\nReady to promote:\n  " << promote_as_backend(manifest.run_id) << "\n";
         } else {
-            std::cout << "\nRe-train or adjust the suite, then re-run:\n  apogee train eval "
-                      << manifest.run_id << " --suite " << suite_name << " --force\n";
+            std::cout << "\nRe-train or adjust the suite, then re-run:\n  "
+                      << harness::render({.verbs = {"train", "eval"},
+                                          .parts = {harness::operand(manifest.run_id),
+                                                    harness::option("--suite", suite_name),
+                                                    harness::option("--force")}})
+                      << "\n";
         }
     });
 
@@ -2854,12 +2893,11 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         for (const std::string& failed : result.pruned.failed) {
             std::cerr << "apogee train: warning: could not prune " << failed << "\n";
         }
-        std::cout << "\nChat with it:\n  apogee chat -m " << result.backend_key << "\n";
+        std::cout << "\nChat with it:\n  " << chat_with(result.backend_key) << "\n";
         const std::optional<training::VersionLedger> ledger =
             store.list_versions(result.backend_key);
         if (ledger.has_value() && ledger->kept() > 1) {
-            std::cout << "Roll back if needed:\n  apogee train rollback " << result.backend_key
-                      << "\n";
+            std::cout << "Roll back if needed:\n  " << rollback_command(result.backend_key) << "\n";
         }
     });
 
@@ -2881,8 +2919,10 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
             fail_user("the version ledger is unreadable: " + error);
         }
         if (!ledger.has_value()) {
-            fail_user("no version history for backend '" + *rollback_backend +
-                      "' -- 'apogee train promote <run> --as " + *rollback_backend +
+            fail_user("no version history for backend '" + *rollback_backend + "' -- '" +
+                      harness::render({.verbs = {"train", "promote"},
+                                       .parts = {harness::placeholder("<run>"),
+                                                 harness::option("--as", *rollback_backend)}}) +
                       "' creates the first version");
         }
         const training::RollbackTarget target = training::rollback_target(*ledger);
@@ -3725,8 +3765,8 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (!promoting) {
             if (!outcome.promote_run_id.empty()) {
-                std::cout << "\nRegime complete. Promote when ready:\n  apogee train promote "
-                          << outcome.promote_run_id << " --as <backend>\n";
+                std::cout << "\nRegime complete. Promote when ready:\n  "
+                          << promote_as_backend(outcome.promote_run_id) << "\n";
             }
             return;
         }
@@ -3748,15 +3788,18 @@ void TrainCommand::bind(CLI::App& root, const RootContext& context) {
         }
         if (!result.ok) {
             std::cerr << "apogee train: regime " << spec.name << ": promote: " << result.error
-                      << "\n  promote by hand: apogee train promote " << outcome.promote_run_id
-                      << " --as " << spec.promote_as << "\n";
+                      << "\n  promote by hand: "
+                      << harness::render({.verbs = {"train", "promote"},
+                                          .parts = {harness::operand(outcome.promote_run_id),
+                                                    harness::option("--as", spec.promote_as)}})
+                      << "\n";
             throw CLI::RuntimeError(result.refused ? kUserError : kBackendError);
         }
         std::cout << "\nregime " << spec.name << " complete -- " << result.backend_key
                   << " is now v" << result.version
                   << (result.target == training::PromoteTarget::Mlx ? "\n  mlx: " : "\n  gguf: ")
-                  << result.weights_path << "\n\nChat with it:\n  apogee chat -m "
-                  << result.backend_key << "\n";
+                  << result.weights_path << "\n\nChat with it:\n  " << chat_with(result.backend_key)
+                  << "\n";
     });
 
     // ---- cycle -------------------------------------------------------------

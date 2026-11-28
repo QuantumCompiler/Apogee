@@ -117,8 +117,11 @@ std::vector<BootstrapStep> bootstrap_plan(const BootstrapHost& host) {
             // Never at install unasked (53k): said, with the command that
             // installs it on the person's word.
             step.status = "skipped";
-            step.reason = "opt-in, never installed unasked -- 'apogee train setup --with " +
-                          std::string{name} + "' installs it";
+            step.reason = "opt-in, never installed unasked -- '" +
+                          harness::render({.verbs = {"train", "setup"},
+                                           .parts = {harness::option("--with", std::string{name},
+                                                                     /*greedy=*/true)}}) +
+                          "' installs it";
         } else {
             step.words = {"train", "setup", "--with", std::string{name}};
         }

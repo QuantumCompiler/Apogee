@@ -1122,7 +1122,9 @@ TEST_CASE("a malformed allowed host's row names the verb that removes it, and --
     CHECK(rows[1]->status == Status::Warn);
     CHECK(rows[1]->detail ==
           "'https://not-a-host.example/path' is not a host name, so it allows nothing");
-    CHECK(rows[1]->remedy == "apogee config delete-allowed-host 'https://not-a-host.example/path'");
+    // The entry is one word by the renderer's rule (CLI-M61): bare, since
+    // every character of it is one no shell reads specially.
+    CHECK(rows[1]->remedy == "apogee config delete-allowed-host https://not-a-host.example/path");
     CHECK(report.passed());  // a warning, never a failure
 
     // --fix never touches an existing config (M11): the entry stays.

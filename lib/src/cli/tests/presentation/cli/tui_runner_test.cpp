@@ -419,3 +419,35 @@ TEST_CASE("the exec line's menu items are the core's candidates, grouped and des
         }
     }
 }
+
+TEST_CASE("the exec line's heading is the command as it runs, each word as the renderer says it",
+          "[cli][tui][runner][child][M61]") {
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const apogee::testing::CliHome home{kConfig};
+    apogee::commands::RootContext context;
+    context.config_path = home.config_path().string();
+    apogee::tui::ManualPump pump;
+    const auto output = std::make_shared<apogee::tui::Progress>(pump);
+    const apogee::tui::ExecLineOptions options =
+        apogee::commands::exec_line_options(context, output, binary);
+    // A word holding a space is one word in the heading, as the child got
+    // it (CLI-M61); the line's own `--` stays where it was typed.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    const auto ended = [&]() {
+        while (output->running()) {
+            REQUIRE(std::chrono::steady_clock::now() < deadline);
+            (void)pump.drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        (void)pump.drain();
+    };
+    CHECK(options.run("config", "get 'no such key'").empty());
+    ended();
+    CHECK(output->heading() == "apogee config get \"no such key\"");
+    CHECK(options.run("config", "get -- models.default").empty());
+    ended();
+    CHECK(output->heading() == "apogee config get -- models.default");
+}

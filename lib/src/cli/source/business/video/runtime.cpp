@@ -67,7 +67,11 @@ struct Package {
                     "the Python environment is on Python " + on.str() + ", and the " +
                         std::string{training::to_string(set)} + " set runs on " +
                         training::python_range(set).describe(),
-                    "apogee train setup --rebuild --with " + std::string{training::to_string(set)});
+                    harness::render(
+                        {.verbs = {"train", "setup"},
+                         .parts = {harness::option("--rebuild"),
+                                   harness::option("--with", std::string{training::to_string(set)},
+                                                   /*greedy=*/true)}}));
                 return false;
             }
             readiness =
@@ -99,8 +103,25 @@ constexpr std::array<std::string_view, 3> kEngineNames{"auto", "torch", "mlx"};
     if (separator == std::string_view::npos) {
         return harness::printed_program() + " models pull <owner>/<repo> --safetensors";
     }
-    return "apogee models pull " + std::string{model.substr(0, separator)} + "/" +
-           std::string{model.substr(separator + 2)} + " --safetensors";
+    return harness::render(
+        {.verbs = {"models", "pull"},
+         .parts = {harness::operand(std::string{model.substr(0, separator)} + "/" +
+                                    std::string{model.substr(separator + 2)}),
+                   harness::option("--safetensors")}});
+}
+
+/// The repair of stored weights by `handle`, by the one renderer (CLI-M61).
+[[nodiscard]] std::string models_repair(const std::string& handle) {
+    return harness::render({.verbs = {"models", "repair"}, .parts = {harness::operand(handle)}});
+}
+
+/// Delete the MLX build at `handle`, then convert `ref` to MLX again.
+[[nodiscard]] std::string convert_again(std::string_view handle, const std::string& ref) {
+    return harness::render(
+               {.verbs = {"models", "delete"}, .parts = {harness::operand(std::string{handle})}}) +
+           ", then " +
+           harness::render({.verbs = {"models", "convert"},
+                            .parts = {harness::operand(ref), harness::option("--mlx")}});
 }
 
 }  // namespace
@@ -261,10 +282,9 @@ VideoReadiness probe_video(const VideoHost& host, const std::filesystem::path& p
         }
         const models::PipelineInfo info = models::read_pipeline_info(pipeline);
         if (!info.complete) {
-            return refused(std::move(readiness), VideoRefusal::NotAPipeline,
-                           name + " " + info.problem,
-                           handle.empty() ? std::string{"pull it again"}
-                                          : "apogee models repair " + std::string{handle});
+            return refused(
+                std::move(readiness), VideoRefusal::NotAPipeline, name + " " + info.problem,
+                handle.empty() ? std::string{"pull it again"} : models_repair(std::string{handle}));
         }
     }
 
@@ -394,9 +414,11 @@ std::filesystem::path find_mlx_video_tokenizer(const models::StoreRoots& roots,
         }
         reason = wanted + " from the Wan set it was converted from, " + record->ref +
                  ", which lacks " + names;
-        remedy = listed ? "apogee models repair " + record->ref
+        remedy = listed ? models_repair(record->ref)
                         : (stored.has_value() && !stored->ref.empty()
-                               ? "apogee models pull " + stored->ref + " --safetensors"
+                               ? harness::render({.verbs = {"models", "pull"},
+                                                  .parts = {harness::operand(stored->ref),
+                                                            harness::option("--safetensors")}})
                                : pull_of(model));
         return {};
     }
@@ -476,8 +498,7 @@ VideoReadiness probe_video_mlx(const VideoHost& host, const std::filesystem::pat
             return refused(std::move(readiness), VideoRefusal::NotAPipeline,
                            name + " " + info.problem,
                            record.has_value() && !record->ref.empty() && !handle.empty()
-                               ? "convert it again: apogee models delete " + std::string{handle} +
-                                     ", then apogee models convert " + record->ref + " --mlx"
+                               ? "convert it again: " + convert_again(handle, record->ref)
                                : std::string{"convert its Wan set again with --mlx"});
         }
         std::string reason;
@@ -530,10 +551,9 @@ VideoReadiness probe_voice(const VideoHost& host, const std::filesystem::path& m
         }
         const models::VoiceInfo info = models::read_voice_info(model);
         if (!info.complete) {
-            return refused(std::move(readiness), VideoRefusal::NotAVoiceModel,
-                           name + " " + info.problem,
-                           handle.empty() ? std::string{"pull it again"}
-                                          : "apogee models repair " + std::string{handle});
+            return refused(
+                std::move(readiness), VideoRefusal::NotAVoiceModel, name + " " + info.problem,
+                handle.empty() ? std::string{"pull it again"} : models_repair(std::string{handle}));
         }
     }
 
@@ -605,8 +625,7 @@ VideoReadiness probe_voice_mlx(const VideoHost& host, const std::filesystem::pat
             return refused(std::move(readiness), VideoRefusal::NotAVoiceModel,
                            name + " " + info.problem,
                            record.has_value() && !record->ref.empty() && !handle.empty()
-                               ? "convert it again: apogee models delete " + std::string{handle} +
-                                     ", then apogee models convert " + record->ref + " --mlx"
+                               ? "convert it again: " + convert_again(handle, record->ref)
                                : std::string{"convert its voice model again with --mlx"});
         }
     }

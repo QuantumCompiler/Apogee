@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "agentloop/content.h"
+#include "contracts/suggested_command.h"
 
 namespace apogee::agentloop {
 namespace {
@@ -529,10 +530,12 @@ VerifierRole verifier_role(const harness::Config& config) {
     }
     const std::string role = harness::validate_policy(suite->validate).verifier;
     if (!suite->members.contains(role)) {
-        out.missing = "suite " + config.models.default_suite + " has no " + role +
-                      " member to check with -- name one, or another verifier: apogee config "
-                      "set-suite " +
-                      config.models.default_suite + " --verifier <role>";
+        out.missing =
+            "suite " + config.models.default_suite + " has no " + role +
+            " member to check with -- name one, or another verifier: " +
+            harness::render({.verbs = {"config", "set-suite"},
+                             .parts = {harness::operand(config.models.default_suite),
+                                       harness::option_placeholder("--verifier", "<role>")}});
         return out;
     }
     out.role = role;

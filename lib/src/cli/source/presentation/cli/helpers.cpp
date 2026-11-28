@@ -555,10 +555,13 @@ std::string media_refusal_message(const std::string& model, harness::Medium medi
     const auto role = [&](std::string_view noun, std::string_view command) {
         if (!helper.empty()) {
             return "and neither can the " + std::string{noun} + " model, '" + std::string{helper} +
-                   "' -- point 'apogee config " + std::string{command} + "' at one that can";
+                   "' -- point '" + harness::render({.verbs = {"config", std::string{command}}}) +
+                   "' at one that can";
         }
-        return "and no " + std::string{noun} + " model is set -- set one with 'apogee config " +
-               std::string{command} + " <backend>'";
+        return "and no " + std::string{noun} + " model is set -- set one with '" +
+               harness::render({.verbs = {"config", std::string{command}},
+                                .parts = {harness::placeholder("<backend>")}}) +
+               "'";
     };
     switch (medium) {
         case harness::Medium::Image:

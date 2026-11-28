@@ -1,3 +1,4 @@
+import BusinessReads
 import DataProtocol
 import Foundation
 
@@ -218,7 +219,8 @@ public struct JobProgress: Sendable, Equatable {
         case .running, .done: return nil
         }
         for notice in notices.reversed() {
-            guard let range = notice.range(of: "apogee ") else { continue }
+            // The CLI's own binary, whichever channel's it is (its M49, M61).
+            guard let range = Argv.printed([], in: notice) else { continue }
             let rest = notice[range.upperBound...]
             let command = rest.split(separator: "'").first.map(String.init) ?? String(rest)
             let words = command.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "`.")))

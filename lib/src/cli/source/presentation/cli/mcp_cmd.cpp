@@ -27,6 +27,16 @@
 namespace apogee::commands {
 namespace {
 
+/// `mcp test <server> <tool> <arguments>`: one call a person can try, each
+/// word by the one renderer (CLI-M61) -- the arguments, a JSON object, one
+/// word quoted by its rule.
+[[nodiscard]] std::string mcp_test_command(const std::string& server, const std::string& tool,
+                                           const std::string& arguments) {
+    return harness::render(
+        {.verbs = {"mcp", "test"},
+         .parts = {harness::operand(server), harness::operand(tool), harness::operand(arguments)}});
+}
+
 [[noreturn]] void fail(const std::string& message) {
     std::cerr << "apogee mcp: " << message << "\n";
     throw CLI::RuntimeError(1);
@@ -123,14 +133,16 @@ void bind_create(CLI::App& parent, const RootContext& context) {
         std::cout << "  command: " << result.command << "\n"
                   << "  config:  " << result.config_path.string() << "\n\n";
         if (preset != nullptr) {
-            std::cout << "Test it:  apogee mcp test " << result.name << " " << preset->try_tool
-                      << " '" << preset->try_arguments << "'\n";
+            std::cout << "Test it:  "
+                      << mcp_test_command(result.name, std::string{preset->try_tool},
+                                          std::string{preset->try_arguments})
+                      << "\n";
             if (!preset->note.empty()) {
                 std::cout << preset->note << "\n";
             }
         } else {
-            std::cout << "Test it:  apogee mcp test " << result.name
-                      << " echo '{\"text\":\"hi\"}'\n";
+            std::cout << "Test it:  " << mcp_test_command(result.name, "echo", R"({"text":"hi"})")
+                      << "\n";
         }
         std::cout << "It connects at the start of the next tool-using run.\n";
     });
@@ -232,8 +244,12 @@ void bind_presets(CLI::App& parent, const RootContext& context) {
                 runs += " " + argument;
             }
             if (preset.refusal.empty()) {
-                std::cout << indent << "register: apogee mcp create " << preset.server_name
-                          << " --from " << preset.name << "\n";
+                std::cout << indent << "register: "
+                          << harness::render(
+                                 {.verbs = {"mcp", "create"},
+                                  .parts = {harness::operand(std::string{preset.server_name}),
+                                            harness::option("--from", std::string{preset.name})}})
+                          << "\n";
                 if (resolution.runnable()) {
                     std::cout << indent << "runs:     " << runs << "\n";
                 }

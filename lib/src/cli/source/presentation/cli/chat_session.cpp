@@ -1285,9 +1285,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
         if (const std::string refused = named_backend_refusal(config, built, model);
             !refused.empty()) {
             fail_user(mode, "chat " + session.chat_id + " cannot resume: " + refused +
-                                " -- resume it on another backend with: apogee " +
-                                std::string{session_command(mode)} + " --resume " +
-                                session.chat_id + " -m <backend>");
+                                " -- resume it on another backend with: " +
+                                harness::render(
+                                    {.verbs = {std::string{session_command(mode)}},
+                                     .parts = {harness::option("--resume", session.chat_id),
+                                               harness::option_placeholder("-m", "<backend>")}}));
         }
     }
     session.backend = model;
@@ -2576,9 +2578,11 @@ void run_session(const RootContext& context, const SessionFlags& session_flags,
                                        ": asked again from now on");
                     } else if (!name.host && config.permissions.levels.contains(name.key)) {
                         out.print_line(style.tag(ansi::Role::Apogee) + " " + what +
-                                       " is the config's answer -- change it with 'apogee config "
-                                       "set-permission " +
-                                       name.key + " ask'");
+                                       " is the config's answer -- change it with '" +
+                                       harness::render({.verbs = {"config", "set-permission"},
+                                                        .parts = {harness::operand(name.key),
+                                                                  harness::operand("ask")}}) +
+                                       "'");
                     } else {
                         out.print_line(style.tag(ansi::Role::Apogee) +
                                        " this chat has no answer for " + what);

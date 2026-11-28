@@ -582,3 +582,33 @@ TEST_CASE("a rollback from the Train view reaches a hand-written dash-led backen
     CHECK(written_alike(slurp(home.training() / "versions" / "-x.json"), home.home.home()) ==
           twin_ledger);
 }
+
+TEST_CASE(
+    "the Train view's rollback confirm names the command as it runs, a dash-led name after --",
+    "[cli][tui][training][M61]") {
+    const Home home{kDashedBackend, "config.json"};
+    seed_ledger(home, "-x");
+    Stage stage{home, true, {}};
+    (void)stage.frame();
+    REQUIRE(has(stage.frame(), "R rollback"));
+    stage.press(Key::character("R"));
+    INFO(stage.frame());
+    CHECK(has(stage.frame(),
+              "Roll -x back to its previous version ('apogee train rollback -- -x')? [y/N]"));
+    stage.press(Key::character("n"));
+}
+
+TEST_CASE("a typed run's confirm is the command as it would run, each word as the renderer says it",
+          "[cli][tui][training][M61]") {
+    const Home home;
+    Stage stage{home, true, {}};
+    stage.press(Key::character("r"));
+    CHECK(has(stage.frame(), "run: run ▏"));
+    stage.type("tiny --dataset 'my set'");
+    stage.press(Key::named(Key::Name::Return));
+    INFO(stage.frame());
+    CHECK(has(stage.frame(),
+              "Start 'apogee train run tiny --dataset \"my set\"'? A training run "
+              "holds this machine until it ends [y/N]"));
+    stage.press(Key::character("n"));
+}

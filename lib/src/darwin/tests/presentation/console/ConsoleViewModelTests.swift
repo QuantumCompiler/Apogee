@@ -26,6 +26,9 @@ struct ConsoleViewModelTests {
         #expect(ConsoleViewModel.words(#"say 'one "two"'"#)! == (["say"], #"one "two""#))
         #expect(ConsoleViewModel.words(#"say "open"# ) == nil, "an unclosed quote is no line")
         #expect(ConsoleViewModel.arguments("apogee models list")! == ["models", "list"])
+        // A command a dev or test build printed, pasted (the CLI's M49, M61).
+        #expect(ConsoleViewModel.arguments("apogee-dev models list")! == ["models", "list"])
+        #expect(ConsoleViewModel.arguments("apogee-test models list")! == ["models", "list"])
         #expect(ConsoleViewModel.arguments("check")! == ["check"])
     }
 

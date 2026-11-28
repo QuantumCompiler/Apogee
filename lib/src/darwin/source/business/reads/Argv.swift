@@ -19,6 +19,38 @@ public enum Argv {
     /// The word after which the binary reads every word as text.
     public static let endOfOptions = "--"
 
+    /// The names a command the CLI prints begins with (the CLI's M49 and
+    /// M61): each channel's installed binary -- the release's `apogee`, and
+    /// `apogee-dev` and `apogee-test` -- so the app's development build,
+    /// which drives `apogee-dev`, reads `apogee-dev models convert …` as the
+    /// release's reads `apogee models convert …`. A note's house voice
+    /// (`apogee <verb>: `) is every build's and is not one of these.
+    public static let programNames = ["apogee", "apogee-dev", "apogee-test"]
+
+    /// Where a command the CLI printed stands in `text`: from one of
+    /// `programNames`, a word of its own, through `verb`'s words after it,
+    /// one space apart -- the first such place, or nil. An empty `verb`
+    /// gives the name and the space after it. `printed(["train", "setup"],
+    /// in:)` finds `apogee train setup` and `apogee-dev train setup` alike,
+    /// never `myapogee train setup`.
+    public static func printed(_ verb: [String], in text: String) -> Range<String.Index>? {
+        var from = text.startIndex
+        while let found = text.range(of: "apogee", range: from..<text.endIndex) {
+            from = found.upperBound
+            if found.lowerBound > text.startIndex {
+                let before = text[text.index(before: found.lowerBound)]
+                if before.isLetter || before.isNumber || before == "-" || before == "_" || before == "." { continue }
+            }
+            for name in programNames {
+                let words = ([name] + verb).joined(separator: " ") + (verb.isEmpty ? " " : "")
+                if text[found.lowerBound...].hasPrefix(words) {
+                    return found.lowerBound..<text.index(found.lowerBound, offsetBy: words.count)
+                }
+            }
+        }
+        return nil
+    }
+
     /// One option of a line: a flag alone, or an option and its value.
     public enum Option: Equatable, Sendable {
         /// A flag that takes no value: `--yes`.

@@ -196,6 +196,18 @@ std::string render(const SuggestedCommand& command) {
     return render(command, native_command_shell());
 }
 
+std::string render_typed(const std::vector<std::string>& words, CommandShell shell) {
+    std::string line = printed_program(shell);
+    for (const std::string& word : words) {
+        line += " " + shell_word(word, shell);
+    }
+    return line;
+}
+
+std::string render_typed(const std::vector<std::string>& words) {
+    return render_typed(words, native_command_shell());
+}
+
 std::string render_all(const std::vector<SuggestedCommand>& commands, std::string_view joiner) {
     std::string out;
     for (const SuggestedCommand& command : commands) {

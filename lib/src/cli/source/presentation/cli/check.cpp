@@ -110,6 +110,26 @@ namespace {
     return harness::backend_door_remedy(harness::delete_backend_door(name));
 }
 
+/// The doors several rows name, each by the one renderer (CLI-M61): a name
+/// a hand edit gave -- a server `-m`, an agent `a;b`, a model handle -- is
+/// one word, with its `--` when it starts with a dash.
+[[nodiscard]] std::string models_repair(const std::string& handle) {
+    return harness::render({.verbs = {"models", "repair"}, .parts = {harness::operand(handle)}});
+}
+
+[[nodiscard]] std::string delete_mcp_server(const std::string& name) {
+    return harness::render(
+        {.verbs = {"config", "delete-mcp-server"}, .parts = {harness::operand(name)}});
+}
+
+[[nodiscard]] std::string agents_edit(const std::string& name) {
+    return harness::render({.verbs = {"agents", "edit"}, .parts = {harness::operand(name)}});
+}
+
+[[nodiscard]] std::string rollback_door(const std::string& backend) {
+    return harness::render({.verbs = {"train", "rollback"}, .parts = {harness::operand(backend)}});
+}
+
 void add(CheckReport& report, Status status, std::string section, std::string name,
          std::string detail, std::string remedy = {}) {
     report.rows.push_back(
@@ -297,7 +317,9 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
         if (suite.members.empty()) {
             add(report, Status::Warn, "Config", label,
                 "names no members -- every role falls through to the global pointers",
-                "apogee config set-suite " + name + " --<role> <backend>");
+                harness::render({.verbs = {"config", "set-suite"},
+                                 .parts = {harness::operand(name),
+                                           harness::option_placeholder("--<role>", "<backend>")}}));
             continue;
         }
         std::string members;
@@ -313,8 +335,11 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                 add(report, Status::Fail, "Config", label,
                     std::string{role} + " names a backend that is not configured: '" +
                         member.backend + "'",
-                    "apogee config set-suite " + name + " --" + std::string{role} +
-                        " <one of your configured backends>");
+                    harness::render({.verbs = {"config", "set-suite"},
+                                     .parts = {harness::operand(name),
+                                               harness::option_placeholder(
+                                                   "--" + std::string{role},
+                                                   "<one of your configured backends>")}}));
                 reported = true;
                 break;
             }
@@ -348,9 +373,12 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                 continue;  // the loader admits a consultable role with a member only
             }
             const MeteredAnswer answer = metered(config, it->second.backend);
-            const std::string fix = "apogee config set-suite " + name +
-                                    " --consultable <its local members>, or --" + role +
-                                    " <a local backend>";
+            const std::string fix =
+                harness::render({.verbs = {"config", "set-suite"},
+                                 .parts = {harness::operand(name),
+                                           harness::option_placeholder("--consultable",
+                                                                       "<its local members>")}}) +
+                ", or --" + role + " <a local backend>";
             if (!answer.unknown.empty()) {
                 add(report, Status::Warn, "Config", label,
                     "consultable " + role + " -- whether '" + it->second.backend +
@@ -372,9 +400,12 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
         if (!reported && suite.validate.any()) {
             if (const auto it = suite.members.find(policy.verifier); it != suite.members.end()) {
                 const MeteredAnswer answer = metered(config, it->second.backend);
-                const std::string fix = "apogee config set-suite " + name +
-                                        " --verifier <a local member>, or --" + policy.verifier +
-                                        " <a local backend>";
+                const std::string fix =
+                    harness::render({.verbs = {"config", "set-suite"},
+                                     .parts = {harness::operand(name),
+                                               harness::option_placeholder("--verifier",
+                                                                           "<a local member>")}}) +
+                    ", or --" + policy.verifier + " <a local backend>";
                 if (!answer.unknown.empty()) {
                     add(report, Status::Warn, "Config", label,
                         "verifier " + policy.verifier + " -- whether '" + it->second.backend +
@@ -400,7 +431,9 @@ void check_suites(CheckReport& report, const harness::Config& config, const back
                     validate_suite_orchestrate(config, name, suite, metered, &symphonies);
                 !refused.empty()) {
                 add(report, Status::Fail, "Config", label, refused,
-                    "apogee config set-suite " + name + " --orchestrate off");
+                    harness::render({.verbs = {"config", "set-suite"},
+                                     .parts = {harness::operand(name),
+                                               harness::option("--orchestrate", "off")}}));
                 reported = true;
             }
         }
@@ -632,9 +665,8 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                         readiness.model_dir);
                     add(report, Status::Fail, "Config", label,
                         std::string{type} + " -- " + files.problem,
-                        stored.has_value() ? "apogee models repair " +
-                                                 models::weights_handle(
-                                                     stored->model, models::kMlxFormat, stored->id)
+                        stored.has_value() ? models_repair(models::weights_handle(
+                                                 stored->model, models::kMlxFormat, stored->id))
                                            : std::string{});
                     continue;
                 }
@@ -718,8 +750,10 @@ void check_config(CheckReport& report, const CheckInputs& inputs) {
                         std::string{secrets::conventional_variables(backend.type).front()};
                     add(report, Status::Warn, "Config", label,
                         std::string{type} + " -- no API key found",
-                        "apogee auth add " + std::string{type} + "   (or export " + variable +
-                            "=..., or set api_key: \"${" + variable + "}\" on this backend)");
+                        harness::render({.verbs = {"auth", "add"},
+                                         .parts = {harness::operand(std::string{type})}}) +
+                            "   (or export " + variable + "=..., or set api_key: \"${" + variable +
+                            "}\" on this backend)");
                     break;
                 }
             }
@@ -849,7 +883,10 @@ void check_providers(CheckReport& report, const CheckInputs& inputs) {
         add(report, Status::Ok, "Providers", "provider: " + status.id,
             std::string{backends::to_string(status.tier())} + ", not registered",
             facts->needs_model
-                ? "apogee config add-backend " + status.id + " --type " + type + " --model <model>"
+                ? harness::render(
+                      {.verbs = {"config", "add-backend"},
+                       .parts = {harness::operand(status.id), harness::option("--type", type),
+                                 harness::option_placeholder("--model", "<model>")}})
                 : std::string{harness::printed_program() + " providers scan --register"});
     }
     if (cache.scanned()) {
@@ -954,7 +991,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         const models::GgufInfo info = models::inspect_gguf(stored.file);
         if (!info.parsed) {
             add(report, Status::Fail, "Models", name, "unreadable GGUF -- " + info.parse_error,
-                "apogee models repair " + name);
+                models_repair(name));
         } else {
             add(report, Status::Ok, "Models", name,
                 info.architecture.empty() ? "valid GGUF header"
@@ -968,7 +1005,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         if (models::config_is_download_record(stored.dir)) {
             add(report, Status::Warn, "Models", name,
                 "damaged by an older pull: its config.json is a download record",
-                "apogee models repair " + name);
+                models_repair(name));
         } else if (const std::optional<models::DraftHead> head =
                        models::snapshot_draft_head(stored.dir)) {
             add(report, Status::Ok, "Models", name,
@@ -989,7 +1026,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         const models::MlxInfo info = models::read_mlx_info(stored.dir);
         if (!info.complete) {
             add(report, Status::Fail, "Models", name, "MLX model that " + info.problem,
-                "apogee models repair " + name);
+                models_repair(name));
         } else {
             add(report, Status::Ok, "Models", name,
                 (info.model_type.empty() ? std::string{} : info.model_type + ", ") + "MLX, " +
@@ -1006,7 +1043,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         const models::PipelineInfo info = models::read_pipeline_info(stored.dir);
         if (!info.complete) {
             add(report, Status::Fail, "Models", name, "pipeline that " + info.problem,
-                "apogee models repair " + name);
+                models_repair(name));
         } else {
             add(report, Status::Ok, "Models", name,
                 info.class_name + ", " + std::to_string(info.components.size()) +
@@ -1023,7 +1060,7 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
         const models::VoiceInfo info = models::read_voice_info(stored.dir);
         if (!info.complete) {
             add(report, Status::Fail, "Models", name, "voice model that " + info.problem,
-                "apogee models repair " + name);
+                models_repair(name));
         } else {
             add(report, Status::Ok, "Models", name,
                 info.checkpoint + ", " + std::to_string(info.voices.size()) +
@@ -1090,7 +1127,10 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
                                              const training::TrainingStore& store,
                                              const std::string& run, const std::string& name,
                                              bool quantized) {
-    const std::string promote = "apogee train promote " + run + " --as " + name + " --adapter";
+    harness::SuggestedCommand promote{
+        .verbs = {"train", "promote"},
+        .parts = {harness::operand(run), harness::option("--as", name),
+                  harness::option("--adapter")}};
     std::string error;
     const std::optional<training::RunManifest> manifest =
         training::read_manifest(store.run_dir(run), error);
@@ -1099,14 +1139,44 @@ void check_models(CheckReport& report, const CheckInputs& inputs) {
     if (quantized) {
         const bool suite_known = (recorded.has_value() && !recorded->suite.empty()) ||
                                  !inputs.config.training.eval_suite_path.empty();
-        return promote + (suite_known ? "" : " --suite <path|name>");
+        if (!suite_known) {
+            promote.parts.push_back(harness::option_placeholder("--suite", "<path|name>"));
+        }
+        return harness::render(promote);
     }
     const bool hard = training::gate_mode_from_string(
                           inputs.config.training.effective_gate_mode()) == training::GateMode::Hard;
     if (hard && !(recorded.has_value() && recorded->passed)) {
-        return "apogee train eval " + run + " --suite <path|name> --force && " + promote;
+        return harness::render_all(
+            {{.verbs = {"train", "eval"},
+              .parts = {harness::operand(run),
+                        harness::option_placeholder("--suite", "<path|name>"),
+                        harness::option("--force")}},
+             promote},
+            " && ");
     }
-    return promote;
+    return harness::render(promote);
+}
+
+/// The door that adds back the backend a version ledger names (53b, 27c):
+/// an entry of `type` over the active version's `weights`, or for an
+/// adapter version an entry over its base, then the adapter applied -- the
+/// two chained with ` && ` (CLI-M61).
+[[nodiscard]] std::string re_add_door(const std::string& backend, const std::string& type,
+                                      bool adapter, const std::string& weights) {
+    harness::SuggestedCommand add{
+        .verbs = {"config", "add-backend"},
+        .parts = {harness::operand(backend), harness::option("--type", type)}};
+    if (!adapter) {
+        add.parts.push_back(harness::option("--model-path", weights));
+        return harness::render(add);
+    }
+    add.parts.push_back(harness::option_placeholder("--model-path", "<base>"));
+    return harness::render_all(
+        {add,
+         {.verbs = {"config", "set-backend"},
+          .parts = {harness::operand(backend), harness::option("--adapters", weights)}}},
+        " && ");
 }
 
 /// The `Adapters` section (53c): a row for every adapter an entry applies,
@@ -1481,7 +1551,8 @@ void check_tools(CheckReport& report, const CheckInputs& inputs) {
             // gate unasked.
             add(report, Status::Warn, "Tools", "allowed_hosts",
                 "'" + host + "' is not a host name, so it allows nothing",
-                "apogee config delete-allowed-host '" + host + "'");
+                harness::render({.verbs = {"config", "delete-allowed-host"},
+                                 .parts = {harness::operand(host)}}));
         }
     }
 
@@ -1605,8 +1676,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
         }
         if (server.command.empty()) {
             add(report, Status::Warn, "MCP", label, "no command set",
-                "set mcp_servers." + name + ".command, or: apogee config delete-mcp-server " +
-                    name);
+                "set mcp_servers." + name + ".command, or: " + delete_mcp_server(name));
             continue;
         }
         const bool bare = server.command.find('/') == std::string::npos &&
@@ -1615,7 +1685,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
             if (platform::find_on_path(server.command).empty()) {
                 add(report, Status::Fail, "MCP", label,
                     "command not found on PATH: " + server.command,
-                    "install it, or: apogee config delete-mcp-server " + name);
+                    "install it, or: " + delete_mcp_server(name));
             } else {
                 add(report, Status::Ok, "MCP", label, server.command + " (on PATH)");
             }
@@ -1624,7 +1694,7 @@ void check_mcp(CheckReport& report, const CheckInputs& inputs) {
         const std::filesystem::path command{server.command};
         if (!std::filesystem::exists(command, code)) {
             add(report, Status::Fail, "MCP", label, "command not found: " + server.command,
-                "apogee config delete-mcp-server " + name);
+                delete_mcp_server(name));
             continue;
         }
         if (harness::supports_private_modes()) {
@@ -1770,14 +1840,16 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
         for (const std::filesystem::path& file : scaffold::agent_files(inputs.config_path, agent)) {
             if (!std::filesystem::exists(file, code)) {
                 add(report, Status::Fail, "Agents", label, "file missing: " + file.string(),
-                    "apogee agents create " + name + " --force   (or fix agents." + name +
-                        ".prompts / .schemas)");
+                    harness::render(
+                        {.verbs = {"agents", "create"},
+                         .parts = {harness::operand(name), harness::option("--force")}}) +
+                        "   (or fix agents." + name + ".prompts / .schemas)");
                 clean = false;
             }
         }
         if (agent.prompts.empty()) {
             add(report, Status::Warn, "Agents", label, "no prompts: the agent has no persona",
-                "apogee agents edit " + name);
+                agents_edit(name));
             clean = false;
         }
         const std::filesystem::path home = harness::home_for_config(inputs.config_path);
@@ -1792,7 +1864,7 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
             const nlohmann::json parsed = nlohmann::json::parse(buffer.str(), nullptr, false);
             if (parsed.is_discarded() || !parsed.is_object()) {
                 add(report, Status::Fail, "Agents", label,
-                    "schema is not a JSON object: " + path.string(), "apogee agents edit " + name);
+                    "schema is not a JSON object: " + path.string(), agents_edit(name));
                 clean = false;
                 continue;
             }
@@ -1801,15 +1873,17 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
                 add(report, Status::Fail, "Agents", label,
                     "schema is not a valid draft-07 JSON Schema: " + path.string() + " -- " +
                         valid.errors.front(),
-                    "apogee agents edit " + name);
+                    agents_edit(name));
                 clean = false;
             }
         }
         if (!agent.model.empty() && !names_a_configured_backend(config, agent.model)) {
             add(report, Status::Fail, "Agents", label,
                 "model '" + agent.model + "' is not a configured backend",
-                "apogee config add-backend " + agent.model + " --type <type>   (or change agents." +
-                    name + ".model)");
+                harness::render({.verbs = {"config", "add-backend"},
+                                 .parts = {harness::operand(agent.model),
+                                           harness::option_placeholder("--type", "<type>")}}) +
+                    "   (or change agents." + name + ".model)");
             clean = false;
         }
         if (const std::string refused = harness::collection_read_error(agent.collection);
@@ -1835,7 +1909,8 @@ void check_agents(CheckReport& report, const CheckInputs& inputs) {
             if (config.find_mcp_server(server) == nullptr) {
                 add(report, Status::Warn, "Agents", label,
                     "mcp server '" + server + "' is not configured; it is skipped",
-                    "apogee mcp create " + server);
+                    harness::render(
+                        {.verbs = {"mcp", "create"}, .parts = {harness::operand(server)}}));
                 clean = false;
             }
         }
@@ -2262,10 +2337,13 @@ void check_graphs(CheckReport& report, const CheckInputs& inputs) {
 /// rule): one its Python cannot take names the rebuild that can.
 [[nodiscard]] std::string setup_remedy(training::RequirementSet set,
                                        const training::PythonVersion& on) {
-    const std::string name{training::to_string(set)};
-    return on.known() && !training::python_range(set).contains(on)
-               ? "apogee train setup --rebuild --with " + name
-               : "apogee train setup --with " + name;
+    harness::SuggestedCommand setup{.verbs = {"train", "setup"}};
+    if (on.known() && !training::python_range(set).contains(on)) {
+        setup.parts.push_back(harness::option("--rebuild"));
+    }
+    setup.parts.push_back(
+        harness::option("--with", std::string{training::to_string(set)}, /*greedy=*/true));
+    return harness::render(setup);
 }
 
 /// One MLX set's row, once its package is there (M23).
@@ -2787,7 +2865,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             } else {
                 add(report, Status::Warn, "Training", "trainer",
                     choice.name + " fits this host, but its requirement set is not installed",
-                    "apogee train setup --trainer " + choice.name);
+                    harness::render({.verbs = {"train", "setup"},
+                                     .parts = {harness::option("--trainer", choice.name)}}));
             }
         }
         if (status.has(training::RequirementSet::Convert)) {
@@ -2834,7 +2913,9 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", label,
                 "the ledger names active version " + std::to_string(ledger.active_version) +
                     ", which it does not hold",
-                "apogee train promote <run> --as " + ledger.backend);
+                harness::render({.verbs = {"train", "promote"},
+                                 .parts = {harness::placeholder("<run>"),
+                                           harness::option("--as", ledger.backend)}}));
             continue;
         }
         const bool there = active->mlx()
@@ -2847,7 +2928,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", label,
                 "active v" + std::to_string(active->version) + " names " + kind +
                     " that is not there: " + active->weights(),
-                "apogee train rollback " + ledger.backend + ", or promote again");
+                rollback_door(ledger.backend) + ", or promote again");
             continue;
         }
         const harness::BackendConfig* backend = inputs.config.find_backend(ledger.backend);
@@ -2855,12 +2936,8 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", label,
                 "active v" + std::to_string(active->version) +
                     " exists, but no backend of that name is configured",
-                "apogee config add-backend " + ledger.backend + " --type " +
-                    (active->mlx() ? "mlx" : "llamacpp") +
-                    (active->adapter() ? " --model-path <base> && apogee config set-backend " +
-                                             ledger.backend + " --adapters "
-                                       : std::string{" --model-path "}) +
-                    active->weights());
+                re_add_door(ledger.backend, active->mlx() ? "mlx" : "llamacpp", active->adapter(),
+                            active->weights()));
             continue;
         }
         if (active->adapter()) {
@@ -2874,7 +2951,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
                 add(report, Status::Warn, "Training", label,
                     "the ledger says v" + std::to_string(active->version) + " (" +
                         active->weights() + ") but the backend's adapters do not name it",
-                    "apogee train rollback " + ledger.backend + ", or promote again");
+                    rollback_door(ledger.backend) + ", or promote again");
                 continue;
             }
             add(report, Status::Ok, "Training", label,
@@ -2886,7 +2963,7 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             add(report, Status::Warn, "Training", label,
                 "the ledger says v" + std::to_string(active->version) + " (" + active->weights() +
                     ") but the backend's model_path is " + backend->model_path,
-                "apogee train rollback " + ledger.backend + ", or promote again");
+                rollback_door(ledger.backend) + ", or promote again");
             continue;
         }
         add(report, Status::Ok, "Training", label,

@@ -20,6 +20,18 @@
 namespace apogee::training {
 namespace {
 
+/// `train setup --with <set>`, `--rebuild` first when the environment is
+/// built again, by the one renderer (CLI-M61).
+[[nodiscard]] std::string setup_command(RequirementSet set, bool rebuild) {
+    harness::SuggestedCommand command{.verbs = {"train", "setup"}};
+    if (rebuild) {
+        command.parts.push_back(harness::option("--rebuild"));
+    }
+    command.parts.push_back(
+        harness::option("--with", std::string{to_string(set)}, /*greedy=*/true));
+    return harness::render(command);
+}
+
 constexpr std::array<std::string_view, 10> kSetNames{
     "prepare", "mlx",   "peft",           "convert",   "mlx-vlm",
     "video",   "voice", "mlx-embeddings", "mlx-video", "mlx-audio"};
@@ -884,8 +896,8 @@ std::string PythonEnv::install(RequirementSet set, const harness::CancellationTo
                std::string{source->package} + " from " + std::string{source->repository} +
                " at commit " + std::string{source->commit.substr(0, 12)} +
                ", which pip fetches with git, and git is not on PATH -- install git (on macOS, "
-               "'xcode-select --install'), then: apogee train setup --with " +
-               std::string{to_string(set)};
+               "'xcode-select --install'), then: " +
+               setup_command(set, /*rebuild=*/false);
     }
     // Off its pin before the install (57i): pip keeps an installed version
     // it is asked for again -- a VCS requirement at another commit that
@@ -956,8 +968,7 @@ std::string PythonEnv::unfit_reason(RequirementSet set) const {
     return "the Python environment at " + dir_.string() + " is on Python " + on.str() +
            ", and the '" + std::string{to_string(set)} + "' set runs on " +
            python_range(set).describe() +
-           " -- rebuild it on a Python that fits: apogee train setup --rebuild --with " +
-           std::string{to_string(set)};
+           " -- rebuild it on a Python that fits: " + setup_command(set, /*rebuild=*/true);
 }
 
 std::string PythonEnv::rebuild(const std::filesystem::path& base_python,

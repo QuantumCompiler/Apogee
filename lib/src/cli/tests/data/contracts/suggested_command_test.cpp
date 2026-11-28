@@ -250,6 +250,28 @@ TEST_CASE("a command keeps today's order, and moves a dash-led operand past --",
                      " && ") == "apogee train eval r1 && apogee train promote r1");
 }
 
+TEST_CASE("a line a person typed renders back word for word, in the person's order",
+          "[contracts][suggested-command][M61]") {
+    const auto typed = [](std::vector<std::string> words) {
+        return apogee::harness::render_typed(words, CommandShell::Posix);
+    };
+    // Plain words keep their bytes: the exec line's heading as it was.
+    CHECK(typed({"config", "get", "models.default"}) == "apogee config get models.default");
+    CHECK(typed({"train", "run", "tiny", "--dataset", "starter", "--iters", "3"}) ==
+          "apogee train run tiny --dataset starter --iters 3");
+    // The person's own `--` and options stay where they typed them: no
+    // option moves, and no `--` is added.
+    CHECK(typed({"graph", "build", "--", "-x"}) == "apogee graph build -- -x");
+    CHECK(typed({"graph", "build", "--source", "src", "g"}) == "apogee graph build --source src g");
+    // Every word through the one rule.
+    CHECK(typed({"embed", "ingest", "my notes", "$HOME", "it's"}) ==
+          "apogee embed ingest \"my notes\" '$HOME' \"it's\"");
+    CHECK(typed({"task", "run", ""}) == "apogee task run \"\"");
+    CHECK(typed({}) == "apogee");
+    CHECK(apogee::harness::render_typed({"datasets", "a b"}, CommandShell::PowerShell) ==
+          "apogee datasets \"a b\"");
+}
+
 TEST_CASE("a command names the build that printed it, and the root flag in force",
           "[contracts][suggested-command][M49]") {
     using apogee::harness::Channel;

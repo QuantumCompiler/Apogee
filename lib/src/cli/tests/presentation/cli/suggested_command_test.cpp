@@ -614,14 +614,6 @@ struct FlaggedHome {
     return true;
 }
 
-/// The doors `check` still joins by hand, whose program word comes with
-/// them onto the renderer in CLI-M61 (its sites, not this item's): the set
-/// remedy `setup_remedy` builds from the set's name. CLI-M61 empties this.
-[[nodiscard]] bool moved_by_m61(const std::string& door) {
-    return door.starts_with("apogee train setup --with ") ||
-           door.starts_with("apogee train setup --rebuild --with ");
-}
-
 [[nodiscard]] bool child_shell_here() {
     return apogee::platform::supports_child_processes() && fs::exists("/bin/sh") &&
            fs::exists("/usr/bin/env");
@@ -742,7 +734,7 @@ TEST_CASE("a dev or test build names itself in every command it prints, and the 
             }
             INFO("row " << row.at("name") << ": " << remedy);
             for (const std::string& door : apogee::testing::remedy_doors(remedy)) {
-                if (door.starts_with("apogee") && !moved_by_m61(door)) {
+                if (door.starts_with("apogee")) {
                     CHECK(door.starts_with(program + " "));
                 }
             }
@@ -759,4 +751,60 @@ TEST_CASE("a dev or test build names itself in every command it prints, and the 
         REQUIRE(home.run({"version"}, &out, &err) == 0);
         CHECK(out.starts_with("apogee "));
     }
+}
+
+TEST_CASE("check's doors for a hand-written suite, agent, MCP server and host reach their verb",
+          "[commands][suggested-command][M61]") {
+    if (!child_shell_here()) {
+        SKIP("no child processes or no /bin/sh here: no shell can read a pasted line");
+    }
+    // The kinds only a hand edit, or a config older than 55f's add rule,
+    // gives an odd name (CLI-M61): each door names it as one word, with its
+    // `--` when it starts with a dash.
+    const CliHome home{
+        "models:\n  default: m\nbackends:\n  m:\n    type: mock\n"
+        "mcp_servers:\n  '-m':\n    command: /nowhere/server\n"
+        "tools:\n  allowed_hosts:\n    - \"it's here\"\n"
+        "suites:\n  '-s': {}\n"
+        "agents:\n  'a;b':\n    model: 'x y'\n    mcp: ['-srv']\n"};
+    const apogee::testing::TempDir folder{"suggested-m61-" +
+                                          std::to_string(std::random_device{}())};
+    std::string out;
+    std::string err;
+    (void)home.run({"check", "--output-format", "json"}, &out, &err);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    std::map<std::string, std::vector<std::string>> remedies;
+    for (const nlohmann::json& row : document.at("rows")) {
+        if (const std::string remedy = row.value("remedy", ""); !remedy.empty()) {
+            remedies[row.at("name").get<std::string>()].push_back(remedy);
+        }
+    }
+    CHECK(remedies["suite: -s"] ==
+          std::vector<std::string>{"apogee config set-suite --<role> <backend> -- -s"});
+    CHECK(remedies["server: -m"] ==
+          std::vector<std::string>{"apogee config delete-mcp-server -- -m"});
+    CHECK(remedies["allowed_hosts"] ==
+          std::vector<std::string>{"apogee config delete-allowed-host \"it's here\""});
+    CHECK(remedies["agent: a;b"] ==
+          std::vector<std::string>{
+              "apogee agents edit \"a;b\"",
+              "apogee config add-backend \"x y\" --type <type>   (or change agents.a;b.model)",
+              "apogee mcp create -- -srv"});
+
+    // Each door with nothing to fill in, read by every shell here, gives its
+    // verb the name as one word, and the verb parses it.
+    const Pasted server = paste(home, "apogee config delete-mcp-server -- -m", folder.path());
+    CHECK(server.words ==
+          std::vector<std::string>{"apogee", "config", "delete-mcp-server", "--", "-m"});
+    const Pasted created = paste(home, "apogee mcp create -- -srv", folder.path());
+    CHECK(created.words == std::vector<std::string>{"apogee", "mcp", "create", "--", "-srv"});
+    CHECK(apogee::testing::sh_words("apogee agents edit \"a;b\"") ==
+          std::vector<std::string>{"apogee", "agents", "edit", "a;b"});
+    // The host goes, as written (CLI-M40), and the row with it.
+    const Pasted host =
+        paste(home, "apogee config delete-allowed-host \"it's here\"", folder.path());
+    CHECK(host.words ==
+          std::vector<std::string>{"apogee", "config", "delete-allowed-host", "it's here"});
+    CHECK(host.code == 0);
+    CHECK(apogee::harness::load_config(home.config_path()).tools.allowed_hosts.empty());
 }

@@ -141,9 +141,12 @@ SessionModel resolve_session_model(const harness::Config& config, std::string_vi
             owners += (owners.empty() ? std::string{} : " and ") + type;
         }
         out.refusal = "'" + std::string{name} + "' is on " + owners +
-                      "'s rosters -- pin it to one entry with 'apogee config add-backend <name> "
-                      "--type <type> --model " +
-                      std::string{name} + "'";
+                      "'s rosters -- pin it to one entry with '" +
+                      harness::render({.verbs = {"config", "add-backend"},
+                                       .parts = {harness::placeholder("<name>"),
+                                                 harness::option_placeholder("--type", "<type>"),
+                                                 harness::option("--model", std::string{name})}}) +
+                      "'";
         return out;
     }
     if (!roster.backend.empty()) {

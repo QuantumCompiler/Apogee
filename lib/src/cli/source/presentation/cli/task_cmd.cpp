@@ -63,6 +63,11 @@ namespace {
 
 namespace fs = std::filesystem;
 
+/// `task <verb> <id>`, by the one renderer (CLI-M61).
+[[nodiscard]] std::string task_door(std::string_view verb, const std::string& id) {
+    return harness::render({.verbs = {"task", std::string{verb}}, .parts = {harness::operand(id)}});
+}
+
 [[noreturn]] void fail_user(const std::string& message) {
     std::cerr << "apogee task: " << message << "\n";
     throw CLI::RuntimeError(kUserError);
@@ -164,8 +169,8 @@ struct TaskFlags {
         return view.status + " (now, process " + std::to_string(*view.process) + ")";
     }
     if (view.interrupted) {
-        return view.status + " (interrupted -- its process is gone; 'apogee task resume " +
-               view.id + "' continues it)";
+        return view.status + " (interrupted -- its process is gone; '" +
+               task_door("resume", view.id) + "' continues it)";
     }
     return view.status;
 }
@@ -1068,9 +1073,9 @@ void drive(const RootContext& context, const MachineBudgetSource& machine, const
     told << "task " << ended.id << " " << ended.status << " -- " << ended.reason << "\n"
          << "  conversation: " << ended.session_id << "\n";
     if (ended.status != tasks::kDone) {
-        told << "  'apogee task status " << ended.id << "' shows each round";
+        told << "  '" << task_door("status", ended.id) << "' shows each round";
         if (tasks::resume_refusal(ended).empty()) {
-            told << "; 'apogee task resume " << ended.id << "' continues it";
+            told << "; '" << task_door("resume", ended.id) << "' continues it";
         }
         told << "\n";
     }
@@ -1665,7 +1670,7 @@ std::string task_holds_chat(const logger::Session& session) {
         return {};
     }
     return "chat " + session.chat_id + " is the conversation of task " + task->id + ", which is " +
-           task->status + " -- 'apogee task cancel " + task->id + "' stops it first";
+           task->status + " -- '" + task_door("cancel", task->id) + "' stops it first";
 }
 
 }  // namespace apogee::commands

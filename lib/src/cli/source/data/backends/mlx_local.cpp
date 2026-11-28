@@ -30,6 +30,17 @@
 namespace apogee::backends {
 namespace {
 
+/// `config add-backend <name> --type mlx --model-path <model directory>
+/// --force`: the entry written again over a model directory, by the one
+/// renderer (CLI-M61).
+[[nodiscard]] std::string mlx_add_again(std::string_view name) {
+    return harness::render(
+        {.verbs = {"config", "add-backend"},
+         .parts = {harness::operand(std::string{name}), harness::option("--type", "mlx"),
+                   harness::option_placeholder("--model-path", "<model directory>"),
+                   harness::option("--force")}});
+}
+
 /// The most of the driver's stderr kept for a failure message -- the vendor
 /// CLIs' bound, since `mlx-lm` and `transformers` warn as freely.
 constexpr std::size_t kStderrTailBytes = 8192;
@@ -493,8 +504,7 @@ MlxReadiness probe_mlx_kind(std::string_view name, const std::filesystem::path& 
         readiness.refusal = MlxRefusal::Kind;
         readiness.reason =
             dir.string() + " is kind " + models::describe(kind) + ", so no mlx entry runs it";
-        readiness.remedy = "apogee config add-backend " + std::string{name} +
-                           " --type mlx --model-path <model directory> --force";
+        readiness.remedy = mlx_add_again(name);
     }
     return readiness;
 }
@@ -505,8 +515,7 @@ MlxReadiness probe_mlx_backend(std::string_view name, const harness::BackendConf
     if (!readiness.ready()) {
         return readiness;
     }
-    const std::string fix = "apogee config add-backend " + std::string{name} +
-                            " --type mlx --model-path <model directory> --force";
+    const std::string fix = mlx_add_again(name);
     if (config.model_path.empty()) {
         readiness.refusal = MlxRefusal::NoModelPath;
         readiness.reason =

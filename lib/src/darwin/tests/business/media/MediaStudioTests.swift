@@ -38,6 +38,21 @@ struct InstallConsentTests {
         let twoVoices = recorded("business/media/Fixtures/compose-refused-two.err")
         #expect(InstallConsent(failure: twoVoices, stderr: twoVoices) == nil)
     }
+
+    @Test("a dev or test build's refusal names its install by its own binary: read as the release's is")
+    func byChannelBinary() throws {
+        // The CLI's M49 and M61: the remedy begins with the build's installed
+        // name; the note's house voice stays `apogee <verb>: `.
+        for program in ["apogee-dev", "apogee-test"] {
+            let stderr = "apogee video compose: torch and diffusers are not installed in Apogee's Python environment -- \(program) train setup --with video\n"
+            let consent = try #require(InstallConsent(failure: stderr, stderr: stderr), "\(program)")
+            #expect(consent.arguments == ["train", "setup", "--with", "video"])
+            #expect(consent.said == stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+            let rebuild = "apogee voice say: Apogee's Python environment runs on Python 3.14, which voice does not -- rebuild it on a Python that fits: \(program) train setup --rebuild --with voice"
+            #expect(MediaLibrary.installCommand(in: rebuild) == ["train", "setup", "--rebuild", "--yes", "--with", "voice"], "\(program)")
+        }
+        #expect(MediaLibrary.installCommand(in: "see myapogee train setup --with video") == nil, "a name that only ends like the binary's is not one")
+    }
 }
 
 /// GUI M13: since the CLI's M29 a runtime refusal ends the job's stream on an

@@ -154,9 +154,11 @@ TEST_CASE("create --from xcode writes what the typed xcrun mcpbridge writes, and
     const apogee::testing::FakeXcode fake;
     REQUIRE(ready.home.run({"mcp", "create", "xcode", "--from", "xcode"}, &out, &err) == 0);
     CHECK_THAT(out, ContainsSubstring("registered MCP server 'xcode'"));
-    CHECK_THAT(out, ContainsSubstring("Test it:  apogee mcp test xcode XcodeListWindows '{}'"));
+    // The arguments one word by the renderer's rule (CLI-M61): `{}` holds
+    // nothing double quotes read otherwise, so they quote it.
+    CHECK_THAT(out, ContainsSubstring("Test it:  apogee mcp test xcode XcodeListWindows \"{}\""));
     // The note, after the Test it line: the switch, the project, the approval.
-    CHECK_THAT(out, ContainsSubstring("'{}'\nXcode answers only while it runs with your project "
+    CHECK_THAT(out, ContainsSubstring("\"{}\"\nXcode answers only while it runs with your project "
                                       "open"));
     CHECK_THAT(out, ContainsSubstring("asks again after every install or update"));
     const std::string from = slurp(ready.home.config_path());

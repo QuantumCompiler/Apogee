@@ -171,7 +171,7 @@ Hermetic: no network, no models, nothing written outside the test's own folder.
 
 ## Out of scope
 
-- The questions' wording and the commands the views run ([CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash), shipped, and [CLI-M61](every-printed-command-goes-through-the-renderer.md)).
+- The questions' wording and the commands the views run ([CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash), shipped, and [CLI-M61](../../../assistant/cli/MILESTONES.md#2026-11-28--every-printed-command-goes-through-the-renderer-maintenance-item-m61-every-printed-command-goes-through-the-renderer), shipped 2026-11-28).
 - The line-mode `[y/N]` prompts, which read a line and already wait.
 - The pump's redraw post and `ManualPump`'s behaviour, both unchanged; the test feeds `Event::Custom` itself.
 - A timeout on an open question.
@@ -185,4 +185,4 @@ Hermetic: no network, no models, nothing written outside the test's own folder.
   - [32b](../../../assistant/cli/MILESTONES.md#2026-10-10--tui-shell-backlog-item-32b-bare-apogee-opens-a-screen), the pump and its redraw;
   - [32d](../../../assistant/cli/MILESTONES.md#2026-10-10--tui-workbench-views-backlog-item-32d-the-rest-of-the-product-on-screen), the list view's confirm;
   - [32e](../../../assistant/cli/MILESTONES.md#2026-10-10--tui-system-monitor-backlog-item-32e-the-machine-on-the-bottom-bar), the monitor's 2 s tick;
-  - [CLI-M61](every-printed-command-goes-through-the-renderer.md), the question texts.
+  - [CLI-M61](../../../assistant/cli/MILESTONES.md#2026-11-28--every-printed-command-goes-through-the-renderer-maintenance-item-m61-every-printed-command-goes-through-the-renderer) (shipped 2026-11-28), the question texts.

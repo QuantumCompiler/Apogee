@@ -713,12 +713,23 @@ add_test(NAME cli.one_key_resolver
 )
 
 # A printed command goes through the renderer, so it names the binary and the
-# root that printed it (CLI-M49; CLI-M61 extends it). See the file.
+# root that printed it (CLI-M49), and no name is joined into it by hand
+# (CLI-M61). See the file. The planted twin runs it over a fixture folder
+# holding each kind of join and passes only when the failure names every one,
+# file and line, and none of the house voice beside them.
 add_test(NAME cli.one_suggested_command
     COMMAND "${CMAKE_COMMAND}"
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_suggested_command.cmake"
 )
+add_test(NAME cli.one_suggested_command_planted
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/one_suggested_command
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/one_suggested_command.cmake"
+)
+set_tests_properties(cli.one_suggested_command_planted PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "joined by hand, on 6 line[(]s[)]:[^@]*presentation/cli/planted[.]h:11: std::string chain = [^@]*presentation/cli/planted[.]h:12: std::string chosen = fresh [?] [^@]*presentation/cli/planted[.]h:13: std::cout << [^@]*presentation/cli/planted[.]h:14: std::string mode = \"chmod 700 '\" [+] path[^@]*presentation/cli/planted[.]h:15: std::string spliced = harness::printed_program[(][)] [+] [^@]*presentation/cli/planted[.]h:16: std::string bare = ")
 
 # Provider probes run inside `check` and `providers scan` only, never on a
 # startup path (28a). See the file.

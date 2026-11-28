@@ -65,8 +65,11 @@ std::string choose_voice_engine(std::string_view asked, VideoEngine directory,
     }
     return "'" + std::string{name} +
            "' is a voice model as Kokoro publishes it, which speaks on PyTorch (kokoro), not "
-           "MLX -- MLX speaks with its MLX build: 'apogee models convert " +
-           std::string{name} + " --mlx' makes one, after '" + mlx_audio_setup_remedy() + "'";
+           "MLX -- MLX speaks with its MLX build: '" +
+           harness::render(
+               {.verbs = {"models", "convert"},
+                .parts = {harness::operand(std::string{name}), harness::option("--mlx")}}) +
+           "' makes one, after '" + mlx_audio_setup_remedy() + "'";
 }
 
 nlohmann::json voice_request_document(const VoiceRequest& request,

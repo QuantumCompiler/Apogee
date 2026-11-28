@@ -1202,11 +1202,12 @@ apogee_run(1 config add-allowed-host https://example.com/)
 # A pasted URL -- a hand edit, since no verb writes one -- allows nothing, and
 # `check` names the verb that removes it, which takes it as written: the file
 # is back to its bytes (CLI-M40). `check --fix` leaves it where it is (M11).
+# The entry is one word by the renderer's rule, bare here (CLI-M61).
 string(REPLACE "\"allowed_hosts\": []"
     "\"allowed_hosts\": [\"https://not-a-host.example/path\"]" PASTED "${BEFORE_ALWAYS}")
 file(WRITE "${CONFIG_FILE}" "${PASTED}")
 apogee_run(0 check --fix)
-if(NOT APOGEE_OUT MATCHES "delete-allowed-host 'https://not-a-host\\.example/path'")
+if(NOT APOGEE_OUT MATCHES "delete-allowed-host https://not-a-host\\.example/path")
     message(FATAL_ERROR "check does not name the verb for a pasted URL:\n${APOGEE_OUT}")
 endif()
 file(READ "${CONFIG_FILE}" AFTER_CHECK)

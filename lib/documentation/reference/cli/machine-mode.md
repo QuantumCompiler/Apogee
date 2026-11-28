@@ -1744,9 +1744,11 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   quotes. Since CLI-M49 a door names the binary and root that printed it --
   `apogee-dev config migrate` from a dev build, `apogee --dev …` under
   `--dev` -- so a host that runs a door through the binary strips the program
-  word it finds, not `apogee` alone. Until CLI-M61 moves the rest onto the
-  same renderer, a door completed by a name (`apogee models repair <name>`)
-  still begins `apogee` from every build, so a host meets both forms. Since
+  word it finds, not `apogee` alone. Since CLI-M61 (2026-11-28) every door
+  goes through the same renderer -- one completed by a name
+  (`apogee models repair <name>`, `apogee config delete-mcp-server -- -m`)
+  included -- so a door begins with the build's program word whatever it
+  names. Since
   CLI-M50, for a backend whose name is outside the add rule (`-x`, `a b`,
   `qwen@home`: written by hand, or kept from a config older than 2026-10-25,
   which every editor refuses), a door naming `config set-backend` or

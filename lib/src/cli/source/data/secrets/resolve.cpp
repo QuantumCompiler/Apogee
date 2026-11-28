@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include "contracts/suggested_command.h"
+
 namespace apogee::secrets {
 namespace {
 
@@ -155,8 +157,9 @@ std::string no_key_message(std::string_view backend_name, harness::BackendType t
     return "no API key found for '" + std::string{backend_name} +
            "'. Either set api_key on "
            "this backend (a \"${" +
-           variable + "}\" reference is expanded when the config is read), run 'apogee auth add " +
-           slot + "', or export " + variable;
+           variable + "}\" reference is expanded when the config is read), run '" +
+           harness::render({.verbs = {"auth", "add"}, .parts = {harness::operand(slot)}}) +
+           "', or export " + variable;
 }
 
 }  // namespace apogee::secrets

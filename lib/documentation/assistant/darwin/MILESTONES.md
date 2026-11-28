@@ -3063,6 +3063,25 @@ Decisions (2026-11-26 and 2026-11-27), each for veto:
 - **The design prototype's mirrors** (`ClipForm.ts` and its test among them) are a design follow-up.
 - **Not run:** CI's rows, which wait for a push.
 
+### 2026-11-28 — a printed command is read whichever channel's binary printed it (from CLI-M61)
+
+**Why.** The CLI's M49 begins every command it prints with the build's own installed name, and its M61 moved the rest of its printed commands onto that renderer, among them the two the app reads with code: a media verb's install remedy (`… -- apogee train setup --with video`) and a stopped models chain's resume line (`  apogee models convert …`). The app found both by the literal `apogee`. On the dev channel the CLI now prints `apogee-dev train setup --with video` and `apogee-dev models convert …`, so the app's development build, which drives `apogee-dev`, showed a refused Video, Voice or Compose run with no Install or Rebuild sheet, and a failed chain with no Resume. Found by the review of CLI-M61, by reading both sides; the release channel was never affected.
+
+- [x] **One reader of a printed command** in `Argv` (`source/business/reads/Argv.swift`): `programNames` -- `apogee`, `apogee-dev`, `apogee-test`, each channel's installed binary -- and `printed(_:in:)`, the first place a program name stands as a word of its own followed by a verb's words. A note's house voice (`apogee <verb>: `) is every build's and is not one of them.
+- [x] **Its three readers**: `MediaLibrary.installCommand` and `InstallConsent`'s naming line read `printed(["train", "setup"], in:)`; `JobProgress.resumeCommand` reads `printed([], in:)`; the Console's `arguments` drops a leading `apogee-dev` or `apogee-test` as it drops `apogee`, so a remedy a dev build printed, pasted there, runs.
+
+Decisions (2026-11-28), each for veto:
+- **The app reads the CLI's words as printed; the CLI is not changed back.** Printing a literal `apogee` on the dev channel would undo the CLI's M49: a dev build's remedy, pasted into a shell, would run the release.
+- **No root flag is read.** The app passes none, so its CLI never prints `apogee --dev …`.
+
+**Verified.**
+- **Red first.** `JobResumeTests`' `resumeByChannelBinary`, `InstallConsentTests`' `byChannelBinary` and `ConsoleViewModelTests`' two new expectations -- an `apogee-dev` and an `apogee-test` line each, and a `myapogee` that is no binary -- failed on the unchanged code, and pass.
+- **The suite**, run on the final code with only the real-binary pass skipped (`-skip-testing:BusinessSessionTests/RealBinaryTests`, since it runs the installed `~/.local/bin` binary): **1,400 of 1,400** cases passed by the result bundle's `totalTestCount`, the layering check among them; the log holds no Swift warning.
+
+**Not done.**
+- **The recordings** under `tests/` still say `apogee`: they were made on the release channel, which prints it.
+- **The Release build** and its signature were not made by this change; CI's macOS row makes them.
+
 ## Milestone F — Apogee in Xcode, the app's side
 
 **Goal.** Track 5 (opened 2026-10-31, the user's call, from that day's Xcode research): the CLI's track 56 made Apogee an Agent Client Protocol agent Xcode 26.6 and later can run (`apogee acp`), gave Apogee's agents Xcode's own tools through a preset (`xcode`, over `xcrun mcpbridge`), and printed the fields Xcode's Add an Agent sheet takes (`acp registration`) -- the setup a person does from a terminal. The app had no place for any of it (wall W7). Its side gives that setup a pane in Settings, every fact in the CLI's words and nothing that reaches Xcode, and classifies `acp` in the parity table.

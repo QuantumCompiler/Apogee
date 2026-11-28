@@ -145,7 +145,7 @@ tui::ListOptions train_view_options(const RootContext& context,
             .prefill = [prefill](const tui::ListRow& /*row*/) { return prefill; },
             .confirm =
                 [spend](const tui::ListRow& /*row*/, const std::string& line) {
-                    return "Start 'apogee train " + line + "'? " + spend;
+                    return "Start '" + typed_command("train", line) + "'? " + spend;
                 },
             .here = true};
     };
@@ -186,10 +186,10 @@ tui::ListOptions train_view_options(const RootContext& context,
             .confirm =
                 [version_of](const tui::ListRow& row) {
                     const std::string backend = version_of(row).value_or(VersionRow{}).backend;
-                    return "Roll " + backend +
-                           " back to its previous version ('apogee train "
-                           "rollback " +
-                           backend + "')?";
+                    return "Roll " + backend + " back to its previous version ('" +
+                           harness::render({.verbs = {"train", "rollback"},
+                                            .parts = {harness::operand(backend)}}) +
+                           "')?";
                 },
             .run =
                 [&context, binary, version_of](const tui::ListRow& row) {
@@ -257,7 +257,7 @@ tui::ListOptions datasets_view_options(const RootContext& context,
             .prefill = [prefill](const tui::ListRow& /*row*/) { return prefill; },
             .confirm =
                 [spend](const tui::ListRow& /*row*/, const std::string& line) {
-                    return "Start 'apogee datasets " + line + "'? " + spend;
+                    return "Start '" + typed_command("datasets", line) + "'? " + spend;
                 },
             .here = true};
     };

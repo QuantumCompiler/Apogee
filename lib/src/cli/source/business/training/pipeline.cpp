@@ -43,8 +43,10 @@ std::string percent_of(double score) {
 /// lost the lock to it say.
 std::string held_refusal(std::string_view id, const platform::PidLock::Holder& holder) {
     return "pipeline " + std::string{id} + " is " + pipeline_holder_text(holder) +
-           " -- it cannot be resumed while it runs; 'apogee train pipeline status " +
-           std::string{id} + "' shows how far it has got";
+           " -- it cannot be resumed while it runs; '" +
+           harness::render({.verbs = {"train", "pipeline", "status"},
+                            .parts = {harness::operand(std::string{id})}}) +
+           "' shows how far it has got";
 }
 
 /// The pipeline's lock for the whole run (57g): taken over from a dead

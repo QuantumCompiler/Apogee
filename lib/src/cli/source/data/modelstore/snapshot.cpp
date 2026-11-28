@@ -493,11 +493,17 @@ std::optional<DiffusionModel> snapshot_diffusion_model(const std::filesystem::pa
 
 namespace {
 
+/// `models pull <ref> --safetensors`, by the one renderer (CLI-M61).
+[[nodiscard]] std::string safetensors_pull(const std::string& ref) {
+    return harness::render({.verbs = {"models", "pull"},
+                            .parts = {harness::operand(ref), harness::option("--safetensors")}});
+}
+
 /// What fetches a Wan set's missing components: the pull of its repository,
 /// at its revision, else the words for one with no record.
 [[nodiscard]] std::string completing_pull(const DiffusionModel& model) {
     return model.ref.empty() ? std::string{"pulling its repository again with --safetensors"}
-                             : "'apogee models pull " + model.ref + " --safetensors'";
+                             : "'" + safetensors_pull(model.ref) + "'";
 }
 
 /// What runs a Wan set on each of `video generate`'s engines (M24): the
@@ -507,8 +513,12 @@ namespace {
 [[nodiscard]] std::string wan_engines(const DiffusionModel& model) {
     const std::string repository = model.ref.substr(0, model.ref.find('@'));
     return "its Diffusers pipeline on PyTorch, pulled whole" +
-           (repository.empty() ? std::string{" (a repository with model_index.json at its root)"}
-                               : " with 'apogee models pull " + repository + "-Diffusers'") +
+           (repository.empty()
+                ? std::string{" (a repository with model_index.json at its root)"}
+                : " with '" +
+                      harness::render({.verbs = {"models", "pull"},
+                                       .parts = {harness::operand(repository + "-Diffusers")}}) +
+                      "'") +
            ", or its MLX conversion on MLX through mlx-video";
 }
 
@@ -577,7 +587,11 @@ std::string wan_layout_run_refusal(std::string_view subject, std::string_view ha
         return out + ", made as " + said_together(model.mlx_conversions) + " -- name " +
                (model.mlx_conversions.size() == 1 ? "it" : "one") + " with --model";
     }
-    out += ", made with 'apogee models convert " + std::string{handle} + " --mlx'";
+    out += ", made with '" +
+           harness::render(
+               {.verbs = {"models", "convert"},
+                .parts = {harness::operand(std::string{handle}), harness::option("--mlx")}}) +
+           "'";
     if (!wan.whole()) {
         const std::vector<std::string> missing = wan.missing();
         out += " once the set is complete: it lacks " + said_together(missing) + ", which " +

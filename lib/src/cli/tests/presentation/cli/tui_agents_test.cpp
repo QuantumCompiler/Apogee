@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cli/command.h"
+#include "cli/line_tokens.h"
 #include "secrets/store.h"
 #include "support/cli_home.h"
 #include "tui/list_view.h"
@@ -435,4 +436,35 @@ TEST_CASE("t on a dash-led server opens after -- and answers as mcp test does",
     CHECK(options.asks.front().prefill({.key = "-x"}) == "-- -x ");
     CHECK(options.asks.front().ask({.key = "-x"}, R"(-- -x read_file '{"path": "note.txt"}')") ==
           err + out);
+}
+
+TEST_CASE("the Agents view's delete confirm names the command as it runs, an odd name one word",
+          "[cli][tui][tooling][M61]") {
+    const Home home;
+    const apogee::tui::ListOptions options =
+        apogee::commands::agents_view_options(home.context, {});
+    REQUIRE(options.actions.front().key == "x");
+    const auto& confirm = options.actions.front().confirm;
+    CHECK(confirm({.key = "reviewer"}) ==
+          "Delete agent reviewer's entry ('apogee agents delete reviewer')? Its prompt and schema "
+          "files stay");
+    CHECK(confirm({.key = "-x"}) ==
+          "Delete agent -x's entry ('apogee agents delete -- -x')? Its prompt and schema files "
+          "stay");
+    CHECK(confirm({.key = "a;b"}) ==
+          "Delete agent a;b's entry ('apogee agents delete \"a;b\"')? Its prompt and schema files "
+          "stay");
+}
+
+TEST_CASE("t opens on a server's name as one word, quoted by the one rule",
+          "[cli][tui][tooling][M61]") {
+    const Home home;
+    const apogee::tui::ListOptions options = apogee::commands::mcp_view_options(home.context, {});
+    REQUIRE(options.asks.front().key == "t");
+    CHECK(options.asks.front().prefill({.key = "my server"}) == "\"my server\" ");
+    CHECK(options.asks.front().prefill({.key = "$x"}) == "'$x' ");
+    CHECK(options.asks.front().prefill({.key = "-a b"}) == "-- \"-a b\" ");
+    // What the line then hands `mcp test` is the name, whole.
+    CHECK(apogee::commands::line_tokens("-- \"-a b\" read_file").words ==
+          std::vector<std::string>{"--", "-a b", "read_file"});
 }

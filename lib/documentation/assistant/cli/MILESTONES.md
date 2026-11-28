@@ -3604,7 +3604,7 @@ The integration spike's wall **W7** — "everything else is a CLI command", but 
 - **No function rendered a printed command.** About 226 name holes at about 189 sites joined a name or a path in raw, and five private quoters each solved part of the job, differently.
 - **Every kind of word failed somewhere.** For a collection `a;b` the pasted line built collection `a`, then ran `b`. A hand-written backend `a;b` lost backend `a` to `models delete`'s remedy. `-h` printed help and exited 0, and zsh read `=ls` as `/bin/ls`. A name with a space or a quote, and every path under a home such as `it's home`, failed to parse. A symphony `-q` could be created and not played or edited as printed.
 - **The same text reached other readers**: `check`'s JSON `remedy`, the HTTP admin graph bodies, the graph tools' results and the TUI's confirm prompts.
-The item was specced whole, then split on 2026-11-27: this pass is the renderer, the folds, and every name the CLI makes plus the backend doors. [CLI-M61](../../backlog/cli/maintenance/every-printed-command-goes-through-the-renderer.md) moves the rest and adds the source check.
+The item was specced whole, then split on 2026-11-27: this pass is the renderer, the folds, and every name the CLI makes plus the backend doors. [CLI-M61](#2026-11-28--every-printed-command-goes-through-the-renderer-maintenance-item-m61-every-printed-command-goes-through-the-renderer) (shipped 2026-11-28) moves the rest and adds the source check.
 
 **What was built**
 
@@ -3704,6 +3704,7 @@ The item was specced whole, then split on 2026-11-27: this pass is the renderer,
 **Left to CI.** Windows' rendering of `--custom`'s file (PowerShell's quoting) and the `admin_graph_navigate` case's `shell_word` of a Windows path are proven by the Windows rows; the shell-replay fixtures skip there.
 
 **Left for CLI-M61.** Its rule joins this check (`one_suggested_command.cmake`), its allowlist for joined commands still empty. It moves the joined doors listed above, and with them their program word; it removes `moved_by_m61` from `cli/suggested_command_test.cpp`; chat's resume door (`chat_session.cpp`, `"… with: apogee " + session_command(mode)`) and the TUI's run heading (`tui_runner.cpp`) and narration (`tui_child.cpp`) join a value to a bare `apogee ` that neither check sees. Its CLAUDE.md invariant gains "and names the binary and root that printed it".
+- *Revised 2026-11-28 ([CLI-M61](#2026-11-28--every-printed-command-goes-through-the-renderer-maintenance-item-m61-every-printed-command-goes-through-the-renderer)):* done -- the joined doors render with their program word, `moved_by_m61` is gone, the check sees the bare `apogee ` joined to a verb, chat's resume door renders, and the TUI's run heading and narration say the command as it runs (`render_typed`).
 
 ### 2026-11-27 — `a-refused-backend-name-gets-the-rename-that-reaches-it` (maintenance item M50): a backend name the editors refuse gets the rename door that reaches it
 
@@ -3751,6 +3752,111 @@ The item was specced whole, then split on 2026-11-27: this pass is the renderer,
 **Left to CI.** Windows renders these doors in PowerShell's spelling; the tests' names (`-x`, `a b`, `a;b`, `qwen@home`) print the same there, and the shell replays skip without `/bin/sh` -- the Windows rows prove it. ` && ` in a door is PowerShell 7's, as `check`'s re-promote door already chains, not Windows PowerShell 5.1's.
 
 **Left for later.** `backends::spell_adapters` has no caller in source now (its doors build parts); its pins in `adapters_test` keep it until a cleanup takes it.
+
+### 2026-11-28 — `every-printed-command-goes-through-the-renderer` (maintenance item M61): every printed command goes through the renderer
+
+**Why.** This is Pass B of the item CLI-M48 split on 2026-11-27. CLI-M48 built one renderer for the commands Apogee prints for a person to copy, and routed every name the CLI makes and the backend doors through it; CLI-M49 gave it the binary and root that printed the line, and CLI-M50 the rename door. Every other command a name or a value completes still joined it in raw:
+- **154 lines in 40 files**, by the source check's own count once its joined rule was written (2026-11-28, today's tree, the sweep's 2026-11-26 count of about 189 sites having shrunk by the three items' own sites);
+- **every kind the ticket names**: the kinds only a hand edit or an older config reaches (backends, suites, agents, MCP servers), model refs and handles, run and task ids, the full-screen shell's confirms, and the holes that are not names (`models_pull`'s resume suffixes, `check`'s `&&` fragment, `mcp create`'s `try_tool`).
+
+Measured on the binary at HEAD e6417134 before any site moved: a YAML home with a hand-written suite `-s`, agent `a;b` (its model `x y`, its server `-srv`), MCP server `-m` and allowed host `it's here` got `check` doors `apogee config set-suite -s --<role> <backend>`, `apogee agents edit a;b` (pasted, it runs `b`), `apogee config add-backend x y --type <type>` (two words), `apogee mcp create -srv` and `apogee config delete-mcp-server -m` (each name read as an option), and `apogee config delete-allowed-host 'it's here'` (a quote left open). A dev or test build's `check` named `apogee train setup --with mlx-video` -- the release binary -- which CLI-M49's fixture excused as `moved_by_m61`.
+
+**What was built**
+
+- [x] **Every remaining site through the renderer**: 148 joined lines in 35 files, plus the MCP view's prefill. Each builds a `SuggestedCommand` where it built a string, and keeps the words around it, its delimiter and its stream.
+  - **`check.cpp`** (34 lines):
+    - the suite rows: `set-suite <name> --<role> <backend>`, `--consultable`, `--verifier` and `--orchestrate off`;
+    - `models repair` on every damaged store row, through one helper; `auth add <type>`; the provider row's `add-backend <id> --type <type> --model <model>`;
+    - `promote_again_door`, its `train eval … --force && train promote … --adapter` through `render_all`;
+    - CLI-M40's `delete-allowed-host`, its hand-wrapped quotes gone;
+    - the three MCP-server doors; the agent rows (`agents create <name> --force`, `agents edit`, `config add-backend <model> --type <type>`, `mcp create <server>`);
+    - `setup_remedy` (`train setup [--rebuild] --with <set>`) and the trainer row;
+    - the version ledger's `train promote <run> --as <backend>`, `train rollback <backend>`, and its re-add door (`config add-backend … --model-path <base> && config set-backend … --adapters …`, the `&&` fragment, through `render_all`).
+  - **`models_pull.cpp`** (24): the convert, delete, repair, pull and quantize hints and refusals, the voice model's `voice say "<text>" -o speech.wav --model <handle>`, the embedding role's note and the next step, and the chains' resume lines, whose flag suffixes are parts now (`--register-with` marked greedy: a vector option).
+  - **`train.cpp`** (19): `chat -m`, `train rollback`, `train promote <run> --as <backend>` and `--as <name> --adapter`, `train eval`, the pipeline resume (`--pipeline <spec>` a placeholder part), `config add-backend … --model-path <base.gguf>`, `train setup --trainer`, and the regime's promote-by-hand line.
+  - **`models.cpp`** (15): `auth add`, `models repair`, `models convert [--mlx]`, the MLX `add-backend` door, `set-default-embedding` and `chat -m`.
+  - **Business and Data**, each calling the renderer directly: `video/runtime.cpp` (10), `video/voice.cpp`, `training/python_env.cpp` (2), `training/promote.cpp`, `training/pipeline.cpp`, `tasks/ledger.cpp`, `models/source_hf.cpp` (2), `agentloop/validate.cpp`, `backends/mlx_local.cpp` (2), `backends/mlx_embed.cpp`, `modelstore/snapshot.cpp` (3, its `?:` operands among them) and `secrets/resolve.cpp`.
+  - **The rest of Presentation**: `task_cmd.cpp` (4, task ids), `mcp_cmd.cpp` (3: the `Test it:` lines, `try_tool` and its arguments each one word, and `mcp presets`' `register:` line), `agents_cmd.cpp` (2), `helpers.cpp` (2), `provider_offer.cpp` (2), `chat_session.cpp` (2: chat's resume door and `set-permission`), `bootstrap_cmd.cpp`, `config_cmd.cpp`, `config_suites.cpp`, `graph.cpp` (`knowledge info`), `providers_cmd.cpp`, `video_runtime.cpp`, and `operations/backend_names.cpp`, `operations/mcp_presets.cpp` (the JSON `register`) and `operations/suites.cpp`.
+  - **The full-screen shell**:
+    - the Agents view's delete confirm and the Train view's rollback confirm, a dash-led name after `--`;
+    - the MCP view's `t` prefill, the key through `shell_word` as the ticket says: POSIX on every platform, since `line_tokens` reads the line, and the `-- ` kept;
+    - the exec line's heading, the Train and Datasets views' typed confirms, and `run_typed`'s narration, each said back by `render_typed` (`tui_child`'s `typed_command`).
+- [x] **`render_typed`** (`contracts/suggested_command.h/.cpp`): a line a person typed, said back after `printed_program`, each word through `shell_word`, in the person's order. The order rule never moves them and no `--` is added: the person's own `--` already says which word is an operand. It adds no rule. It is the word rule over words whose order is the person's, for the three places that echo a typed line, where `render`'s operands and options would move a typed option.
+- [x] **`cli.one_suggested_command` gains CLI-M61's rule** (`tests/scripts/cmake/one_suggested_command.cmake`):
+  - **What it fails**: a literal holding `apogee <verb> ` or `chmod ` that runs on past its end into a value that is not a literal, through `+`, `<<` or as a `?:` operand, with a quote opening the value counting (so CLI-M40's `'" + host + "'` failed it). So do the program word spliced in and then joined (`printed_program() + " models repair " + name`) and the bare program word joined to a verb (`"with: apogee " + verb`, which CLI-M49's record said neither check saw).
+  - **What it lets through**: the house voice, written whole or joined (`"apogee " << verb << ": "`), and `+ harness::printed_program()` after a literal, which closes nothing.
+  - **Its lists**: a line on the first list (not a command at all) is exempt from both rules. The second list, joined commands allowed to stay joined, ships empty.
+  - **How it reports**: a list naming a missing file, a stale entry, no house voice seen and both kinds of offender are reported together in one failure, the offending lines first.
+  - **Its planted twin**: `cli.one_suggested_command_planted` runs it over `tests/fixtures/one_suggested_command/presentation/cli/planted.h`, a header so `make lint` never parses it. The fixture holds six joins (a `+` chain, a `?:` operand, a `<<` chain, a hand-wrapped `chmod`, a spliced program word, a bare one) beside two lines of the house voice, and the twin passes only when the failure names all six, file and line.
+- [x] **Tests**, each failing on the old code (red first; the renderer's case failed to compile until `render_typed` existed):
+  - `contracts/suggested_command_test`: `render_typed`'s plain bytes (`apogee config get models.default`), the person's `--` and option order kept with nothing added, `"my notes"`, `'$HOME'`, `""` and PowerShell's spelling.
+  - `cli/suggested_command_test` (`[M61]`): the hand-written YAML home above. `check`'s JSON doors are, exactly, `apogee config set-suite --<role> <backend> -- -s`, `apogee agents edit "a;b"`, `apogee config add-backend "x y" --type <type>   (or change agents.a;b.model)`, `apogee mcp create -- -srv`, `apogee config delete-mcp-server -- -m` and `apogee config delete-allowed-host "it's here"`. The doors with nothing to fill in are read by every shell here and reach their verb, and the host goes, as written.
+  - CLI-M49's dev-and-test-build case: `moved_by_m61` is removed, so every Apogee door `check` names on this host begins with the build's name, `train setup --with` among them.
+  - `tui_agents_test` (`[M61]`): the delete confirm on `reviewer` byte for byte, on `-x` (`agents delete -- -x`) and on `a;b` (`"a;b"`); `t`'s prefill on `my server`, `$x` and `-a b`, read back whole by `line_tokens`.
+  - `tui_training_test` (`[M61]`): `R`'s confirm on a hand-written `-x` names `train rollback -- -x`, and a typed run's confirm is the command as it would run (`tiny --dataset 'my set'` confirmed as `apogee train run tiny --dataset "my set"`).
+  - `tui_runner_test` (`[M61]`): the exec line's heading for `get 'no such key'` is `apogee config get "no such key"`, and for `get -- models.default` keeps the typed `--`.
+- [x] **Docs.**
+  - CLAUDE.md: the invariant [⚠ A printed command runs as printed](CLAUDE.md#-a-printed-command-runs-as-printed), the root sub-rule's parenthetical (the joined doors took the program word here), the codebase map's `suggested_command.h` and its Code Style shared-helper line.
+  - DEVELOPER.md: the `suggested_command.h/.cpp` and `tui_child.h/.cpp` rows, `cli.one_suggested_command`'s paragraph with its twin, and the five test rows.
+  - [machine-mode.md](../../reference/cli/machine-mode.md)'s `remedy`: no door begins `apogee` from every build now.
+  - The dated revisions of CLI-M40's remedy ([its record](#2026-11-27--delete-allowed-host-removes-what-the-list-holds-maintenance-item-m40-the-verb-removes-an-entry-as-written-and-every-spelling-of-a-host)) and of CLI-M49's "Left for CLI-M61" [above](#2026-11-27--a-printed-command-names-the-binary-that-printed-it-maintenance-item-m49-a-printed-command-names-the-binary-and-root-that-printed-it), and CLI-M48's and CLI-M62's links repointed at this record.
+  - SPEC is unchanged.
+
+**Decisions made while building** (2026-11-28, each recorded for veto):
+- **The open calls' defaults, taken:** each site keeps its delimiter (`'apogee config delete-backend "my model"'` nests double quotes in a site's single ones); the caller marks a greedy option.
+- **Build-time rulings** (the most conservative reading; for the user's veto):
+  - **The joined rule reaches three shapes the ticket's sentence did not spell out**, so a raw join cannot start again by another spelling:
+    - `chmod ` joined: the ticket names it, and no site does now;
+    - the program word spliced and then joined (`printed_program() + " <verb> " + value`): none was on the tree;
+    - the bare program word with a verb joined after it: CLI-M49's record names chat's resume door and the TUI's heading and narration as left for this item.
+  - **Six lines the joined rule flags are not commands, and go on the first list**, each with its reason. The joined list ships empty. The six:
+    - the Mermaid export's comment, on its two lines (`%% apogee graph export mermaid -- graph "<g>": …`);
+    - the starter prompt a scaffolded agent is written with (`… loaded for "apogee analyze --agent <name>"`), the same bytes in every install as CLI-M49 ruled for files written there;
+    - `mcp_serve`'s refusal prose (`… is not a call apogee mcp serve makes`);
+    - the full-screen shell's title (`apogee <version>`);
+    - the bottom bar's label for this process's memory (`apogee 12 MB`).
+    A seventh, `complete_sources`' completion description (`'apogee train setup --with <set>'`), was already on that list under CLI-M49's ruling for completion descriptions and stays.
+  - **`render_typed` is added to the renderer** for a line a person typed (the exec line's heading, the typed confirms, the narration). `render`'s parts would move a typed option ahead of an operand and add a `--`; the person's own order and `--` are the command. It is the one word rule over the person's words and adds no rule. A typed line the splitter refuses keeps its words as typed in the confirm, after the rendered program and group, and the run then refuses it with the splitter's reason, as before.
+  - **The shell's heading, confirms and narration use the build's shell spelling** (PowerShell's on Windows), as every other printed command does. The MCP view's `t` prefill is POSIX on every platform, as the ticket says, since it is text `line_tokens` reads back.
+  - **Pins that moved, and why each may:**
+    - CLI-M40's remedy, as the ticket says ("whose hand-wrapped quotes go"): `check_test`'s `delete-allowed-host 'https://not-a-host.example/path'` and `config_e2e.cmake`'s match now read the entry bare, every character of it bare. The record is revised in place.
+    - `mcp create --from xcode`'s `Test it:` line: `mcp_presets_cmd_test`'s two pins of `XcodeListWindows '{}'` now read `"{}"`. The arguments are one word by the rule, and `{}` holds nothing double quotes read otherwise. That is a word that needs quoting changing exactly as `shell_word` renders it, CLI-M48's precedent for code-exec's pins. `code-exec`'s `'{"code": "print(6 * 7)"}'` holds a `"` and keeps its bytes.
+    Every other pin and golden of a moved site passes unedited, `train_test`'s name-then-option order among them.
+  - **Greedy marks**: `models pull`/`convert --register-with` and `train setup --with`, CLI11 vector options, are marked greedy by their callers. Only a dash-led ref changes the rendering: `--register-with <levels> -- -- -x`.
+  - **`check`'s re-add door names `config set-backend` without CLI-M50's rename choice**: its row exists because no backend of that name is configured, so `add-backend` comes first, and that refuses a name outside the add rule by itself.
+  - **The Mac app's readers of a printed command take every channel's program name** (from the session's review, 2026-11-28). Three app sites read the CLI's printed words with code, not only show them: `MediaLibrary.installCommand` and `InstallConsent`'s naming line (`train setup --with <set>` from a media verb's refusal, for the Install and Rebuild sheets), `JobProgress.resumeCommand` (a stopped chain's Resume), and the Console's leading-word strip. Each matched the literal `apogee`, and the sites this item moved now begin with the build's own name, so the app's development build, which drives `apogee-dev`, lost the Install sheet and Resume. Reverting those sites to a literal `apogee` would undo CLI-M49 (a dev build's remedy pasted would run the release). So the app reads them as printed: `Argv.programNames` (`apogee`, `apogee-dev`, `apogee-test`) and `Argv.printed(_:in:)`, a program name standing as a word of its own followed by the verb's words, in `lib/src/darwin/source/business/reads/Argv.swift`, used by all three; `JobResumeTests`, `InstallConsentTests` and `ConsoleViewModelTests` pin `apogee-dev` and `apogee-test` lines and a `myapogee` that is no binary, each seen failing first. Recorded beside it in the app's MILESTONES ([Milestone E](../darwin/MILESTONES.md#2026-11-28--a-printed-command-is-read-whichever-channels-binary-printed-it-from-cli-m61)).
+  - **The source check reports every problem in one failure** (a list naming a missing file, a stale entry, the vacuity guards, both kinds of offender), as `cli.no_stdout_notes` does. That is what lets its planted twin read the offenders, since the folder holds none of the listed files.
+
+**Verified.**
+- **Red first.** The source check's rule, its planted twin and every fixture below were written before any site moved:
+  - `cli.one_suggested_command` failed naming 154 lines in 40 files, the list this item then emptied;
+  - its planted twin passed (the failure named all six joins), and with one planted join taken out it failed (`Required regular expression not found`);
+  - CLI-M49's dev-and-test-build case, with `moved_by_m61` removed, failed 4 assertions: the `video` and `voice` rows' `apogee train setup --with mlx-video` and `--with mlx-audio` under both builds;
+  - the `[M61]` presentation case failed 4 of 40 assertions, its doors as measured under **Why**;
+  - the five TUI cases failed: the agents confirm on `-x` and `a;b`, the three prefills, the heading (`apogee config get no such key`), the rollback confirm (`train rollback -x`) and the typed confirm (`--dataset 'my set'`);
+  - the renderer's case failed to compile until `render_typed` existed.
+
+  With the code, every one passed.
+- **The whole Catch2 binary**, run once from an empty folder: 4,757 cases, 4,752 passed and four skipped as before (the two `[powershell]` cases, the `pdftotext` case, the extended-attribute guard). One failed, `mcp_presets_cmd_test`'s `'{}'` pin, which moved as the rulings say and then passed.
+- **Targeted suites on the final build, all passing:**
+  - Catch2: `[M61]` (7 cases), `[commands]` (879, one skipped), `[tui]` (157), `[httpserver]` (201), `[operations]` (54) and `[contracts]` (76, one skipped).
+  - ctest: 63 of the 69 script cases, in 390 s, the install, channel-probe, unit-suite-under-a-tty, version and required-checks cases left to the gate. Among them: `cli.one_suggested_command` and its planted twin, `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.no_stdout_notes` and its twin, `cli.one_key_resolver`, and `cli.config_lifecycle` (its moved allowed-host match). Also every lifecycle that reads a printed command: complete, non-ASCII, machine mode, suites, task, symphonies, execute, providers, provider surfacing and offer, mlx and mlx models, serve, mcp, code exec, video, analyze, knowledge, graph and code graph, navigation, artifacts, datasets, train, the TUI shell and doors, ACP and the reference driver.
+- **The source check by hand**: a planted `"run 'apogee config init'"`, `apogee-dev config init` and a command split after `apogee ` still fail CLI-M49's rule, written out whole. On the tree it passes: 812 files, 83 house-voice lines.
+- **On the real binary** (the build tree's `apogee`, `env -i PATH=/usr/bin:/bin`, `HOME` and `APOGEE_HOME` three folders deep in the scratchpad, stdin `/dev/null`):
+  - The YAML home under **Why** now gives `check` doors `apogee config set-suite --<role> <backend> -- -s`, `apogee config delete-allowed-host "it's here"`, `apogee config delete-mcp-server -- -m`, `apogee agents edit "a;b"`, `apogee config add-backend "x y" --type <type>   (or change agents.a;b.model)` and `apogee mcp create -- -srv`.
+  - Pasted through `/bin/sh`, the host's door removed it (exit 0). The MCP server's door reached `config delete-mcp-server`, which refused `-m` in 57e's words (below).
+  - Run as `apogee --dev check` with only `HOME` set, every one of those doors and the `train setup --with` doors began `apogee --dev`.
+- **Scans.** Homebrew clang-format 22 over all 46 changed C++ files, `--dry-run --Werror` clean, and `make format-check`: `format OK`. The MinGW scan (`x86_64-w64-mingw32-g++`, the windows-x64 tree's flags) over all 43 changed `.cpp` files: 0 with errors, 0 warnings of ours.
+- **The gate**, run on the final CLI tree (2026-11-28, from 01:21), `lib/scripts/cicd.sh --app cli --test`, with nothing else running: exit 0. **4,826 ctest cases**, 4,822 passed and the same four skipped by platform as CLI-M60's run -- eight more than its 4,818 -- in 717 s. No CLI source changed after it. The app's three readers (the ruling above) then ran in the app's whole suite, with only the real-binary pass skipped, since it runs the installed binary: **1,400 of 1,400** passed by the result bundle's count.
+- **The review** (a fresh reviewer over the working tree, read-only): every plain name's bytes identical on a release build at all 47 changed files, the greedy marks right, `render_typed`'s output read by nothing, the `t` prefill read back exactly, no layer edge upward and no command hidden in the new list entries. Its two findings, both the Mac app's readers on the dev channel, are fixed (the ruling above).
+
+**Not done:**
+- **CI has not run this.** `make lint` (the whole-tree clang-tidy) and `make pr-ci` were not run.
+- **Windows** renders the new sites in PowerShell's spelling. Only the MinGW scan compiled it here; the Windows rows prove it. `render_typed`'s PowerShell case passes as a unit.
+- **A door that reaches a refusal.** `config delete-mcp-server -- -m` now reaches its verb, which refuses a name the editors cannot edit (57e) and names no way past it. Suites, agents and graph entries meet the same dead end, the one CLI-M50 recorded and left out; it is still open.
+- **Names in prose, kept as they were**, not commands: the Mermaid export's comment and a scaffolded agent's starter prompt.
+- **From earlier items, still open**: `backends::spell_adapters` still has no caller in source (CLI-M50's note). The mod's and the design's recorded documents hold plain words and read none of these commands; the Mac app's three readers changed, above.
+- **The app's recordings** still say `apogee` (they were recorded on the release channel); no new recording was made.
 
 ### 2026-11-27 — `a-runs-notes-are-said-once-on-stderr` (maintenance item M58): a run's notes are said once, on stderr, in the house voice
 
@@ -6078,6 +6184,7 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,278
 - [x] **The verb** (`cli/config_cmd.cpp`): the positional's help is "A host in tools.allowed_hosts, or an entry as written there", and the line (`removed_hosts_line`) names the host -- `removed example.com from tools.allowed_hosts (2 entries)`, one spelling's line word for word as before -- or the entry: `removed 'https://not-a-host.example/path' from tools.allowed_hosts -- it was not a host name, so it allowed nothing`. The count is the predicate over the text the edit was handed and over its result, as the loader reads them; nothing dereferences `canonical_host`.
 - [x] **The twin** (`httpserver/admin_config.cpp`): a pre-check through the predicate over the loaded list -- none is the `404`, never read out of the transform's refusal, so its other refusals stay `400` (ADR 0002) -- and `deleted` (the host canonical, or the entry as written) and `restart_required` (only for a host this server started with listed; an entry that allowed nothing never asks for one) from the entries matched.
 - [x] **`check`** (`cli/check.cpp`): a malformed entry's warning row names `apogee config delete-allowed-host '<entry>'` as its remedy. `check --fix` still never touches an existing config (M11), since rewriting a pasted URL to its host would widen the gate unasked.
+  - *Revised 2026-11-28 ([CLI-M61](#2026-11-28--every-printed-command-goes-through-the-renderer-maintenance-item-m61-every-printed-command-goes-through-the-renderer)):* the remedy is rendered, the entry one word by the renderer's rule in place of the hand-wrapped quotes, which broke on an entry holding a `'` -- `apogee config delete-allowed-host https://not-a-host.example/path` bare, `"it's here"` double-quoted.
 - [x] **CLI-M36's offer follows** (`cli/complete_sources.cpp`, `ALLOWED_HOST`): a host canonical, once, and a malformed entry as written, each held to the predicate; an empty entry is not offered, and a list of only those says so.
 - [x] **Docs.** [http-api.md](../../reference/cli/http-api.md)'s `DELETE /v1/admin/allowed-hosts/{id}`, with a dated revision (an entry as written or every spelling of a host; an entry holding `/` removed through the CLI or the apps); [tools.md](../../reference/cli/tools.md)'s line on the verb; DEVELOPER.md's `host`, `config_edit`, `jsonc`, `config_cmd`, `complete_sources`, `admin_config` and `host_test` rows; dated revisions of the "exact inverses" record (Milestone V) and of CLI-M36's offer and hint. No file was added or moved, and SPEC is unchanged.
 

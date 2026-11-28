@@ -1,3 +1,4 @@
+import BusinessReads
 import Foundation
 
 /// The install a media verb's refusal named -- `train setup --with video`,
@@ -88,7 +89,7 @@ public struct InstallConsent: Sendable, Equatable {
 
     /// The line of `text` that names the install, trimmed.
     private static func naming(in text: String) -> String? {
-        text.split(whereSeparator: \.isNewline).last { $0.contains("apogee train setup") }
+        text.split(whereSeparator: \.isNewline).last { Argv.printed(["train", "setup"], in: String($0)) != nil }
             .map { $0.trimmingCharacters(in: .whitespaces) }
     }
 

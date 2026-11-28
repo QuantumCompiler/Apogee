@@ -195,8 +195,14 @@ void bind_create(CLI::App& parent, const RootContext& context) {
             std::cout << "  schema: " << result.schema_path.string() << "\n";
         }
         std::cout << "  config: " << result.config_path.string() << "\n\n"
-                  << "Run it:   apogee analyze --agent " << result.name << "\n"
-                  << "Edit it:  apogee agents edit " << result.name << "\n";
+                  << "Run it:   "
+                  << harness::render(
+                         {.verbs = {"analyze"}, .parts = {harness::option("--agent", result.name)}})
+                  << "\n"
+                  << "Edit it:  "
+                  << harness::render(
+                         {.verbs = {"agents", "edit"}, .parts = {harness::operand(result.name)}})
+                  << "\n";
     });
 }
 

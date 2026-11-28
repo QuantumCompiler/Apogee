@@ -185,14 +185,21 @@ std::string render_registration(const RegistrationPlan& plan, bool applied) {
             case RegistrationStep::Outcome::NameTaken:
                 out += step.provider + ": not registered -- a backend named '" + step.name +
                        "' already exists (" + step.detail + "); add one under another name: " +
-                       "apogee config add-backend <name> --type " + type + "\n";
+                       harness::render({.verbs = {"config", "add-backend"},
+                                        .parts = {harness::placeholder("<name>"),
+                                                  harness::option("--type", type)}}) +
+                       "\n";
                 break;
             case RegistrationStep::Outcome::NeedsModel:
                 out += step.provider + ": not registered -- an " + type + " backend needs a model" +
                        (step.detail.empty() ? std::string{}
                                             : ", and Ollama has several: " + step.detail) +
-                       "; add one with: apogee config add-backend " + step.name + " --type " +
-                       type + " --model <model>\n";
+                       "; add one with: " +
+                       harness::render(
+                           {.verbs = {"config", "add-backend"},
+                            .parts = {harness::operand(step.name), harness::option("--type", type),
+                                      harness::option_placeholder("--model", "<model>")}}) +
+                       "\n";
                 break;
         }
     }

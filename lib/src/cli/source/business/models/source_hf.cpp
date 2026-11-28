@@ -391,12 +391,15 @@ bool choose_file(const HfListing& listing, HfRef& ref, std::string& error) {
             error +=
                 "It is a SafeTensors repository. Apogee runs GGUF, so pull the snapshot "
                 "and convert it:\n"
-                "  apogee models pull " +
-                ref.repo_id() +
-                " --safetensors\n"
-                "  apogee models convert " +
-                ref.repo_id() + " " + repo_directory_name(ref) +
-                ".gguf\n"
+                "  " +
+                harness::render({.verbs = {"models", "pull"},
+                                 .parts = {harness::operand(ref.repo_id()),
+                                           harness::option("--safetensors")}}) +
+                "\n  " +
+                harness::render({.verbs = {"models", "convert"},
+                                 .parts = {harness::operand(ref.repo_id()),
+                                           harness::operand(repo_directory_name(ref) + ".gguf")}}) +
+                "\n"
                 "(conversion runs in Apogee's Python environment: '" +
                 harness::printed_program() +
                 " train setup --with convert' installs it once)\n\nOr look for a community GGUF "

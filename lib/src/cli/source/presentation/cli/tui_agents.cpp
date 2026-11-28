@@ -136,7 +136,9 @@ tui::ListOptions agents_view_options(const RootContext& context, std::filesystem
             },
         .confirm =
             [](const tui::ListRow& row) {
-                return "Delete agent " + row.key + "'s entry ('apogee agents delete " + row.key +
+                return "Delete agent " + row.key + "'s entry ('" +
+                       harness::render(
+                           {.verbs = {"agents", "delete"}, .parts = {harness::operand(row.key)}}) +
                        "')? Its prompt and schema files stay";
             },
         .run =
@@ -199,26 +201,30 @@ tui::ListOptions mcp_view_options(const RootContext& context, std::filesystem::p
                               "protocol_version", "tools", "error"});
     };
     // `t`: one tool on the selected server, as `mcp test` invokes it.
-    options.asks = {
-        tui::ListAsk{.key = "t",
-                     .label = "test",
-                     .ask =
-                         [&context, binary](const tui::ListRow& /*row*/, const std::string& line) {
-                             const LineTokens split = line_tokens(line);
-                             if (!split.error.empty()) {
-                                 return "not run: " + split.error;
-                             }
-                             std::vector<std::string> words{"mcp", "test"};
-                             words.insert(words.end(), split.words.begin(), split.words.end());
-                             return child_answer(context, binary, words);
-                         },
-                     // `--` first for a dash-led name, which the line then
-                     // hands `mcp test` as its server (CLI-M51).
-                     .prefill =
-                         [](const tui::ListRow& row) {
-                             return (row.key.starts_with('-') ? "-- " : "") + row.key + " ";
-                         },
-                     .needs_row = true}};
+    options.asks = {tui::ListAsk{
+        .key = "t",
+        .label = "test",
+        .ask =
+            [&context, binary](const tui::ListRow& /*row*/, const std::string& line) {
+                const LineTokens split = line_tokens(line);
+                if (!split.error.empty()) {
+                    return "not run: " + split.error;
+                }
+                std::vector<std::string> words{"mcp", "test"};
+                words.insert(words.end(), split.words.begin(), split.words.end());
+                return child_answer(context, binary, words);
+            },
+        // `--` first for a dash-led name, which the line then
+        // hands `mcp test` as its server (CLI-M51), the name one
+        // word by the renderer's rule (CLI-M61) -- POSIX quoting
+        // on every platform, since the line is read by
+        // `line_tokens`.
+        .prefill =
+            [](const tui::ListRow& row) {
+                return (row.key.starts_with('-') ? "-- " : "") +
+                       harness::shell_word(row.key, harness::CommandShell::Posix) + " ";
+            },
+        .needs_row = true}};
     const auto in_state = [last](bool enabled) {
         return [last, enabled](const tui::ListRow& row) {
             const std::lock_guard lock{last->mutex};

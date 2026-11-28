@@ -8,6 +8,7 @@
 
 #include "cli/line_tokens.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 
 namespace apogee::commands {
 
@@ -175,6 +176,16 @@ bool start_child_run(tui::Progress& progress, const RootContext& context,
         });
 }
 
+std::string typed_command(const std::string& group, const std::string& line) {
+    const LineTokens split = line_tokens(line);
+    if (!split.error.empty()) {
+        return harness::render_typed({group}) + " " + line;
+    }
+    std::vector<std::string> words{group};
+    words.insert(words.end(), split.words.begin(), split.words.end());
+    return harness::render_typed(words);
+}
+
 std::string run_typed(tui::Progress& progress, const RootContext& context,
                       const std::filesystem::path& binary, const std::string& group,
                       const std::string& line) {
@@ -187,10 +198,11 @@ std::string run_typed(tui::Progress& progress, const RootContext& context,
     }
     std::vector<std::string> words{group};
     words.insert(words.end(), split.words.begin(), split.words.end());
+    const std::string said = harness::render_typed(words);
     if (!start_child_run(progress, context, binary, std::move(words), group + " " + line)) {
         return "not now: a run is going -- Ctrl-C stops it";
     }
-    return "running 'apogee " + group + " " + line + "' -- its narration is below";
+    return "running '" + said + "' -- its narration is below";
 }
 
 std::string exit_line(int code) {

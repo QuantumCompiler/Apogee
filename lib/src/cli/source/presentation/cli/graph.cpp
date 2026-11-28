@@ -493,7 +493,9 @@ void print_node_core(const embedstore::Store& store, const embedstore::GraphNode
         std::cout << indent_lines(preview_text(node.description, 300), "  ") << "\n";
     }
     if (node.type == embedstore::kNodeTypeDecision) {
-        std::cout << "  (knowledge record -- `apogee knowledge info " << node.name
+        std::cout << "  (knowledge record -- `"
+                  << harness::render(
+                         {.verbs = {"knowledge", "info"}, .parts = {harness::operand(node.name)}})
                   << "` for the full record)\n";
     }
     // A code node's provenance (27k): where it is defined and declared --

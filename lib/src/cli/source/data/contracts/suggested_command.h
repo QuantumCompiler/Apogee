@@ -120,6 +120,14 @@ struct SuggestedCommand {
 [[nodiscard]] std::string render(const SuggestedCommand& command, CommandShell shell);
 [[nodiscard]] std::string render(const SuggestedCommand& command);
 
+/// A command line a person typed, said back as one line a person copies
+/// (CLI-M61): `printed_program`, then `words` -- what `line_tokens` read from
+/// the line, the full-screen shell's exec line or a view's typed ask -- each
+/// through `shell_word`, in the person's own order. The order rule never
+/// moves them: the person's own `--` already says which word is an operand.
+[[nodiscard]] std::string render_typed(const std::vector<std::string>& words, CommandShell shell);
+[[nodiscard]] std::string render_typed(const std::vector<std::string>& words);
+
 /// Several commands rendered and joined by `joiner` (`" && "`).
 [[nodiscard]] std::string render_all(const std::vector<SuggestedCommand>& commands,
                                      std::string_view joiner);

@@ -215,8 +215,9 @@ void bind_register(CLI::App& parent, const RootContext& context) {
         const std::filesystem::path config_path = registration_config(context);
         if (!backends::load_provider_cache().scanned()) {
             fail("this machine has not been scanned for providers yet -- '" +
-                 harness::printed_program() +
-                 " providers scan' looks, then 'apogee providers register " + *provider +
+                 harness::printed_program() + " providers scan' looks, then '" +
+                 harness::render(
+                     {.verbs = {"providers", "register"}, .parts = {harness::operand(*provider)}}) +
                  "' registers what it found");
         }
         ProviderRegistration done;

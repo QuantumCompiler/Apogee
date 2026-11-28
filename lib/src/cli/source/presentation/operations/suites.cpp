@@ -277,8 +277,11 @@ std::string active_suite_refusal(
             continue;
         }
         return refused + " -- suite " + config.models.default_suite + "'s " + std::string{role} +
-               " member; fix it with: apogee config set-suite " + config.models.default_suite +
-               " --" + std::string{role} + " <backend>";
+               " member; fix it with: " +
+               harness::render(
+                   {.verbs = {"config", "set-suite"},
+                    .parts = {harness::operand(config.models.default_suite),
+                              harness::option_placeholder("--" + std::string{role}, "<backend>")}});
     }
     return {};
 }

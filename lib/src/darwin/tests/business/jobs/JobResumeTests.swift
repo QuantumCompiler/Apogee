@@ -60,6 +60,28 @@ struct JobResumeTests {
         #expect(failed.resumeCommand == Self.resume)
     }
 
+    @Test("a dev or test build names its resume by its own binary, and it is read as the release's is")
+    func resumeByChannelBinary() {
+        // The CLI's M49 and M61: a printed command begins with the build's
+        // installed name, so the app's development build -- which drives
+        // `apogee-dev` -- reads `apogee-dev models convert …`.
+        for program in ["apogee-dev", "apogee-test"] {
+            var failed = JobProgress()
+            chainStream().prefix(6).forEach { failed.apply($0) }
+            failed.apply(.event(.notice("resume with:")))
+            failed.apply(.event(.notice("  \(program) models convert org--model/safetensors/a --register-with Q4_K_M")))
+            failed.apply(.event(.error("convert failed")))
+            failed.apply(ended(1))
+            #expect(failed.resumeCommand == Self.resume, "\(program)")
+        }
+        // A name that only begins like the binary's is not one.
+        var other = JobProgress()
+        other.apply(.event(.notice("  myapogee models convert org--model/safetensors/a")))
+        other.apply(.event(.error("convert failed")))
+        other.apply(ended(1))
+        #expect(other.resumeCommand == nil)
+    }
+
     @Test("a standalone conversion that finished names its next step, which is no resume")
     func doneConversionOffersNone() {
         // `models convert` alone ends by saying how to make it smaller

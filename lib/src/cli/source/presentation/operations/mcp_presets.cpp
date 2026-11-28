@@ -228,8 +228,10 @@ nlohmann::json mcp_presets_document(const McpPresetHost& host) {
             }
         }
         if (preset.refusal.empty()) {
-            row["register"] = "apogee mcp create " + std::string{preset.server_name} + " --from " +
-                              std::string{preset.name};
+            row["register"] =
+                harness::render({.verbs = {"mcp", "create"},
+                                 .parts = {harness::operand(std::string{preset.server_name}),
+                                           harness::option("--from", std::string{preset.name})}});
         } else {
             row["refusal"] = refusal_of(preset);
         }

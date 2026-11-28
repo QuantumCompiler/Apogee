@@ -62,6 +62,34 @@
 namespace apogee::commands {
 namespace {
 
+/// The models commands this file prints, each by the one renderer (CLI-M61):
+/// a ref, handle or snapshot is one word, with its `--` when it starts with
+/// a dash.
+[[nodiscard]] std::string convert_command(const std::string& from,
+                                          const std::vector<harness::CommandPart>& options = {}) {
+    harness::SuggestedCommand command{.verbs = {"models", "convert"},
+                                      .parts = {harness::operand(from)}};
+    command.parts.insert(command.parts.end(), options.begin(), options.end());
+    return harness::render(command);
+}
+
+[[nodiscard]] std::string models_delete(const std::string& handle) {
+    return harness::render({.verbs = {"models", "delete"}, .parts = {harness::operand(handle)}});
+}
+
+[[nodiscard]] std::string models_repair(const std::string& handle) {
+    return harness::render({.verbs = {"models", "repair"}, .parts = {harness::operand(handle)}});
+}
+
+/// `voice say "<text>" -o speech.wav --model <handle>`: an MLX voice spoken
+/// with, the text the person's.
+[[nodiscard]] std::string voice_say_command(const std::string& handle) {
+    return harness::render(
+        {.verbs = {"voice", "say"},
+         .parts = {harness::placeholder("\"<text>\""), harness::option("-o", "speech.wav"),
+                   harness::option("--model", handle)}});
+}
+
 /// What installs mlx-video's Wan converter (53k): opt-in, never at install.
 [[nodiscard]] std::string mlx_video_remedy() {
     return harness::printed_program() + " train setup --with mlx-video";
@@ -527,9 +555,8 @@ void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem:
                   << "\n";
         if (offers(conversions, models::kMlxFormat)) {
             std::cout << "Make the drafter of it -- an MLX build an mlx backend over its base runs "
-                         "beside it, named as that backend's draft -- with\n  apogee models "
-                         "convert "
-                      << repo_id << " --mlx\n";
+                         "beside it, named as that backend's draft -- with\n  "
+                      << convert_command(repo_id, {harness::option("--mlx")}) << "\n";
         } else {
             const MlxOffer offer = installed_mlx_offer(dir);
             std::cout << "Its one conversion, an MLX drafter, is not offered here: " << offer.gap
@@ -542,11 +569,14 @@ void print_snapshot_next(const models::StoreRoots& roots, const std::filesystem:
         return;
     }
     std::cout << "\nA full-weight snapshot: trainable with '" + harness::printed_program() +
-                     " train', not runnable -- make a GGUF of it with\n  apogee models convert "
-              << repo_id
-              << "\nNext time one command pulls, converts and registers it:\n  apogee models "
-                 "pull "
-              << repo_id << " --safetensors --register-with Q4_K_M\n";
+                     " train', not runnable -- make a GGUF of it with\n  "
+              << convert_command(repo_id) << "\nNext time one command pulls, converts and "
+              << "registers it:\n  "
+              << harness::render(
+                     {.verbs = {"models", "pull"},
+                      .parts = {harness::operand(repo_id), harness::option("--safetensors"),
+                                harness::option("--register-with", "Q4_K_M", /*greedy=*/true)}})
+              << "\n";
 }
 
 /// The items of a tree download over `client`, each promising what the
@@ -936,7 +966,7 @@ std::string render_repair(const models::StoreRoots& roots, std::string_view name
             out << "header:  " << (info.parsed ? "ok" : "FAILED -- " + info.parse_error) << "\n";
             if (!info.parsed) {
                 out << "\nThis file is not a readable GGUF. Replace it, or delete it with\n"
-                    << "  apogee models delete " << target.model << "/gguf/" << stored.id << "\n";
+                    << "  " << models_delete(target.model + "/gguf/" + stored.id) << "\n";
             }
             continue;
         }
@@ -950,9 +980,12 @@ std::string render_repair(const models::StoreRoots& roots, std::string_view name
             continue;
         }
         out << "\nThis model no longer matches its record. Re-acquire it:\n";
-        out << "  apogee models delete " << target.model << "/gguf/" << stored.id << "\n";
+        out << "  " << models_delete(target.model + "/gguf/" + stored.id) << "\n";
         if (sidecar->source == "huggingface" || sidecar->source == "ollama") {
-            out << "  apogee models pull " << sidecar->ref << "\n";
+            out << "  "
+                << harness::render(
+                       {.verbs = {"models", "pull"}, .parts = {harness::operand(sidecar->ref)}})
+                << "\n";
         }
     }
     return out.str();
@@ -1077,7 +1110,8 @@ SnapshotChoice choose_snapshot(const models::StoreRoots& roots, std::string_view
                    models::kMlxFormat);
         choice.error = models::draft_head_refusal(
             "'" + std::string{given} + "'", *head, models::draft_head_bases(roots, *head),
-            drafter ? "apogee models convert " + std::string{given} + " --mlx" : std::string{});
+            drafter ? convert_command(std::string{given}, {harness::option("--mlx")})
+                    : std::string{});
         choice.path.clear();
     } else if (const std::optional<models::DiffusionModel> diffusion =
                    models::stored_diffusion_model(roots, choice.path,
@@ -1349,9 +1383,8 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
     choice.model = target.model;
     if (target.format == models::kSafetensorsFormat) {
         choice.error = "'" + std::string{given} +
-                       "' is SafeTensors weights; make a GGUF of them first with 'apogee models "
-                       "convert " +
-                       target.model + "'";
+                       "' is SafeTensors weights; make a GGUF of them first with '" +
+                       convert_command(target.model) + "'";
         return choice;
     }
     if (target.format == models::kMlxFormat) {
@@ -1404,7 +1437,7 @@ GgufChoice choose_gguf(const models::StoreRoots& roots, std::string_view given,
                 choice.error += " " + gguf.id;
             }
         } else {
-            choice.error += " -- make one with 'apogee models convert " + target.model + "'";
+            choice.error += " -- make one with '" + convert_command(target.model) + "'";
         }
         return choice;
     }
@@ -1524,8 +1557,9 @@ void print_mlx_drafter_hint(const models::StoredMlx& stored) {
 /// names it, in the one wording the standalone verb and the chain share.
 [[nodiscard]] std::string embedding_role_note(const std::string& name) {
     return "note: an embedding model -- the backend embeds and answers no chat; point the "
-           "embedding role at it: apogee config set-default-embedding " +
-           name;
+           "embedding role at it: " +
+           harness::render(
+               {.verbs = {"config", "set-default-embedding"}, .parts = {harness::operand(name)}});
 }
 
 /// The one thing to type once a chain has registered `name` (M3, M16): chat
@@ -1533,8 +1567,11 @@ void print_mlx_drafter_hint(const models::StoredMlx& stored) {
 /// point the embedding role at it (55d), on either route.
 [[nodiscard]] std::string next_step(const std::string& name, bool embedding) {
     return embedding
-               ? "point the embedding role at it:  apogee config set-default-embedding " + name
-               : "chat with one:  apogee chat -m " + name;
+               ? "point the embedding role at it:  " +
+                     harness::render({.verbs = {"config", "set-default-embedding"},
+                                      .parts = {harness::operand(name)}})
+               : "chat with one:  " +
+                     harness::render({.verbs = {"chat"}, .parts = {harness::option("-m", name)}});
 }
 
 /// The two commands that put an MLX embedding model to use (53h): an `mlx`
@@ -1703,8 +1740,10 @@ void print_pulled_mlx_hint(const models::StoredMlx& stored, const models::MlxKin
     } else if (kind.word == models::kMlxDrafter) {
         print_mlx_drafter_hint(stored);
     } else if (kind.word == models::kMlxVoice) {
-        std::cout << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
-                  << models::weights_handle(stored.model, models::kMlxFormat, stored.id) << "\n";
+        std::cout << "\nSpeak with it on MLX:\n  "
+                  << voice_say_command(
+                         models::weights_handle(stored.model, models::kMlxFormat, stored.id))
+                  << "\n";
     }
     // A video model has no backend to add (53k): its kind line says what runs it.
 }
@@ -2098,8 +2137,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
     }
     // Every refusal before anything is announced.
     if (const std::string damaged = models::damaged_snapshot_error(source.path); !damaged.empty()) {
-        fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
-             "'");
+        fail(damaged + " -- or repair it in place with '" + models_repair(source.model) + "'");
     }
     // Which converter builds it, from its own files (53f): mlx-vlm keeps a
     // set's towers, and mlx-lm builds a language model -- or, asked, a
@@ -2157,8 +2195,9 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
         if (made.has_value() && made->source == "convert" && made->ref == record.ref &&
             made->transform == record.transform) {
             std::cout << "already converted:\n  " << stored.dir.string() << "\n"
-                      << "(to convert it again, delete it first: apogee models delete "
-                      << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                      << "(to convert it again, delete it first: "
+                      << models_delete(
+                             models::weights_handle(stored.model, models::kMlxFormat, stored.id))
                       << ")\n";
             out.dir = stored.dir;
             out.existed = true;
@@ -2358,8 +2397,9 @@ ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots, const VoiceSe
         if (made.has_value() && made->source == "convert" && made->ref == record.ref &&
             made->transform == record.transform) {
             std::cout << "already converted:\n  " << stored.dir.string() << "\n"
-                      << "(to convert it again, delete it first: apogee models delete "
-                      << models::weights_handle(stored.model, models::kMlxFormat, stored.id)
+                      << "(to convert it again, delete it first: "
+                      << models_delete(
+                             models::weights_handle(stored.model, models::kMlxFormat, stored.id))
                       << ")\n";
             out.dir = stored.dir;
             out.existed = true;
@@ -2438,8 +2478,7 @@ ConvertedMlx convert_voice_to_mlx(const models::StoreRoots& roots, const VoiceSe
               << " shard header(s) and " << built.voices.size() << " voice(s) read whole\n"
               << "mlx model: " << mlx_summary(out.info) << "\n"
               << "kind: " << models::describe(models::read_mlx_kind(out.dir)) << "\n"
-              << "\nSpeak with it on MLX:\n  apogee voice say \"<text>\" -o speech.wav --model "
-              << made << "\n";
+              << "\nSpeak with it on MLX:\n  " << voice_say_command(made) << "\n";
     return out;
 }
 
@@ -2482,8 +2521,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     // Every refusal BEFORE anything is announced or any Python is looked
     // for: the cheap local checks first, then the environment.
     if (const std::string damaged = models::damaged_snapshot_error(source.path); !damaged.empty()) {
-        fail(damaged + " -- or repair it in place with 'apogee models repair " + source.model +
-             "'");
+        fail(damaged + " -- or repair it in place with '" + models_repair(source.model) + "'");
     }
     const training::PythonEnv env{harness::training_venv_dir()};
     const std::filesystem::path script = training::converter_script();
@@ -2525,8 +2563,8 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
             std::cout << "  " << done->projector.string() << "\n";
         }
         if (!chained) {
-            std::cout << "(to convert it again, delete it first: apogee models delete "
-                      << done->model << "/gguf/" << done->id << ")\n";
+            std::cout << "(to convert it again, delete it first: "
+                      << models_delete(done->model + "/gguf/" + done->id) << ")\n";
         }
         if (out.base_model) {
             out.warnings.push_back(base_model_note());
@@ -2685,8 +2723,11 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     finish();
     if (!chained) {
         if (type != "q8_0") {
-            std::cout << "\nMake it smaller:\n  apogee models quantize " << source.model
-                      << " --type Q4_K_M\n";
+            std::cout << "\nMake it smaller:\n  "
+                      << harness::render({.verbs = {"models", "quantize"},
+                                          .parts = {harness::operand(source.model),
+                                                    harness::option("--type", "Q4_K_M")}})
+                      << "\n";
         }
         print_backend_hint(model_file, projector, out.embedding);
     }
@@ -3120,16 +3161,27 @@ void run_register_chain(const RegisterChainRequest& request, const ChainTools& t
     for (const std::string& level : levels) {
         joined += (joined.empty() ? "" : ",") + level;
     }
-    const std::string with =
-        (levels.empty() ? " --register" : " --register-with " + joined) +
-        (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name);
+    // What resumes the chain: its own flags, each a part, after the weights.
+    std::vector<harness::CommandPart> with{
+        levels.empty() ? harness::option("--register")
+                       : harness::option("--register-with", joined, /*greedy=*/true)};
+    if (!request.base_name.empty()) {
+        with.push_back(harness::option("--base-name", request.base_name));
+    }
     const auto convert_resume = [&with](const std::string& from) {
-        return "apogee models convert " + from + with;
+        return convert_command(from, with);
     };
 
     ChainLog log;
-    log.resume = pulls ? "apogee models pull " + request.pull_ref + " --safetensors" + with
-                       : convert_resume(snapshot);
+    if (pulls) {
+        harness::SuggestedCommand pull{
+            .verbs = {"models", "pull"},
+            .parts = {harness::operand(request.pull_ref), harness::option("--safetensors")}};
+        pull.parts.insert(pull.parts.end(), with.begin(), with.end());
+        log.resume = harness::render(pull);
+    } else {
+        log.resume = convert_resume(snapshot);
+    }
 
     ConvertedModel f16;
     std::vector<QuantizedModel> quants;
@@ -3309,13 +3361,23 @@ void run_mlx_register_chain(const MlxRegisterRequest& request,
     const bool embedding = models::snapshot_embedding_model(source.path).has_value();
 
     ChainLog log;
-    log.resume =
-        "apogee models convert " + snapshot + " --mlx" +
-        (request.listed ? " --register-with " + joined
-                        : " --register --type " + request.precisions.front()) +
-        (request.base_name.empty() ? std::string{} : " --base-name " + request.base_name) +
-        (request.model_type.empty() ? std::string{} : " --model-type " + request.model_type) +
-        (request.text_only ? " --text-only" : "");
+    std::vector<harness::CommandPart> resume{harness::option("--mlx")};
+    if (request.listed) {
+        resume.push_back(harness::option("--register-with", joined, /*greedy=*/true));
+    } else {
+        resume.push_back(harness::option("--register"));
+        resume.push_back(harness::option("--type", request.precisions.front()));
+    }
+    if (!request.base_name.empty()) {
+        resume.push_back(harness::option("--base-name", request.base_name));
+    }
+    if (!request.model_type.empty()) {
+        resume.push_back(harness::option("--model-type", request.model_type));
+    }
+    if (request.text_only) {
+        resume.push_back(harness::option("--text-only"));
+    }
+    log.resume = convert_command(snapshot, resume);
 
     std::vector<ChainStage> stages;
     std::vector<ConvertedMlx> made(request.precisions.size());
@@ -3433,10 +3495,9 @@ void convert_voice_to_mlx_command(const models::StoreRoots& roots, const std::st
     }
     if (const models::VoiceInfo voice = models::read_voice_info(source.path); !voice.complete) {
         fail("'" + name + "' " + voice.problem +
-             (source.id.empty()
-                  ? std::string{}
-                  : " -- apogee models repair " +
-                        models::weights_handle(source.model, models::kVoiceFormat, source.id)));
+             (source.id.empty() ? std::string{}
+                                : " -- " + models_repair(models::weights_handle(
+                                               source.model, models::kVoiceFormat, source.id))));
     }
     // bf16 unless one is named: the build mlx-audio's README loads first for
     // Kokoro, and an 82M-parameter model costs little unquantized.

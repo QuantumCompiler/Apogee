@@ -6,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include "contracts/suggested_command.h"
 #include "platform/platform.h"
 
 namespace apogee::training {
@@ -69,8 +70,11 @@ GateVerdict eval_gate(const RunManifest& manifest, GateMode mode, bool force) {
     }
     std::string problem;
     if (!manifest.eval.has_value()) {
-        problem = "no eval results for run " + manifest.run_id + ". Run 'apogee train eval " +
-                  manifest.run_id + " --suite <path>' first";
+        problem = "no eval results for run " + manifest.run_id + ". Run '" +
+                  harness::render({.verbs = {"train", "eval"},
+                                   .parts = {harness::operand(manifest.run_id),
+                                             harness::option_placeholder("--suite", "<path>")}}) +
+                  "' first";
     } else if (!manifest.eval->passed) {
         problem = "the eval gate failed for run " + manifest.run_id + " (" + tally(*manifest.eval) +
                   "). Fix the training or the suite, then re-run eval";

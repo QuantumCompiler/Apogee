@@ -12,6 +12,7 @@
 #include "cli/tui_parity.h"
 #include "contracts/config.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
 #include "tui/progress.h"
 
 namespace apogee::commands {
@@ -30,14 +31,6 @@ namespace {
         at += takes_value(words.at(at)) && words.at(at).find('=') == std::string::npos ? 2U : 1U;
     }
     return at;
-}
-
-[[nodiscard]] std::string joined(const std::vector<std::string>& words) {
-    std::string out;
-    for (const std::string& word : words) {
-        out += (out.empty() ? "" : " ") + word;
-    }
-    return out;
 }
 
 /// The live command tree, read once: the parser every run would build.
@@ -157,7 +150,7 @@ tui::ExecLineOptions exec_line_options(const RootContext& context,
         if (!run.refusal.empty()) {
             return run.refusal;
         }
-        const std::string heading = "apogee " + joined(run.words);
+        const std::string heading = harness::render_typed(run.words);
         if (!start_child_run(*output, context, binary, std::move(run.words), heading)) {
             return std::string{"not now: a command is running -- Ctrl-C stops it"};
         }

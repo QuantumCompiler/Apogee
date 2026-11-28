@@ -470,7 +470,10 @@ void bind_add_suite(CLI::App& parent, const RootContext& context) {
             return harness::append_suite(content, flags->name, suite, flags->force);
         });
         std::cout << "added suite '" << flags->name << "' to " << path.string()
-                  << " -- use it with: apogee chat --suite " << flags->name << "\n";
+                  << " -- use it with: "
+                  << harness::render(
+                         {.verbs = {"chat"}, .parts = {harness::option("--suite", flags->name)}})
+                  << "\n";
     });
 }
 

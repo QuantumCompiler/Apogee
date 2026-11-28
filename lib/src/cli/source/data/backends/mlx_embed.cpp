@@ -101,8 +101,10 @@ std::string_view MlxEmbedProvider::backend_name() const noexcept {
 std::string MlxEmbedProvider::chat_refusal() const {
     return options_.model + " is " + models::describe_mlx_kind(models::kMlxEmbedding) +
            " -- this mlx backend embeds through mlx-embeddings and answers no chat or "
-           "completion; point the embedding role at it ('apogee config set-default-embedding " +
-           options_.backend_name + "') and chat on another backend";
+           "completion; point the embedding role at it ('" +
+           harness::render({.verbs = {"config", "set-default-embedding"},
+                            .parts = {harness::operand(options_.backend_name)}}) +
+           "') and chat on another backend";
 }
 
 harness::ChatResponse MlxEmbedProvider::chat(const harness::ChatRequest& request,

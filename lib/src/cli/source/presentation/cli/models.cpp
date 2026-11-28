@@ -51,6 +51,26 @@ namespace {
     throw CLI::RuntimeError(1);
 }
 
+/// The doors `models info` and `models list` name, each by the one renderer
+/// (CLI-M61): a handle or a backend's name is one word, with its `--` when
+/// it starts with a dash.
+[[nodiscard]] std::string models_repair(const std::string& handle) {
+    return harness::render({.verbs = {"models", "repair"}, .parts = {harness::operand(handle)}});
+}
+
+[[nodiscard]] std::string convert_mlx(const std::string& handle) {
+    return harness::render({.verbs = {"models", "convert"},
+                            .parts = {harness::operand(handle), harness::option("--mlx")}});
+}
+
+/// `config add-backend <name> --type mlx --model-path <the path below>`.
+[[nodiscard]] std::string mlx_add_door(const std::string& name) {
+    return harness::render(
+        {.verbs = {"config", "add-backend"},
+         .parts = {harness::operand(name), harness::option("--type", "mlx"),
+                   harness::option_placeholder("--model-path", "<the path below>")}});
+}
+
 /// Whether this backend type names a local file Apogee can inspect.
 [[nodiscard]] bool is_local(harness::BackendType type) noexcept {
     return type == harness::BackendType::LlamaCpp;
@@ -549,8 +569,11 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
                     case secrets::KeySource::None:
                         row.state = "no key";
                         row.attention = true;
-                        row.note = "no API key found; run 'apogee auth add " +
-                                   std::string{harness::to_string(backend.type)} + "'";
+                        row.note = "no API key found; run '" +
+                                   harness::render({.verbs = {"auth", "add"},
+                                                    .parts = {harness::operand(std::string{
+                                                        harness::to_string(backend.type)})}}) +
+                                   "'";
                         break;
                 }
             }
@@ -675,8 +698,8 @@ std::vector<ModelRow> build_model_rows(const harness::Config& config,
             }
             if (models::config_is_download_record(stored.dir)) {
                 row.attention = true;
-                row.note = "damaged by an older pull -- 'apogee models repair " + stored.model +
-                           "/safetensors/" + stored.id + "'";
+                row.note = "damaged by an older pull -- '" +
+                           models_repair(stored.model + "/safetensors/" + stored.id) + "'";
             }
             snapshot_rows.emplace_back(rows.size(), stored.dir);
             rows.push_back(std::move(row));
@@ -1267,9 +1290,10 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         const std::filesystem::path id_dir = path.parent_path();
         if (models::is_weight_id(id_dir.filename().string()) &&
             id_dir.parent_path().filename() == models::kGgufFormat) {
-            out << "repair:       apogee models repair "
-                << id_dir.parent_path().parent_path().filename().string() << "/gguf/"
-                << id_dir.filename().string() << "\n";
+            out << "repair:       "
+                << models_repair(id_dir.parent_path().parent_path().filename().string() + "/gguf/" +
+                                 id_dir.filename().string())
+                << "\n";
         } else {
             out << "repair:       re-download the file, or point model_path at another\n";
         }
@@ -1523,14 +1547,16 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         const bool text_only = mlx && offer.has_value() && !offer->converter.has_value();
         if (head.has_value()) {
             // Its one conversion: a drafter, never a GGUF (53i).
-            out << "made from it: nothing yet -- 'apogee models convert " << handle
-                << " --mlx' makes an MLX drafter of it\n";
+            out << "made from it: nothing yet -- '" << convert_mlx(handle)
+                << "' makes an MLX drafter of it\n";
         } else if (diffusion.has_value()) {
             // Its one conversion: an MLX video model, never a GGUF (53k).
-            out << "made from it: nothing yet -- 'apogee models convert " << handle
-                << " --mlx' makes an MLX video model of it\n";
+            out << "made from it: nothing yet -- '" << convert_mlx(handle)
+                << "' makes an MLX video model of it\n";
         } else {
-            out << "made from it: nothing yet -- 'apogee models convert " << handle
+            out << "made from it: nothing yet -- '"
+                << harness::render(
+                       {.verbs = {"models", "convert"}, .parts = {harness::operand(handle)}})
                 << "' makes a GGUF of it"
                 << (text_only ? " (--mlx --text-only an MLX model of its language model)"
                     : mlx     ? " (--mlx an MLX model)"
@@ -1552,7 +1578,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         }
     }
     if (models::config_is_download_record(stored.dir)) {
-        out << "repair:       apogee models repair " << handle << "\n";
+        out << "repair:       " << models_repair(handle) << "\n";
     } else if ((consumed.has_value() || !mlx_made.empty()) &&
                backends_on(config, stored.dir).empty()) {
         out << "listing:      folded -- a conversion consumed it; '" + harness::printed_program() +
@@ -1578,14 +1604,13 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     if (!backends.empty()) {
         out << backends;
     } else if (kind.backend()) {
-        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
-            << " --type mlx --model-path <the path below>'";
+        out << "none -- '" << mlx_add_door(models::stored_mlx_name(stored)) << "'";
     } else if (kind.embeds()) {
         // An mlx entry the embedding role names (53h).
-        out << "none -- 'apogee config add-backend " << models::stored_mlx_name(stored)
-            << " --type mlx --model-path <the path below>', then 'apogee config "
-               "set-default-embedding "
-            << models::stored_mlx_name(stored) << "'";
+        out << "none -- '" << mlx_add_door(models::stored_mlx_name(stored)) << "', then '"
+            << harness::render({.verbs = {"config", "set-default-embedding"},
+                                .parts = {harness::operand(models::stored_mlx_name(stored))}})
+            << "'";
     } else if (kind.word == models::kMlxDrafter) {
         // A drafter runs as a backend's draft, never as one (53i).
         const std::string drafting = backends_drafting_with(config, stored.dir);
@@ -1631,8 +1656,9 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     }
     render_mlx_files(out, info, harness::BackendConfig{});
     if (!info.complete) {
-        out << "repair:       apogee models repair "
-            << models::weights_handle(stored.model, models::kMlxFormat, stored.id) << "\n";
+        out << "repair:       "
+            << models_repair(models::weights_handle(stored.model, models::kMlxFormat, stored.id))
+            << "\n";
     }
     return out.str();
 }
@@ -1685,7 +1711,7 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
     out << "size:         " << format_progress_size(static_cast<std::int64_t>(info.bytes))
         << " on disk\n";
     if (!info.complete) {
-        out << "repair:       apogee models repair " << handle << "\n";
+        out << "repair:       " << models_repair(handle) << "\n";
     }
     return out.str();
 }
@@ -1732,11 +1758,11 @@ void render_gguf(std::ostream& out, const std::filesystem::path& path,
         first = false;
     }
     if (mlx_made.empty() && converts) {
-        out << "made from it: nothing yet -- 'apogee models convert " << handle
-            << " --mlx' makes an MLX voice model of it\n";
+        out << "made from it: nothing yet -- '" << convert_mlx(handle)
+            << "' makes an MLX voice model of it\n";
     }
     if (!info.complete) {
-        out << "repair:       apogee models repair " << handle << "\n";
+        out << "repair:       " << models_repair(handle) << "\n";
     }
     return out.str();
 }
@@ -1825,7 +1851,9 @@ namespace {
     out << "model:        " << pin.pinned << "\n";
     out << "backend:      " << pin.backend << " (" << type << ")\n";
     out << "listed:       " << listed << "\n";
-    out << "runs with:    /model " << selected << " -- or 'apogee chat -m " << selected << "'\n";
+    out << "runs with:    /model " << selected << " -- or '"
+        << harness::render({.verbs = {"chat"}, .parts = {harness::option("-m", selected)}})
+        << "'\n";
     return out.str();
 }
 
