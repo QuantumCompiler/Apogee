@@ -358,6 +358,14 @@ struct ModelsConfig {
 /// suite may be named it.
 inline constexpr std::string_view kSuiteOff = "off";
 
+/// The two words a `rerank` setting takes beside a backend's name (26b):
+/// `off`, and `on` for the utility model to judge. Each is read exactly as
+/// written, before any backend is looked up (`agentloop::resolve_turn_rerank`),
+/// so a value written so names no backend whatever backends exist -- and a
+/// backend's rename leaves it (CLI-M54). `agentloop`'s constants are these.
+inline constexpr std::string_view kRerankOff = "off";
+inline constexpr std::string_view kRerankOn = "on";
+
 /// One member of a suite: the backend that answers for a role while the suite
 /// is active, and the two knobs that make a small helper small (27d).
 ///

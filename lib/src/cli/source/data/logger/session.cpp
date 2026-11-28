@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <system_error>
 
+#include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "contracts/paths.h"
@@ -205,6 +206,17 @@ struct Grouped {
         }
     }
     return out;
+}
+
+/// Whether a chat's `value` -- its backend, its rerank judge -- is to become
+/// `new_name` in a rename of `old_name` (CLI-M54): it names that backend case
+/// aside, as the config's keys compare (`CaseInsensitiveLess` both ways), and
+/// does not already read `new_name` (a change of case). A rerank's `off` and
+/// `on` are words, never a backend's name, and the caller leaves them.
+[[nodiscard]] bool renames(std::string_view value, std::string_view old_name,
+                           std::string_view new_name) {
+    const harness::CaseInsensitiveLess less;
+    return !less(value, old_name) && !less(old_name, value) && value != new_name;
 }
 
 }  // namespace
@@ -700,13 +712,18 @@ SessionSweep rename_session_backend(std::string_view old_name, std::string_view 
         } catch (const std::exception&) {
             continue;  // not ours to rewrite: a corrupt file stays as it is
         }
-        if (session.backend != old_name && session.rerank != old_name) {
+        // A chat names the backend in any case, as the config does (CLI-M54).
+        const bool backend = renames(session.backend, old_name, new_name);
+        const bool rerank = session.rerank != harness::kRerankOff &&
+                            session.rerank != harness::kRerankOn &&
+                            renames(session.rerank, old_name, new_name);
+        if (!backend && !rerank) {
             continue;
         }
-        if (session.backend == old_name) {
+        if (backend) {
             session.backend = std::string{new_name};
         }
-        if (session.rerank == old_name) {
+        if (rerank) {
             session.rerank = std::string{new_name};
         }
         try {

@@ -576,6 +576,101 @@ TEST_CASE("rename_backend in a JSONC config: the key where it stands, every refe
     CHECK(config.mcp_server_names() == std::vector<std::string>{"gemma"});
 }
 
+namespace {
+
+/// `kRenameJsonc` with every reference written in another case (CLI-M54),
+/// and the traps in other cases: a key that only begins with the name, an
+/// MCP server and a collection keyed like it.
+constexpr std::string_view kRenameMixedJsonc = R"({
+  // The backends.
+  "backends": {
+    // The local model, quantized.
+    "gemma": {  // the one we use
+      "type": "llamacpp",
+      "model_path": "/models/gemma.gguf"  // 12B
+    },
+    "GEMMA-old": {"type": "mock"},
+    "claude": {"type": "anthropic"}
+  },
+  "models": {
+    "default": "GEMMA",  // the chat
+    "default_utility": "Gemma",
+    "default_vision": "claude"
+  },
+  "suites": {
+    "duo": {"members": {"chat": "gEmMa", "utility": {"backend": "GEMMA", "window": 8192}}}
+  },
+  "embeddings": {
+    "GEMMA": {"backend": "Gemma", "rerank": "GEMMA", "graph": {"extract_backend": "Gemma"}}
+  },
+  "mcp_servers": {
+    "GEMMA": {"command": "/bin/echo"}
+  },
+  "training": {
+    "judge_backend": "GEMMA",
+    "cycle": {
+      "backend": "Gemma",
+      "sources": [{"type": "sessions", "log_consent": true, "backend": "GEMMA"}]
+    }
+  }
+}
+)";
+
+}  // namespace
+
+TEST_CASE("rename_backend in a JSONC config: every reference whatever its case, by any case",
+          "[config][jsonc][rename][CLI-M54]") {
+    std::string expected{kRenameMixedJsonc};
+    const auto swap = [&expected](std::string_view from, std::string_view to) {
+        const std::size_t at = expected.find(from);
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, from.size(), to);
+    };
+    swap("\"gemma\": {  // the one we use", "\"gemma4-12b\": {  // the one we use");
+    swap("\"default\": \"GEMMA\",", "\"default\": \"gemma4-12b\",");
+    swap("\"default_utility\": \"Gemma\"", "\"default_utility\": \"gemma4-12b\"");
+    swap("{\"chat\": \"gEmMa\", \"utility\": {\"backend\": \"GEMMA\"",
+         "{\"chat\": \"gemma4-12b\", \"utility\": {\"backend\": \"gemma4-12b\"");
+    swap(
+        "{\"backend\": \"Gemma\", \"rerank\": \"GEMMA\", \"graph\": {\"extract_backend\": "
+        "\"Gemma\"}}",
+        "{\"backend\": \"gemma4-12b\", \"rerank\": \"gemma4-12b\", \"graph\": "
+        "{\"extract_backend\": \"gemma4-12b\"}}");
+    swap("\"judge_backend\": \"GEMMA\"", "\"judge_backend\": \"gemma4-12b\"");
+    swap("\"backend\": \"Gemma\",\n      \"sources\"",
+         "\"backend\": \"gemma4-12b\",\n      \"sources\"");
+    swap("\"log_consent\": true, \"backend\": \"GEMMA\"}",
+         "\"log_consent\": true, \"backend\": \"gemma4-12b\"}");
+    for (const std::string_view old_name : {"gemma", "GEMMA", "Gemma"}) {
+        CAPTURE(old_name);
+        const std::string renamed =
+            apogee::harness::rename_backend(kRenameMixedJsonc, old_name, "gemma4-12b");
+        CHECK(renamed == expected);
+        const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+        CHECK(config.find_backend("gemma4-12b") != nullptr);
+        CHECK(config.find_backend("GEMMA-old") != nullptr);
+        CHECK(config.mcp_server_names() == std::vector<std::string>{"GEMMA"});
+    }
+    // A case variant to a change of case is the backend's own name.
+    std::string recased;
+    REQUIRE_NOTHROW(recased = apogee::harness::rename_backend(kRenameMixedJsonc, "GEMMA", "Gemma"));
+    CHECK(recased.find("\"Gemma\": {  // the one we use") != std::string::npos);
+    CHECK(apogee::harness::parse_config(recased, "recased").models.default_backend == "Gemma");
+    // The exact spelling's golden is untouched.
+    CHECK(apogee::harness::rename_backend(kRenameJsonc, "GEMMA", "gemma4-12b") ==
+          apogee::harness::rename_backend(kRenameJsonc, "gemma", "gemma4-12b"));
+}
+
+TEST_CASE("rename_backend in a JSONC config leaves a rerank's off and on",
+          "[config][jsonc][rename][CLI-M54]") {
+    constexpr std::string_view kText =
+        "{\n  \"backends\": {\"OFF\": {\"type\": \"mock\"}},\n"
+        "  \"embeddings\": {\"a\": {\"rerank\": \"off\"}, \"b\": {\"rerank\": \"Off\"}}\n}\n";
+    CHECK(apogee::harness::rename_backend(kText, "off", "judge") ==
+          "{\n  \"backends\": {\"judge\": {\"type\": \"mock\"}},\n"
+          "  \"embeddings\": {\"a\": {\"rerank\": \"off\"}, \"b\": {\"rerank\": \"judge\"}}\n}\n");
+}
+
 // --- 55f: names, lists and hashes, in JSONC as in YAML ------------------------
 
 TEST_CASE("every name add-backend takes lives a whole life in JSONC, and the rest are refused",

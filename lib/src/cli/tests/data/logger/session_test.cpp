@@ -1154,3 +1154,63 @@ TEST_CASE("a delete is learned without a save, and only of a file this process f
     CHECK_FALSE(apogee::logger::learn_deleted(secret));
     CHECK_FALSE(secret.deleted);
 }
+
+TEST_CASE("a backend rename sweeps every chat naming it, in any case, and no other",
+          "[chat][session][rename][CLI-M54]") {
+    const TempDir dir{"session-rename"};
+    const EnvGuard home{"APOGEE_HOME", dir.path().string()};
+    std::filesystem::create_directories(apogee::logger::sessions_dir());
+    // Written as a rename finds them -- by `serialize`, so `updated_at` is the
+    // file's own and a sweep that kept it is seen keeping it.
+    const auto write = [](const std::string& id, const std::string& backend,
+                          const std::string& rerank) {
+        Session session = sample();
+        session.chat_id = id;
+        session.backend = backend;
+        session.rerank = rerank;
+        std::ofstream{apogee::logger::session_path(id), std::ios::binary}
+            << apogee::logger::serialize(session);
+    };
+    write("20260826-120000-0001", "FOO", "");
+    write("20260826-120000-0002", "Foo", "");
+    write("20260826-120000-0003", "foo", "");
+    write("20260826-120000-0004", "claude", "FOO");
+    write("20260826-120000-0005", "food", "Food");
+
+    const apogee::logger::SessionSweep sweep = apogee::logger::rename_session_backend("foo", "bar");
+    CHECK(sweep.renamed == 4);
+    CHECK(sweep.failed.empty());
+    const auto read = [](const std::string& id) { return apogee::logger::load(id, {}).session; };
+    for (const char* id :
+         {"20260826-120000-0001", "20260826-120000-0002", "20260826-120000-0003"}) {
+        CAPTURE(id);
+        CHECK(read(id).backend == "bar");
+        CHECK(read(id).updated_at == "2026-08-26T12:05:00Z");
+    }
+    CHECK(read("20260826-120000-0004").backend == "claude");
+    CHECK(read("20260826-120000-0004").rerank == "bar");
+    // A name that only begins with it is another backend's.
+    CHECK(read("20260826-120000-0005").backend == "food");
+    CHECK(read("20260826-120000-0005").rerank == "Food");
+
+    // A change of case: a chat already naming the new spelling is left as it
+    // is, and only the ones that change are counted.
+    write("20260826-120000-0006", "Baz", "");
+    write("20260826-120000-0007", "baz", "BAZ");
+    const apogee::logger::SessionSweep recased =
+        apogee::logger::rename_session_backend("baz", "Baz");
+    CHECK(recased.renamed == 1);
+    CHECK(read("20260826-120000-0007").backend == "Baz");
+    CHECK(read("20260826-120000-0007").rerank == "Baz");
+
+    // A rerank of `off` or `on` is a word, never a backend's name: a backend
+    // `OFF` renamed leaves it, while `Off` names that backend.
+    write("20260826-120000-0008", "claude", "off");
+    write("20260826-120000-0009", "claude", "on");
+    write("20260826-120000-0010", "claude", "Off");
+    CHECK(apogee::logger::rename_session_backend("OFF", "judge").renamed == 1);
+    CHECK(read("20260826-120000-0008").rerank == "off");
+    CHECK(read("20260826-120000-0010").rerank == "judge");
+    CHECK(apogee::logger::rename_session_backend("On", "helper").renamed == 0);
+    CHECK(read("20260826-120000-0009").rerank == "on");
+}

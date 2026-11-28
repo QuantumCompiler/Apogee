@@ -70,7 +70,9 @@ struct RenameOutcome {
 /// every reference the one walk lists (`store_references`, 55d): its
 /// `draft:` and adapters too -- and `models.default_video` where it names
 /// it; and each stored drafter whose record names it as a base names it as it
-/// is now called (M25).
+/// is now called (M25). `old_name` finds the backend in any case, and every
+/// step after takes its key as the file writes it, every reference matched
+/// case aside (CLI-M54).
 [[nodiscard]] RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path,
                                                       const models::StoreRoots& roots,
                                                       std::string_view old_name,

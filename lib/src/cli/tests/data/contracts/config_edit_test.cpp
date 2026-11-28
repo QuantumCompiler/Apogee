@@ -2200,6 +2200,164 @@ TEST_CASE("rename_backend refuses an unknown name, a taken one, and a name no ke
     CHECK_NOTHROW(rename_backend(kRenameYaml, "gemma", "Gemma"));
 }
 
+namespace {
+
+/// `kRenameYaml` with every reference written in another case (CLI-M54), as
+/// `config set-default FOO` or a hand edit writes one -- and the traps in
+/// other cases too: a key that only begins with the name, an MCP server and
+/// a collection keyed like it, a prompt that says it.
+constexpr std::string_view kRenameMixedYaml = R"(# The config, with notes.
+backends:
+  # The local model, quantized.
+  gemma:   # the one we use
+    type: llamacpp
+    model_path: /models/gemma.gguf   # 12B
+  GEMMA-old:
+    type: mock
+  claude:
+    type: anthropic
+models:
+  default: GEMMA   # the chat
+  default_utility: "Gemma"
+  default_vision: claude
+suites:
+  duo:
+    members:
+      chat: Gemma
+      utility: {backend: GEMMA, window: 8192}
+  flow:
+    members: {chat: gEmMa, utility: claude}
+embeddings:
+  GEMMA:
+    backend: GEMMA
+    rerank: Gemma
+    graph:
+      extract_backend: GEMMA
+graphs:
+  code:
+    extract_backend: Gemma
+agents:
+  reviewer:
+    model: GEMMA
+mcp_servers:
+  GEMMA:
+    command: /bin/echo
+symphonies:
+  say:
+    description: Says GEMMA.
+    stages:
+      - name: one
+        role: chat
+        prompt: |
+          backend: GEMMA
+          model: Gemma
+training:
+  judge_backend: GEMMA
+  regimes:
+    mine:
+      teacher: Gemma
+      kits: [summarization]
+  cycle:
+    backend: GEMMA
+    judge_backend: claude
+    sources:
+    - type: sessions
+      log_consent: true
+      backend: Gemma
+    - type: directory
+      path: /data
+)";
+
+}  // namespace
+
+TEST_CASE("rename_backend renames every reference whatever its case, by the name in any case",
+          "[config_edit][rename][CLI-M54]") {
+    std::string expected{kRenameMixedYaml};
+    const auto swap = [&expected](std::string_view from, std::string_view to) {
+        const std::size_t at = expected.find(from);
+        REQUIRE(at != std::string::npos);
+        expected.replace(at, from.size(), to);
+    };
+    swap("  gemma:   # the one we use", "  gemma4-12b:   # the one we use");
+    swap("  default: GEMMA   # the chat", "  default: gemma4-12b   # the chat");
+    swap("  default_utility: \"Gemma\"", "  default_utility: gemma4-12b");
+    swap("      chat: Gemma\n", "      chat: gemma4-12b\n");
+    swap("{backend: GEMMA, window: 8192}", "{backend: gemma4-12b, window: 8192}");
+    swap("{chat: gEmMa, utility: claude}", "{chat: gemma4-12b, utility: claude}");
+    swap("    backend: GEMMA\n    rerank: Gemma\n",
+         "    backend: gemma4-12b\n    rerank: gemma4-12b\n");
+    swap("      extract_backend: GEMMA\n", "      extract_backend: gemma4-12b\n");
+    swap("    extract_backend: Gemma\nagents", "    extract_backend: gemma4-12b\nagents");
+    swap("    model: GEMMA\nmcp", "    model: gemma4-12b\nmcp");
+    swap("  judge_backend: GEMMA\n", "  judge_backend: gemma4-12b\n");
+    swap("      teacher: Gemma\n", "      teacher: gemma4-12b\n");
+    swap("    backend: GEMMA\n    judge_backend: claude",
+         "    backend: gemma4-12b\n    judge_backend: claude");
+    swap("      backend: Gemma\n    - type: directory",
+         "      backend: gemma4-12b\n    - type: directory");
+    // By the key's own spelling and by another: the same bytes, every
+    // reference renamed and every trap -- `GEMMA-old`, the MCP server and the
+    // collection keyed `GEMMA`, the prompt -- as it was.
+    for (const std::string_view old_name : {"gemma", "GEMMA", "Gemma"}) {
+        CAPTURE(old_name);
+        const std::string renamed =
+            apogee::harness::rename_backend(kRenameMixedYaml, old_name, "gemma4-12b");
+        CHECK(renamed == expected);
+        const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+        CHECK(config.find_backend("gemma4-12b") != nullptr);
+        CHECK(config.find_backend("GEMMA-old") != nullptr);
+        CHECK(config.models.default_backend == "gemma4-12b");
+        CHECK(config.mcp_server_names() == std::vector<std::string>{"GEMMA"});
+    }
+    // The exact spelling's golden is untouched by any of it.
+    CHECK(apogee::harness::rename_backend(kRenameYaml, "GEMMA", "gemma4-12b") ==
+          apogee::harness::rename_backend(kRenameYaml, "gemma", "gemma4-12b"));
+}
+
+TEST_CASE("rename_backend by a case variant to a change of case is the backend's own, not taken",
+          "[config_edit][rename][CLI-M54]") {
+    using apogee::harness::rename_backend;
+    // `GEMMA` names `gemma`: a rename to `Gemma` is a change of case to the
+    // backend's own name, never a collision with `gemma`.
+    std::string renamed;
+    REQUIRE_NOTHROW(renamed = rename_backend(kRenameMixedYaml, "GEMMA", "Gemma"));
+    const apogee::harness::Config config = apogee::harness::parse_config(renamed, "renamed");
+    REQUIRE(config.backends.contains("Gemma"));
+    CHECK(config.backends.find("Gemma")->first == "Gemma");
+    CHECK(config.models.default_backend == "Gemma");
+    CHECK(renamed.find("  default: Gemma   # the chat\n") != std::string::npos);
+    CHECK(renamed.find("{chat: Gemma, utility: claude}") != std::string::npos);
+    // A reference that already reads as the new name is left as written.
+    CHECK(renamed.find("  default_utility: \"Gemma\"\n") != std::string::npos);
+    // A name another backend holds, in any case, is still taken.
+    CHECK_THROWS_WITH(rename_backend(kRenameMixedYaml, "GEMMA", "CLAUDE"),
+                      "a backend named 'claude' already exists");
+    CHECK_THROWS_WITH(rename_backend(kRenameMixedYaml, "Nope", "x"), "no backend named 'Nope'");
+    // A key written quoted is refused by its spelling in any case, as
+    // `find_entry_line` refuses one (CLI-M44), never "no backend named".
+    CHECK_THROWS_WITH(rename_backend("backends:\n  \"Foo\":\n    type: mock\n", "foo", "bar"),
+                      ContainsSubstring("the key backends.foo is written '\"Foo\":'"));
+}
+
+TEST_CASE(
+    "rename_backend leaves a rerank's off and on, which name no backend, in any backend's rename",
+    "[config_edit][rename][CLI-M54]") {
+    // `rerank: off` and `rerank: on` are words, read as written before any
+    // backend is looked up; any other spelling names a backend, case aside.
+    constexpr std::string_view kText =
+        "backends:\n  OFF:\n    type: mock\n  On:\n    type: mock\n"
+        "embeddings:\n  a:\n    rerank: off\n  b:\n    rerank: Off\n  c:\n    rerank: on\n"
+        "  d:\n    rerank: ON\n  e: {rerank: off}\n";
+    CHECK(apogee::harness::rename_backend(kText, "off", "judge") ==
+          "backends:\n  judge:\n    type: mock\n  On:\n    type: mock\n"
+          "embeddings:\n  a:\n    rerank: off\n  b:\n    rerank: judge\n  c:\n    rerank: on\n"
+          "  d:\n    rerank: ON\n  e: {rerank: off}\n");
+    CHECK(apogee::harness::rename_backend(kText, "On", "helper") ==
+          "backends:\n  OFF:\n    type: mock\n  helper:\n    type: mock\n"
+          "embeddings:\n  a:\n    rerank: off\n  b:\n    rerank: Off\n  c:\n    rerank: on\n"
+          "  d:\n    rerank: helper\n  e: {rerank: off}\n");
+}
+
 // --- editing a backend in place (46b) ---------------------------------------
 
 namespace {

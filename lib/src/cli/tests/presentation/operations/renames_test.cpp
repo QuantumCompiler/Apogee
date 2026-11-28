@@ -1019,3 +1019,194 @@ TEST_CASE("every rename carries what was made from a folder to its sources' new 
                                                      "111111111111" / "text-F16.gguf")) == foreign);
     }
 }
+
+// --- the name in any case, every reference in any case (CLI-M54) -------------
+
+namespace {
+
+/// A home of each format holding mock backends `foo` and `claude` and a
+/// reference to `foo` in every case there is: the JSONC config `config init`
+/// writes, the backends added, and an older `config.yaml` by hand.
+struct CaseHome {
+    std::string format;
+    apogee::testing::CliHome home;
+
+    explicit CaseHome(std::string kind)
+        : format{std::move(kind)},
+          home{format == "jsonc" ? std::string{apogee::harness::config_template()}
+                                 : std::string{kYaml},
+               format == "jsonc" ? "config.json" : "config.yaml"} {
+        if (format != "jsonc") {
+            return;
+        }
+        std::string out;
+        std::string err;
+        for (const std::vector<std::string>& args : std::vector<std::vector<std::string>>{
+                 {"config", "add-backend", "foo", "--type", "mock"},
+                 {"config", "add-backend", "claude", "--type", "mock"},
+                 {"config", "set-default-utility", "foo"},
+                 {"config", "add-suite", "duo", "--chat", "Foo"},
+                 {"agents", "create", "rev", "--model", "FOO"}}) {
+            REQUIRE(run(home, args, &out, &err) == 0);
+        }
+    }
+
+    static constexpr std::string_view kYaml =
+        "backends:\n  foo:\n    type: mock\n  claude:\n    type: mock\n"
+        "models:\n  default_utility: foo\n"
+        "suites:\n  duo:\n    members:\n      chat: Foo\n"
+        "agents:\n  rev:\n    model: FOO\n";
+};
+
+/// `chat_id`'s saved chat, written as a rename finds it: `serialize`d, so
+/// its `updated_at` is the file's own.
+void write_chat(const std::string& chat_id, const std::string& backend, const std::string& rerank) {
+    apogee::logger::Session session;
+    session.chat_id = chat_id;
+    session.backend = backend;
+    session.rerank = rerank;
+    session.started_at = "2026-11-26T12:00:00Z";
+    session.updated_at = "2026-11-26T12:05:00Z";
+    fs::create_directories(apogee::logger::sessions_dir());
+    std::ofstream{apogee::logger::session_path(chat_id), std::ios::binary}
+        << apogee::logger::serialize(session);
+}
+
+}  // namespace
+
+TEST_CASE("config rename-backend repoints a reference written in another case, so check passes",
+          "[renames][config][CLI-M54]") {
+    for (const char* format : {"jsonc", "yaml"}) {
+        CAPTURE(format);
+        const CaseHome fixture{format};
+        std::string out;
+        std::string err;
+        REQUIRE(run(fixture.home, {"config", "set-default", "FOO"}, &out, &err) == 0);
+        REQUIRE(apogee::harness::load_config(fixture.home.config_path()).models.default_backend ==
+                "FOO");
+        REQUIRE(run(fixture.home, {"config", "rename-backend", "foo", "bar"}, &out, &err) == 0);
+        CHECK_THAT(out, ContainsSubstring("renamed backend 'foo' to 'bar'"));
+        const apogee::harness::Config config =
+            apogee::harness::load_config(fixture.home.config_path());
+        CHECK(config.models.default_backend == "bar");
+        CHECK(config.models.default_utility == "bar");
+        REQUIRE(config.find_agent("rev") != nullptr);
+        CHECK(config.find_agent("rev")->model == "bar");
+        (void)run(fixture.home, {"check", "--no-color"}, &out, &err);
+        CHECK_FALSE(out.find("names a backend that is not configured") != std::string::npos);
+        (void)run(fixture.home, {"models", "status"}, &out, &err);
+        CHECK_FALSE(out.find("not configured") != std::string::npos);
+    }
+}
+
+TEST_CASE("config rename-backend finds the backend by its name in any case, and sweeps its chats",
+          "[renames][config][CLI-M54]") {
+    for (const char* format : {"jsonc", "yaml"}) {
+        CAPTURE(format);
+        const CaseHome fixture{format};
+        std::string out;
+        std::string err;
+        REQUIRE(run(fixture.home, {"config", "set-default", "FOO"}, &out, &err) == 0);
+        write_chat("20261126-120000-0001", "FOO", "Foo");
+        write_chat("20261126-120000-0002", "claude", "");
+        const std::string other_chat = slurp(apogee::logger::session_path("20261126-120000-0002"));
+
+        REQUIRE(run(fixture.home, {"config", "rename-backend", "Foo", "bar"}, &out, &err) == 0);
+        // Said by the key as the file writes it.
+        CHECK_THAT(out, ContainsSubstring("renamed backend 'foo' to 'bar'"));
+        CHECK_THAT(out, ContainsSubstring("1 saved chat now names 'bar'"));
+        const apogee::harness::Config config =
+            apogee::harness::load_config(fixture.home.config_path());
+        REQUIRE(config.backends.contains("bar"));
+        CHECK(config.backends.find("bar")->first == "bar");
+        CHECK(config.backends.size() == 2);
+        CHECK(config.models.default_backend == "bar");
+        CHECK(config.models.default_utility == "bar");
+        CHECK(config.find_agent("rev")->model == "bar");
+        REQUIRE(config.suites.contains("duo"));
+        CHECK(config.suites.at("duo").members.at("chat").backend == "bar");
+        const apogee::logger::Session chat =
+            apogee::logger::load("20261126-120000-0001", {}).session;
+        CHECK(chat.backend == "bar");
+        CHECK(chat.rerank == "bar");
+        CHECK(chat.updated_at == "2026-11-26T12:05:00Z");
+        CHECK(slurp(apogee::logger::session_path("20261126-120000-0002")) == other_chat);
+    }
+    // A key written `Bar` by hand, renamed by `bar`.
+    const apogee::testing::CliHome hand{
+        "backends:\n  Bar:\n    type: mock\n"
+        "models:\n  default: BAR\n"};
+    std::string out;
+    std::string err;
+    REQUIRE(run(hand, {"config", "rename-backend", "--", "bar", "renamed"}, &out, &err) == 0);
+    CHECK_THAT(out, ContainsSubstring("renamed backend 'Bar' to 'renamed'"));
+    CHECK(apogee::harness::load_config(hand.config_path()).models.default_backend == "renamed");
+}
+
+TEST_CASE("the store follows a backend renamed by its name in another case, as by its own",
+          "[renames][config][coupling][CLI-M54]") {
+    const StoreHome store{{"gemma-Q4KM"}};
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"config", "rename-backend", "GEMMA-q4km", "mine-Q4KM"}, &out, &err) ==
+            0);
+    CHECK_THAT(out, ContainsSubstring("moved store 'org--gemma' to 'org--mine'"));
+    CHECK_FALSE(out.find("still points at it") != std::string::npos);
+    CHECK_FALSE(out.find("is not named after") != std::string::npos);
+    CHECK_FALSE(fs::exists(store.home.home() / "models" / "org--gemma"));
+    const apogee::harness::Config config = apogee::harness::load_config(store.home.config_path());
+    REQUIRE(config.find_backend("mine-Q4KM") != nullptr);
+    CHECK(config.find_backend("mine-Q4KM")->model_path == store.at("org--mine"));
+    CHECK(config.models.default_backend == "mine-Q4KM");
+}
+
+TEST_CASE("models rename renames the backends named after it and their references in any case",
+          "[renames][models][CLI-M54]") {
+    const StoreHome store{{"gemma-Q4KM"}};
+    std::ofstream{store.home.config_path(), std::ios::binary | std::ios::trunc}
+        << "backends:\n"
+        << store.entry("gemma-Q4KM") << "models:\n  default: GEMMA-q4km\n";
+    std::string out;
+    std::string err;
+    REQUIRE(run(store.home, {"models", "rename", "org--gemma", "org--gem"}, &out, &err) == 0);
+    const apogee::harness::Config config = apogee::harness::load_config(store.home.config_path());
+    REQUIRE(config.backends.contains("gem-Q4KM"));
+    CHECK(config.backends.find("gem-Q4KM")->first == "gem-Q4KM");
+    CHECK(config.models.default_backend == "gem-Q4KM");
+}
+
+TEST_CASE("a change of case still renames, and delete-backend still clears a pointer in any case",
+          "[renames][config][CLI-M54]") {
+    for (const char* format : {"jsonc", "yaml"}) {
+        CAPTURE(format);
+        {
+            const CaseHome fixture{format};
+            std::string out;
+            std::string err;
+            REQUIRE(run(fixture.home, {"config", "set-default", "FOO"}, &out, &err) == 0);
+            REQUIRE(run(fixture.home, {"config", "rename-backend", "foo", "Foo"}, &out, &err) == 0);
+            const apogee::harness::Config config =
+                apogee::harness::load_config(fixture.home.config_path());
+            REQUIRE(config.backends.contains("Foo"));
+            CHECK(config.backends.find("Foo")->first == "Foo");
+            CHECK(config.models.default_backend == "Foo");
+            CHECK(config.models.default_utility == "Foo");
+            // A rename to the key's own spelling is the same-name refusal,
+            // whatever case the old name is typed in.
+            const std::string settled = slurp(fixture.home.config_path());
+            CHECK(run(fixture.home, {"config", "rename-backend", "FOO", "Foo"}, &out, &err) == 1);
+            CHECK_THAT(err, ContainsSubstring("'Foo' is already its name"));
+            CHECK(slurp(fixture.home.config_path()) == settled);
+        }
+        {
+            const CaseHome fixture{format};
+            std::string out;
+            std::string err;
+            REQUIRE(run(fixture.home, {"config", "set-default", "FOO"}, &out, &err) == 0);
+            REQUIRE(run(fixture.home, {"config", "delete-backend", "FOO"}, &out, &err) == 0);
+            CHECK_THAT(out, ContainsSubstring("models.default cleared: it named 'FOO'"));
+            CHECK(apogee::harness::load_config(fixture.home.config_path())
+                      .models.default_backend.empty());
+        }
+    }
+}

@@ -431,7 +431,13 @@ rewritten to name it as it is now called, so a pairing that held still holds
 (M25). The config it leaves is byte for byte the CLI's. `200 {renamed, to, said, restart_required}`, `said`
 the lines the CLI prints; `404` when unknown; `400` naming why for a name
 that is taken or cannot name a backend -- since 55f, the names the add route
-takes; the old name may be any, which is how an odd one is reached.
+takes; the old name may be any, which is how an odd one is reached. Since
+CLI-M54 the `{id}` names the backend in any case, as every other route's does
+(`/backends/Foo/rename` renames `foo`), and every reference is renamed however
+it is spelled -- a `models.default` written `FOO` among them, and a saved chat
+on `Foo` -- while a value that only begins with the name never is. `said`
+names the backend by its key as the file writes it; `renamed` echoes the
+`{id}` as sent.
 
 ### `POST /v1/admin/backends/default`
 
@@ -570,8 +576,10 @@ names each. No restart is needed: `analyze` reads the config on every run.
 
 One agent's view plus `prompt_bodies` and `schema_bodies`, each a list of
 `{path, body, present}` -- the file's text, or the compiled-in text for a
-bundled agent whose file has not been seeded (`present: false`). `404` when
-unknown.
+bundled agent whose file has not been seeded (`present: false`). Since
+CLI-M54 the `{id}` names the agent in any case, as its `DELETE` and every
+other section's `GET` do -- a bundled agent too (`/agents/Code-Review`) --
+and the view carries the agent's own name. `404` when unknown.
 
 ### `PUT /v1/admin/agents/{id}`
 

@@ -897,6 +897,39 @@ TEST_CASE("a backend renamed over HTTP is byte-identical to the CLI's, every ref
               .status == 400);
 }
 
+TEST_CASE("a backend renamed over HTTP by its name in any case is the CLI's, every case repointed",
+          "[httpserver][admin][parity][rename][CLI-M54]") {
+    // The route's own lookup folds, and so does the core it calls: `Foo` and
+    // `foo` both rename `foo`, a pointer written `FOO` with it.
+    for (const char* typed : {"foo", "Foo"}) {
+        CAPTURE(typed);
+        const Fixture fixture;
+        fixture.cli({"config", "add-backend", "foo", "--type", "mock"});
+        fixture.cli({"config", "set-default", "FOO"});
+        REQUIRE(admin_create_backend(fixture.context(),
+                                     post(nlohmann::json{{"name", "foo"}, {"type", "mock"}}))
+                    .status == 201);
+        REQUIRE(admin_set_role(fixture.context(), "default", post(nlohmann::json{{"name", "FOO"}}))
+                    .status == 200);
+        REQUIRE(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+        REQUIRE(apogee::harness::load_config(fixture.http_config).models.default_backend == "FOO");
+
+        fixture.cli({"config", "rename-backend", typed, "bar"});
+        const HttpResponse renamed =
+            admin_rename_backend(fixture.context(), typed, post(nlohmann::json{{"name", "bar"}}));
+        REQUIRE(renamed.status == 200);
+        const nlohmann::json body = parsed(renamed);
+        CHECK(body.at("to") == "bar");
+        CHECK(
+            body.at("said").at(0).get<std::string>().starts_with("renamed backend 'foo' to 'bar'"));
+        CHECK(Fixture::bytes(fixture.cli_config) == Fixture::bytes(fixture.http_config));
+        const apogee::harness::Config config = apogee::harness::load_config(fixture.http_config);
+        CHECK(config.models.default_backend == "bar");
+        REQUIRE(config.backends.contains("bar"));
+        CHECK(config.backends.find("bar")->first == "bar");
+    }
+}
+
 TEST_CASE("a backend edited over HTTP is byte-identical to the CLI's, and never takes a key",
           "[httpserver][admin][parity][set-backend]") {
     // 46b: the twin calls the CLI's one core.

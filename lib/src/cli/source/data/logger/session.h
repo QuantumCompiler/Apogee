@@ -354,10 +354,11 @@ struct SessionSweep {
 };
 
 /// Every saved chat that names backend `old_name` -- its backend, its rerank
-/// judge -- rewritten to `new_name`, each file atomically and its
-/// `updated_at` kept: a rename is no new turn, and the chats keep their
-/// order. A file that does not parse is never rewritten; one that cannot be
-/// written is counted in `failed`.
+/// judge, in any case, as the config compares names (CLI-M54), a value
+/// already reading `new_name` left -- rewritten to `new_name`, each file
+/// atomically and its `updated_at` kept: a rename is no new turn, and the
+/// chats keep their order. A file that does not parse is never rewritten;
+/// one that cannot be written is counted in `failed`.
 [[nodiscard]] SessionSweep rename_session_backend(std::string_view old_name,
                                                   std::string_view new_name);
 

@@ -273,11 +273,18 @@ RenameOutcome rename_backend_everywhere(const std::filesystem::path& config_path
         out.refusal = e.what();
         return out;
     }
-    const harness::BackendConfig* entry = config.find_backend(old_name);
-    if (entry == nullptr) {
+    const auto found = config.backends.find(old_name);
+    if (found == config.backends.end()) {
         out.refusal = "no backend named '" + std::string{old_name} + "'";
         return out;
     }
+    // Found case aside, as every config lookup finds an entry; from here on
+    // the name is the entry's own key, as the file writes it (CLI-M54) -- the
+    // store's rule, the edit, the line and the sweep all read the one
+    // spelling, so `Foo` renames `foo` exactly as `foo` does.
+    const std::string stored_key = found->first;
+    old_name = stored_key;
+    const harness::BackendConfig* entry = &found->second;
 
     // The store follows only where the mapping is one to one (46a's rule (a)).
     const std::string model = stored_model_at(roots, entry->model_path);

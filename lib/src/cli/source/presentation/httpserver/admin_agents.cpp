@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "contracts/assets.h"
+#include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/paths.h"
 #include "operations/collections.h"
@@ -196,8 +197,13 @@ HttpResponse admin_get_agent(const AdminConfigContext& context, std::string_view
     if (!loaded.config.has_value()) {
         return loaded.failure;
     }
+    // In any case, as its DELETE and every other section's GET find an entry
+    // (CLI-M54) -- folded inside the walk of every agent, so the bundled
+    // seven are found as the config's entries are; the view keeps the
+    // agent's own name.
+    const harness::CaseInsensitiveLess less;
     for (const harness::NamedAgent& agent : harness::all_agents(*loaded.config)) {
-        if (agent.name != name) {
+        if (less(agent.name, name) || less(name, agent.name)) {
             continue;
         }
         nlohmann::json view = agent_view(agent);

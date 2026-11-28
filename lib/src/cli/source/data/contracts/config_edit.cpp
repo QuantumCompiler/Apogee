@@ -3094,6 +3094,20 @@ bool reference_path(const std::vector<std::string>& path,
     });
 }
 
+/// Whether a reference's value `text`, under key `key`, names backend
+/// `old_name` and is not already `new_name` (CLI-M54): the whole value
+/// compared case aside, as the loader's keys compare, so `FOO` names `foo`
+/// and `food` does not -- and a value that already reads as a change of
+/// case's new name is left as written. A rerank's `off` and `on` are words,
+/// read before any backend (`kRerankOff`, `kRerankOn`), never a name.
+bool names_renamed(std::string_view key, std::string_view text, std::string_view old_name,
+                   std::string_view new_name) {
+    if (key == "rerank" && (text == kRerankOff || text == kRerankOn)) {
+        return false;
+    }
+    return equals_folded(text, old_name) && text != new_name;
+}
+
 /// A flow mapping's values naming `old_name` replaced, each at a reference
 /// path under `path` -- `{chat: root, utility: helper}` as a suite's members.
 std::string rename_in_flow_map(std::string_view flow, std::vector<std::string> path,
@@ -3128,8 +3142,10 @@ std::string rename_in_flow_map(std::string_view flow, std::vector<std::string> p
             if (from != std::string::npos) {
                 const std::size_t last = item.find_last_not_of(" \t");
                 path.push_back(key);
-                if (reference_path(path, patterns) && token_text_of(std::string_view{item}.substr(
-                                                          from, last + 1 - from)) == old_name) {
+                if (reference_path(path, patterns) &&
+                    names_renamed(
+                        key, token_text_of(std::string_view{item}.substr(from, last + 1 - from)),
+                        old_name, new_name)) {
                     item = item.substr(0, from) + yaml_scalar(new_name) + item.substr(last + 1);
                 }
                 path.pop_back();
@@ -3164,7 +3180,9 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
         }
         // A name every format edits is found written bare, as every other
         // editor finds it (CLI-M44); a name none does is found as written.
-        refuse_key_spelling(line, kEntryIndent, old_name, dotted_path({"backends", old_name}));
+        // Either case aside, as `find_entry_line` finds an entry (CLI-M54).
+        refuse_key_spelling(line, kEntryIndent, old_name, dotted_path({"backends", old_name}),
+                            /*folded=*/true);
         const std::size_t end = key_token_end(line, kEntryIndent);
         if (end == std::string_view::npos) {
             continue;
@@ -3173,7 +3191,7 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
             rest != std::string_view::npos && line[rest] != '#') {
             continue;  // a `key: value` line, no entry
         }
-        if (key_text(line, kEntryIndent, end) == old_name) {
+        if (equals_folded(key_text(line, kEntryIndent, end), old_name)) {
             key_line = i;
             break;
         }
@@ -3257,7 +3275,8 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
                   rename_in_flow_map(value, path, patterns, old_name, new_name) + raw.substr(stop);
             continue;
         }
-        if (reference_path(path, patterns) && token_text_of(value) == old_name) {
+        if (reference_path(path, patterns) &&
+            names_renamed(key, token_text_of(value), old_name, new_name)) {
             raw = raw.substr(0, from) + yaml_scalar(new_name) + raw.substr(stop);
         }
     }
@@ -3516,11 +3535,14 @@ std::vector<std::vector<std::string>> backend_reference_paths() {
 
 namespace {
 
-/// The values naming `old_name` at `path`'s matches under `node`, replaced.
+/// The values naming `old_name` at `path`'s matches under `node`, replaced:
+/// in any case, as the YAML half matches them (CLI-M54).
 void rename_references(nlohmann::ordered_json& node, const std::vector<std::string>& path,
                        std::size_t at, std::string_view old_name, std::string_view new_name) {
     if (at == path.size()) {
-        if (node.is_string() && node.get_ref<const std::string&>() == old_name) {
+        if (node.is_string() &&
+            yaml_text::names_renamed(path.back(), node.get_ref<const std::string&>(), old_name,
+                                     new_name)) {
             node = std::string{new_name};
         }
         return;
@@ -3555,7 +3577,10 @@ std::string rename_backend_jsonc(std::string_view content, std::string_view old_
     }
     const jsonc::Value& backends =
         root.children.at(static_cast<std::size_t>(backends_at - root.keys.begin()));
-    const auto entry = std::ranges::find(backends.keys, old_name);
+    // The entry by its name in any case, as the loader finds it (CLI-M54).
+    const auto entry = std::ranges::find_if(backends.keys, [old_name](const std::string& key) {
+        return yaml_text::equals_folded(key, old_name);
+    });
     if (backends.kind != jsonc::Kind::Object || entry == backends.keys.end()) {
         throw ConfigEditError("no backend named '" + std::string{old_name} + "'");
     }
@@ -3593,10 +3618,12 @@ std::string rename_backend(std::string_view content, std::string_view old_name,
         throw ConfigEditError("'" + std::string{old_name} + "' is already its name");
     }
     // A name taken -- the same folded, as add-backend refuses one -- unless it
-    // is this backend's own, a change of case.
+    // is this backend's own, a change of case: its own whatever case
+    // `old_name` is written in (CLI-M54).
     const auto refuse_taken = [&](std::string_view text) {
         for (const std::string& name : section_entry_names(text, "backends")) {
-            if (name != old_name && yaml_text::fold_collision({name}, new_name).has_value()) {
+            if (!yaml_text::equals_folded(name, old_name) &&
+                yaml_text::fold_collision({name}, new_name).has_value()) {
                 throw ConfigEditError("a backend named '" + name + "' already exists");
             }
             if (name == new_name) {

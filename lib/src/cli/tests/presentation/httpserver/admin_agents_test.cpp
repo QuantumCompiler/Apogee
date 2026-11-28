@@ -192,6 +192,50 @@ TEST_CASE("list shows the bundled seven and the entries; get inlines the bodies"
     CHECK(after[0]["model"] == "local");
 }
 
+TEST_CASE("get finds an agent by its name in any case, a bundled one with its compiled-in bodies",
+          "[httpserver][admin][agents][CLI-M54]") {
+    const Fixture fixture;
+    (void)admin_create_agent(fixture.context(),
+                             with_body("POST", nlohmann::json{{"name", "mine"},
+                                                              {"prompt_body", "MY PROMPT\n"},
+                                                              {"no_schema", true}}));
+    // A config entry, named as the entry is.
+    const HttpResponse mine = admin_get_agent(fixture.context(), "MINE");
+    REQUIRE(mine.status == 200);
+    CHECK(parsed(mine)["name"] == "mine");
+    CHECK(parsed(mine)["prompt_bodies"][0]["body"] == "MY PROMPT\n");
+
+    // A bundled agent, unseeded: its compiled-in bodies, as by its own name.
+    const HttpResponse bundled = admin_get_agent(fixture.context(), "Release-Notes");
+    REQUIRE(bundled.status == 200);
+    const nlohmann::json view = parsed(bundled);
+    CHECK(view["name"] == "release-notes");
+    CHECK(view["bundled"] == true);
+    CHECK(view == parsed(admin_get_agent(fixture.context(), "release-notes")));
+    CHECK(view["prompt_bodies"][0]["body"].get<std::string>().find("release notes") !=
+          std::string::npos);
+
+    // An entry overriding a bundled agent, by another case: the entry.
+    (void)admin_create_agent(
+        fixture.context(),
+        with_body("POST", nlohmann::json{{"name", "security-review"}, {"model", "local"}}));
+    const HttpResponse overriding = admin_get_agent(fixture.context(), "SECURITY-REVIEW");
+    REQUIRE(overriding.status == 200);
+    CHECK(parsed(overriding)["name"] == "security-review");
+    CHECK(parsed(overriding)["overrides_bundled"] == true);
+    CHECK(parsed(overriding)["model"] == "local");
+
+    // Guards: an unknown name is a 404 in the name typed, and a delete by a
+    // case variant is still a 200.
+    const HttpResponse unknown = admin_get_agent(fixture.context(), "Nope");
+    CHECK(unknown.status == 404);
+    CHECK(unknown.body.find("no agent named 'Nope'") != std::string::npos);
+    HttpRequest keep;
+    keep.method = "DELETE";
+    CHECK(admin_delete_agent(fixture.context(), "MINE", keep).status == 200);
+    CHECK(admin_get_agent(fixture.context(), "mine").status == 404);
+}
+
 TEST_CASE("put edits in place with force implied; delete removes the entry and, asked, the files",
           "[httpserver][admin][agents]") {
     const Fixture fixture;

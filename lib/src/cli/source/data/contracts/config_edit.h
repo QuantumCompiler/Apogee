@@ -183,7 +183,10 @@ public:
 /// it, in one edit: the entry's key where it stands -- its fields, its
 /// comments and its place in the file kept -- and each value naming it at
 /// one of `backend_reference_paths()`, replaced where it stands. Nothing
-/// else in the file moves.
+/// else in the file moves. The key and every reference are matched case
+/// aside, as the loader compares names (CLI-M54): `FOO` names backend `foo`,
+/// a whole value always, so `food` never does; a reference that already
+/// reads as `new_name` (a change of case) is left as written.
 ///
 /// Throws ConfigEditError when `old_name` is no backend, `new_name` is taken
 /// (folded, as `append_backend` refuses a name -- a change of case to the

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "contracts/cancellation.h"
+#include "contracts/config.h"
 #include "embedstore/store.h"
 #include "harness/harness.h"
 
@@ -35,11 +36,11 @@
 namespace apogee::agentloop {
 
 /// `--rerank off`, or `rerank: off` on a collection: disabled for the run.
-inline constexpr std::string_view kRerankOff = "off";
+inline constexpr std::string_view kRerankOff = harness::kRerankOff;
 
 /// A rerank setting that names no backend: the utility model judges, or the
 /// conversation's own backend when none is set (26b).
-inline constexpr std::string_view kRerankOn = "on";
+inline constexpr std::string_view kRerankOn = harness::kRerankOn;
 
 /// Multiplies the limit to size the candidate set the judge sees: 5 injected
 /// chunks are chosen from ~50. Reranking can only improve on what retrieval
