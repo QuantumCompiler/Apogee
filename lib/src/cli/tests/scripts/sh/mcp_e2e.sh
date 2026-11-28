@@ -23,7 +23,11 @@ WORK_DIR="$(sandbox_dir "$WORK_DIR")"
 mkdir -p "$WORK_DIR"
 export APOGEE_HOME="$WORK_DIR"
 unset ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY
-trap 'rm -rf "$WORK_DIR"' EXIT
+# 58b's code graph is parsed from a tree outside any repository: the work
+# directory sits in the build tree, which git ignores, and inside a
+# repository a source tree is read the way git reads it (code_graph_e2e.sh).
+SRC_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/apogee-mcp-shop.XXXXXX")
+trap 'rm -rf "$WORK_DIR" "$SRC_ROOT"' EXIT
 
 fail() { echo "mcp_e2e: $*" >&2; exit 1; }
 
@@ -63,10 +67,35 @@ if "$APOGEE_BIN" mcp test self write_note '{"key":"k","content":"x"}' </dev/null
     fail "a writing tool was reachable over stdio: $(cat "$WORK_DIR/write.txt")"
 fi
 
+# --- the graphs and the records a host reads (58b) ---------------------------
+# The spike's sandbox: a model-free code graph `shop` over a two-file Python
+# project, its README ingested as `notes`, and one knowledge record captured
+# by a scripted clerk -- so list_graphs, graph_stats, graph_report and the
+# knowledge reads below each have something to answer with.
+mkdir -p "$SRC_ROOT/shop" "$WORK_DIR/readme"
+printf 'class Store:\n    def charge(self, amount):\n        return amount\n' >"$SRC_ROOT/shop/store.py"
+printf 'from store import Store\n\n\ndef checkout():\n    return Store().charge(5)\n' >"$SRC_ROOT/shop/app.py"
+printf 'The shop charges at checkout through the store.\n' >"$WORK_DIR/readme/README.md"
+"$APOGEE_BIN" embed ingest notes "$WORK_DIR/readme" </dev/null >/dev/null 2>&1 || fail "embed ingest notes"
+"$APOGEE_BIN" graph build --source "$SRC_ROOT/shop" --graph shop -q </dev/null >/dev/null 2>"$WORK_DIR/shop.err" || fail "graph build --source: $(cat "$WORK_DIR/shop.err")"
+printf '%s' '{"turns": [{"text": "{\"intent\": \"We dropped the cancel button because testers kept mistaking it for back.\", \"decision\": \"Remove the cancel button.\", \"status\": \"shipped\", \"discipline\": \"ux\", \"downstream_link\": \"\", \"provenance\": {\"source\": \"meeting\", \"attribution\": \"Ada\"}}"}]}' >"$WORK_DIR/clerk.json"
+"$APOGEE_BIN" config add-backend clerk --type mock --model-path "$WORK_DIR/clerk.json" </dev/null >/dev/null || fail "add the clerk"
+"$APOGEE_BIN" knowledge capture -m clerk --json "Ada: drop the cancel button? Bob: yes" </dev/null >"$WORK_DIR/capture.json" 2>"$WORK_DIR/capture.err" || fail "knowledge capture: $(cat "$WORK_DIR/capture.err")"
+RECORD_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["record"]["id"])' "$WORK_DIR/capture.json")" || fail "the captured record has no id"
+
 # --- mcp serve (54a): the public verb, its alias, the status reads ----------
 # An external client over raw JSON-RPC: both spellings list the same tools,
-# all read-only, the five status reads last; each read answers with the CLI's
-# own --output-format json document, byte for byte.
+# all read-only, the status reads last (54a's five, then 58b's six); each read
+# answers with the CLI's own --output-format json document, byte for byte --
+# graph_report with the Markdown the command prints.
+"$APOGEE_BIN" graph list --output-format json </dev/null >"$WORK_DIR/doc-graph-list.json" 2>/dev/null || fail "graph list --output-format json"
+grep -q '"built":true.*"name":"shop"' "$WORK_DIR/doc-graph-list.json" || fail "graph list did not name shop built: $(cat "$WORK_DIR/doc-graph-list.json")"
+"$APOGEE_BIN" graph stats shop --output-format json </dev/null >"$WORK_DIR/doc-graph-stats.json" 2>/dev/null || fail "graph stats shop --output-format json"
+"$APOGEE_BIN" graph report --graph shop </dev/null >"$WORK_DIR/doc-graph-report.md" 2>"$WORK_DIR/report.err" || fail "graph report --graph shop: $(cat "$WORK_DIR/report.err")"
+"$APOGEE_BIN" knowledge list --output-format json </dev/null >"$WORK_DIR/doc-knowledge-list.json" 2>/dev/null || fail "knowledge list --output-format json"
+"$APOGEE_BIN" knowledge info "$RECORD_ID" --output-format json </dev/null >"$WORK_DIR/doc-knowledge-info.json" 2>/dev/null || fail "knowledge info --output-format json"
+"$APOGEE_BIN" knowledge query "cancel button" --output-format json </dev/null >"$WORK_DIR/doc-knowledge-query.json" 2>/dev/null || fail "knowledge query --output-format json"
+grep -q "$RECORD_ID" "$WORK_DIR/doc-knowledge-query.json" || fail "knowledge query did not find the record: $(cat "$WORK_DIR/doc-knowledge-query.json")"
 "$APOGEE_BIN" models list --output-format json </dev/null >"$WORK_DIR/doc-models-list.json" 2>/dev/null || fail "models list --output-format json"
 "$APOGEE_BIN" models list --all --output-format json </dev/null >"$WORK_DIR/doc-models-list-all.json" 2>/dev/null || fail "models list --all --output-format json"
 "$APOGEE_BIN" models status --output-format json </dev/null >"$WORK_DIR/doc-models-status.json" 2>/dev/null || fail "models status --output-format json"
@@ -82,7 +111,13 @@ cat >"$WORK_DIR/serve-calls.json" <<EOF
   {"tool": "models_status", "arguments": {}, "expect": "$WORK_DIR/doc-models-status.json"},
   {"tool": "train_status", "arguments": {}, "expect": "$WORK_DIR/doc-train-status.json"},
   {"tool": "train_versions", "arguments": {}, "expect": "$WORK_DIR/doc-train-versions.json"},
-  {"tool": "check", "arguments": {}, "expect": "$WORK_DIR/doc-check.json"}
+  {"tool": "check", "arguments": {}, "expect": "$WORK_DIR/doc-check.json"},
+  {"tool": "list_graphs", "arguments": {}, "expect": "$WORK_DIR/doc-graph-list.json"},
+  {"tool": "graph_stats", "arguments": {"graph": "shop"}, "expect": "$WORK_DIR/doc-graph-stats.json"},
+  {"tool": "graph_report", "arguments": {"graph": "shop"}, "expect": "$WORK_DIR/doc-graph-report.md"},
+  {"tool": "knowledge_list", "arguments": {}, "expect": "$WORK_DIR/doc-knowledge-list.json"},
+  {"tool": "knowledge_info", "arguments": {"id": "$RECORD_ID"}, "expect": "$WORK_DIR/doc-knowledge-info.json"},
+  {"tool": "knowledge_query", "arguments": {"question": "cancel button"}, "expect": "$WORK_DIR/doc-knowledge-query.json"}
 ]
 EOF
 python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/serve-calls.json" </dev/null >"$WORK_DIR/serve.txt" 2>&1 || fail "mcp serve's handshake: $(cat "$WORK_DIR/serve.txt")"

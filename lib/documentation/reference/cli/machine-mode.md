@@ -1442,8 +1442,10 @@ apogee providers register <id> --output-format json  # {"object":"provider.regis
 apogee system --output-format json          # {"cpu":{…},"memory":{…},"apogee":{…},"gpu":{…},"disk":{…}}
 apogee knowledge list --output-format json  # {"object":"list","db":…,"data":[records]}
 apogee knowledge info <id> --output-format json      # the record, as --json prints it
+apogee knowledge query "<question>" --output-format json   # {"object":"knowledge.query","db",…,"records":[{"record","score"}],"retriever","reranked"}
 apogee embed list --output-format json      # {"object":"list","data":[{"name","chunks","sources","error"?}]}
 apogee embed info <name> --output-format json        # {"collection","path","schema","chunks","vectors":{…}|null,"index","sources":[…]}
+apogee graph list --output-format json      # {"object":"list","data":[{"name","kind","built","nodes","edges","last_build",…}]}
 apogee graph stats <name> --output-format json       # {"object":"graph.stats","graph","kind","built",…}
 apogee graph show <name> <entity> --output-format json   # {"object":"graph.show","match",…,"data":[entities]}
 apogee train status --output-format json    # byte for byte GET /v1/admin/training/status
@@ -1460,10 +1462,14 @@ apogee train pipeline show <name> --output-format json   # {"object":"training.p
 apogee auth list --output-format json       # byte for byte GET /v1/admin/auth: metadata only
 ```
 
-Five of these are also MCP tools since 54a: `apogee mcp serve` answers
-`models_list`, `models_status`, `train_status`, `train_versions` and `check`
-with these same documents, byte for byte, less the newline that ends the
-command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve)).
+Eleven of these are also MCP tools. Since 54a `apogee mcp serve` answers
+`models_list`, `models_status`, `train_status`, `train_versions` and `check`,
+and since 58b `list_graphs`, `graph_stats`, `knowledge_list`,
+`knowledge_info` and `knowledge_query` (`graph list`, `graph stats`,
+`knowledge list`, `knowledge info` and `knowledge query --rerank off`), with
+these same documents, byte for byte, less the newline that ends the
+command's stdout; and `graph_report` with the Markdown `graph report` prints
+the same way ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve)).
 
 - **`models list`**: one object per row the table shows — `backend`,
   `backend_type`, `model`, `roles`, `source`, `architecture`, `profile`,
@@ -1807,6 +1813,23 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   more than one) or `null` when it has none, its lexical `index` (`ok`,
   `FAILED -- <reason>`, or since 57s `not checked -- the collection is being
   written` while an ingest holds its write lock), and its `sources`.
+- **`knowledge query`** (since 58b): the object `--json` prints -- `records`,
+  each the `record` as `--json` prints one and its `score` on the retriever
+  that ran, `retriever` (`lexical`, `vector` or `hybrid`), `reranked`, and
+  the decision's `notes` when there are any; `--graph`'s walk as `graph`
+  (`context`, `entities`, a `note`) -- one line, with `object`
+  (`knowledge.query`) and `db`, the collection searched. `--status` keeps to
+  shipped records unless given, as the text does. The text is unchanged.
+- **`graph list`** (since 58b): every graph a name reaches, graphs-first --
+  each named graph in the config's order, then each collection holding a
+  graph of its own that no named graph's name shadows; a collection with no
+  graph is not listed. Each row is `name`, `kind` (`named` or `collection`,
+  so `graph_query`'s `graph` or `collection` can be filled from it), a named
+  graph's entry's `collections` and `sources`, `built`, `nodes`, `edges` and
+  `last_build` -- the newest time a build extracted or parsed a source, RFC
+  3339 UTC, `null` when none recorded one -- and, for a store that cannot be
+  read, its `error`. A named graph not built yet is a row with `"built":
+  false`. A config that will not load exits `1` with the message on stderr.
 - **`graph stats`** (since 37c): the counts the text prints, whole --
   `kind` (`named` or `collection`), `built`, `nodes` with `nodes_by_type`,
   `edges` with their `edges_extracted`/`edges_inferred` origin, `mentions`,

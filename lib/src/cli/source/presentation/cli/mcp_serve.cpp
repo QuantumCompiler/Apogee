@@ -20,7 +20,10 @@
 #include "agentloop/reporter.h"
 #include "cli/check.h"
 #include "cli/complete.h"
+#include "cli/graph.h"
+#include "cli/graph_artifacts.h"
 #include "cli/helpers.h"
+#include "cli/knowledge.h"
 #include "cli/models.h"
 #include "cli/permissions.h"
 #include "cli/suite_residency.h"
@@ -37,8 +40,10 @@
 namespace apogee::commands {
 namespace {
 
-constexpr std::array<std::string_view, 5> kStatusReads{
-    kModelsListRead, kModelsStatusRead, kTrainStatusRead, kTrainVersionsRead, kCheckRead};
+constexpr std::array<std::string_view, 11> kStatusReads{
+    kModelsListRead,    kModelsStatusRead,  kTrainStatusRead,   kTrainVersionsRead,
+    kCheckRead,         kListGraphsRead,    kGraphStatsRead,    kGraphReportRead,
+    kKnowledgeListRead, kKnowledgeInfoRead, kKnowledgeQueryRead};
 
 /// The name a host sees in `initialize`, unchanged since the server was
 /// hidden: a host keys nothing on it, but nothing gains by moving it.
@@ -84,6 +89,26 @@ constexpr std::string_view kServerName = "apogee-tools";
 
 [[nodiscard]] mcp::ToolCallResult answered(const nlohmann::json& document) {
     return mcp::ToolCallResult{document_text(document), false};
+}
+
+/// A read served as text (58b's `graph_report`): the command's stdout less
+/// the newline that ends it, as a document is.
+[[nodiscard]] mcp::ToolCallResult answered_text(std::string text) {
+    if (text.ends_with('\n')) {
+        text.pop_back();
+    }
+    return mcp::ToolCallResult{std::move(text), false};
+}
+
+/// A string argument the read cannot do without, refused by name with what
+/// it is.
+[[nodiscard]] std::string required_argument(const nlohmann::json& args, std::string_view key,
+                                            std::string_view what) {
+    std::string value = string_argument(args, key);
+    if (value.empty()) {
+        throw std::invalid_argument(std::string{key} + " is required: " + std::string{what});
+    }
+    return value;
 }
 
 [[nodiscard]] mcp::ToolCallResult refused(std::string reason) {
@@ -190,7 +215,7 @@ std::span<const std::string_view> status_read_names() noexcept {
     return kStatusReads;
 }
 
-std::vector<mcp::ServedRead> status_reads(const RootContext& context) {
+std::vector<mcp::ServedRead> status_reads(const RootContext& context, ServedProviders providers) {
     std::vector<mcp::ServedRead> reads;
 
     reads.push_back(mcp::ServedRead{
@@ -283,6 +308,185 @@ std::vector<mcp::ServedRead> status_reads(const RootContext& context) {
             [&context](const nlohmann::json&) {
                 return answered(
                     render_report_document(read_check_report(check_inputs(context)), std::nullopt));
+            },
+    });
+
+    // ---- the graphs (58b) ------------------------------------------------
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kListGraphsRead},
+        .description =
+            "Apogee's knowledge graphs: every named graph the config names, then each collection "
+            "holding a graph of its own, each with its kind (named or collection), what a named "
+            "graph is over, whether it is built, its nodes and edges and its last build. The "
+            "names graph_query and the other graph tools take as graph. The document `apogee "
+            "graph list --output-format json` prints, byte for byte.",
+        .input_schema = object_schema(),
+        .answer =
+            [&context](const nlohmann::json&) {
+                try {
+                    return answered(graph_list_document(context));
+                } catch (const GraphRefusal& e) {
+                    return refused(e.what());
+                }
+            },
+    });
+
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kGraphStatsRead},
+        .description =
+            "One knowledge graph's shape: its nodes by type, its edges and where they came from "
+            "(parsed from source, or asserted by a model), mentions, coverage, the code it "
+            "parsed, its extractor, what is stale, its communities -- and a named graph's "
+            "members. The document `apogee graph stats <graph> --output-format json` prints, "
+            "byte for byte. A graph not built yet answers built: false.",
+        .input_schema =
+            nlohmann::json{
+                {"type", "object"},
+                {"properties",
+                 {{"graph",
+                   {{"type", "string"},
+                    {"description", "A named graph or a collection, as list_graphs names them"}}}}},
+                {"required", nlohmann::json::array({"graph"})}},
+        .answer =
+            [&context](const nlohmann::json& args) {
+                const std::string graph = required_argument(
+                    args, "graph", "a named graph or a collection, as list_graphs names them");
+                try {
+                    return answered(graph_stats_document(context, graph));
+                } catch (const GraphRefusal& e) {
+                    return refused(e.what());
+                }
+            },
+    });
+
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kGraphReportRead},
+        .description =
+            "A knowledge graph's architecture summary in Markdown -- its communities, hubs, the "
+            "origin mix, cross-collection links, decisions and orphans -- from the store, with "
+            "no model call. The Markdown document `apogee graph report` prints, byte for byte.",
+        .input_schema = object_schema(
+            {{"graph",
+              {{"type", "string"},
+               {"description",
+                "The graph: a named graph or a collection's own graph, as list_graphs names "
+                "them. Omit when only one graph is built"}}},
+             {"collection",
+              {{"type", "string"},
+               {"description",
+                "Report on the graph covering this collection instead: a named graph listing "
+                "it, else its own"}}}}),
+        .answer =
+            [&context](const nlohmann::json& args) {
+                const std::string graph = string_argument(args, "graph");
+                const std::string collection = string_argument(args, "collection");
+                try {
+                    return answered_text(graph_report_markdown(context, graph, collection));
+                } catch (const GraphRefusal& e) {
+                    return refused(e.what());
+                }
+            },
+    });
+
+    // ---- the knowledge records (58b) ---------------------------------------
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kKnowledgeListRead},
+        .description =
+            "The project's knowledge records -- each decision's why, what was chosen, whether it "
+            "shipped -- newest first, kept to a branch or a discipline when asked. The "
+            "document `apogee knowledge list --output-format json` prints, byte for byte.",
+        .input_schema = object_schema(
+            {{"status",
+              {{"type", "string"},
+               {"description",
+                "Keep only this branch -- shipped, rejected or superseded -- as knowledge list "
+                "--status does"}}},
+             {"discipline",
+              {{"type", "string"},
+               {"description",
+                "Keep only this discipline, as knowledge list --discipline does"}}}}),
+        .answer =
+            [&context](const nlohmann::json& args) {
+                const std::string status = string_argument(args, "status");
+                const std::string discipline = string_argument(args, "discipline");
+                try {
+                    return answered(knowledge_list_document(
+                        read_knowledge_records(context, {}, status, discipline)));
+                } catch (const KnowledgeRefusal& e) {
+                    return refused(e.what());
+                }
+            },
+    });
+
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kKnowledgeInfoRead},
+        .description =
+            "One knowledge record in full: its intent, decision, status, discipline, link, "
+            "provenance and when it was captured. The document `apogee knowledge info <id> "
+            "--output-format json` prints, byte for byte; the archived conversation is never "
+            "served.",
+        .input_schema =
+            nlohmann::json{{"type", "object"},
+                           {"properties",
+                            {{"id",
+                              {{"type", "string"},
+                               {"description", "The record id, as knowledge_list names them"}}}}},
+                           {"required", nlohmann::json::array({"id"})}},
+        .answer =
+            [&context](const nlohmann::json& args) {
+                const std::string id =
+                    required_argument(args, "id", "a record id, as knowledge_list names them");
+                try {
+                    return answered(knowledge_info_document(context, {}, id, false));
+                } catch (const KnowledgeRefusal& e) {
+                    return refused(e.what());
+                }
+            },
+    });
+
+    reads.push_back(mcp::ServedRead{
+        .name = std::string{kKnowledgeQueryRead},
+        .description =
+            "Find the shipped knowledge records that best answer a question, each with its score "
+            "on the retriever that ran, which the answer names, since their scales differ. The "
+            "document `apogee knowledge query \"<question>\" --rerank off --output-format json` "
+            "prints, byte for byte: a vector search embeds the question through the records' "
+            "embedder, one small call that a paid embedder bills; a lexical one makes none, and "
+            "no rerank judge is ever asked.",
+        .input_schema =
+            nlohmann::json{
+                {"type", "object"},
+                {"properties",
+                 {{"question",
+                   {{"type", "string"},
+                    {"description", "What the records are asked, as knowledge query takes it"}}},
+                  {"top_k",
+                   {{"type", "integer"},
+                    {"minimum", 1},
+                    {"description",
+                     "How many records to return (default 5), as knowledge query -n"}}}}},
+                {"required", nlohmann::json::array({"question"})}},
+        .answer =
+            [&context, providers = std::move(providers)](const nlohmann::json& args) {
+                const std::string question =
+                    required_argument(args, "question", "what the records are asked");
+                KnowledgeQuery query{.question = question};
+                if (const std::optional<std::int64_t> top_k = whole_argument(args, "top_k");
+                    top_k.has_value()) {
+                    if (*top_k < 1) {
+                        throw std::invalid_argument("top_k must be at least 1");
+                    }
+                    query.top_k = static_cast<int>(
+                        std::min<std::int64_t>(*top_k, std::numeric_limits<int>::max()));
+                }
+                // Nothing spends but the question's embedding: never a judge.
+                query.rerank = "off";
+                try {
+                    return answered(
+                        knowledge_query_document(run_knowledge_query(context, query, providers)));
+                } catch (const KnowledgeRefusal& e) {
+                    return refused(e.what());
+                }
             },
     });
 
@@ -489,8 +693,14 @@ int serve_mcp(const RootContext& context, std::istream& in, std::ostream& out, s
         }
         return through(name, args);
     };
-    mcp::ServedSet served =
-        mcp::with_reads(mcp::read_only_tools(registry), std::move(native), status_reads(context));
+    // knowledge_query embeds through the same providers (58b), asked only
+    // when its question might need an embedder.
+    ServedProviders providers = [&models]() -> const harness::Harness& {
+        (void)models.ready();
+        return models.harness();
+    };
+    mcp::ServedSet served = mcp::with_reads(mcp::read_only_tools(registry), std::move(native),
+                                            status_reads(context, std::move(providers)));
 
     // The calls the config lists (54b), each backend asked its provider's
     // word; a listing the editor would have refused is said and left out.

@@ -2,6 +2,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <functional>
 #include <iosfwd>
 #include <stdexcept>
 #include <string>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "cli/command.h"
+#include "harness/harness.h"
 #include "knowledge/query.h"
 #include "knowledge/record.h"
 
@@ -67,18 +69,27 @@ struct KnowledgeRecords {
 /// [records]}`, each record as `--json` prints it.
 [[nodiscard]] nlohmann::json knowledge_list_document(const KnowledgeRecords& read);
 
+/// `knowledge info`'s JSON read (58b): the record `id` in the collection `db`
+/// names (else the config's, else `knowledge`), the object `--json` prints,
+/// and under `raw` the archived conversation beside it (M31) -- what both
+/// JSON faces print and `mcp serve`'s `knowledge_info` serves, never with
+/// `raw`. Throws KnowledgeRefusal in the command's words.
+[[nodiscard]] nlohmann::json knowledge_info_document(const RootContext& context,
+                                                     const std::string& db, const std::string& id,
+                                                     bool raw);
+
 /// `knowledge info` as a person reads it: the id, every field, when captured.
 [[nodiscard]] std::string knowledge_record_text(const knowledge::Record& record);
 
 /// `knowledge query`'s arguments.
 struct KnowledgeQuery {
-    std::string question;
+    std::string question{};
     std::string status{knowledge::kStatusShipped};
-    std::string discipline;
+    std::string discipline{};
     int top_k = 5;
-    std::string retriever;
-    std::string rerank;
-    std::string db;
+    std::string retriever{};
+    std::string rerank{};
+    std::string db{};
 };
 
 /// What `knowledge query` found, and in which collection.
@@ -87,12 +98,27 @@ struct KnowledgeAnswer {
     knowledge::QueryResult result;
 };
 
+/// Where a query takes its providers from when it might need an embedder or
+/// a judge (58b): asked only then. Empty builds the configured providers
+/// for the one query, as the command does; `mcp serve` hands its own, built
+/// once for the server's life.
+using KnowledgeProviders = std::function<const harness::Harness&()>;
+
 /// `knowledge query`'s search (37c): the one retriever resolved from the flag,
 /// the collection's pin and the facts, a rerank judge when one applies --
-/// providers built only when an embedder or a judge might be needed. Throws
-/// KnowledgeRefusal in the command's words.
+/// providers asked for only when an embedder or a judge might be needed.
+/// Throws KnowledgeRefusal in the command's words.
 [[nodiscard]] KnowledgeAnswer run_knowledge_query(const RootContext& context,
-                                                  const KnowledgeQuery& query);
+                                                  const KnowledgeQuery& query,
+                                                  const KnowledgeProviders& providers = {});
+
+/// `knowledge query --json`'s object: each record with its score, the
+/// retriever that ran, whether a judge reordered them, the notes when there
+/// are any. And under `--output-format json` (58b) the same facts as one
+/// document, `{"object": "knowledge.query", "db", ...}` -- what `mcp serve`'s
+/// `knowledge_query` serves. `--graph`'s walk is the command's to add.
+[[nodiscard]] nlohmann::json knowledge_answer_json(const KnowledgeAnswer& answer);
+[[nodiscard]] nlohmann::json knowledge_query_document(const KnowledgeAnswer& answer);
 
 /// The answer as the command prints it: its notes, the retriever that ran,
 /// each record's score on that retriever's scale.

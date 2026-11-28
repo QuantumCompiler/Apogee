@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <span>
@@ -26,9 +27,12 @@
 /// the toolsets directly and never the MCP registry -- a config listing this
 /// very command as a server would otherwise spawn itself without end -- and
 /// the **status reads**: `models_list`, `models_status`, `train_status`,
-/// `train_versions` and `check`, each answering with the document its
-/// command prints under `--output-format json`, byte for byte, computed by
-/// the very functions the command prints from. A writing tool is withheld.
+/// `train_versions` and `check` (54a), then `list_graphs`, `graph_stats`,
+/// `graph_report`, `knowledge_list`, `knowledge_info` and `knowledge_query`
+/// (58b), each answering with the document its command prints under
+/// `--output-format json`, byte for byte -- `graph_report` with its Markdown
+/// -- computed by the very functions the command prints from. A writing tool
+/// is withheld.
 /// `search_documents` searches as chat's tool does, through the one
 /// retriever resolver with the collection's embedder (54b).
 ///
@@ -49,16 +53,34 @@ inline constexpr std::string_view kModelsStatusRead = "models_status";
 inline constexpr std::string_view kTrainStatusRead = "train_status";
 inline constexpr std::string_view kTrainVersionsRead = "train_versions";
 inline constexpr std::string_view kCheckRead = "check";
+// 58b: the graphs and the knowledge records, after 54a's five.
+inline constexpr std::string_view kListGraphsRead = "list_graphs";
+inline constexpr std::string_view kGraphStatsRead = "graph_stats";
+inline constexpr std::string_view kGraphReportRead = "graph_report";
+inline constexpr std::string_view kKnowledgeListRead = "knowledge_list";
+inline constexpr std::string_view kKnowledgeInfoRead = "knowledge_info";
+inline constexpr std::string_view kKnowledgeQueryRead = "knowledge_query";
 
 /// The status reads' names, in the order they are listed.
 [[nodiscard]] std::span<const std::string_view> status_read_names() noexcept;
 
+/// Where a served read that may embed takes its providers from (58b): asked
+/// only when the read's one decision might need an embedder, so a lexical
+/// read builds none. `serve_mcp` hands the server's own (`ServedModels`),
+/// built once for its life; with none, the read builds the command's own at
+/// its call, as `apogee knowledge query` does.
+using ServedProviders = std::function<const harness::Harness&()>;
+
 /// The status reads for `context`'s install: each reads the config, the
 /// store and the training records afresh at its call, as its command does at
-/// its run -- so a host asking after a promotion sees the promotion. A
-/// read that cannot answer (a config that will not load, a backend with no
-/// history) answers an error result with the command's own reason.
-[[nodiscard]] std::vector<mcp::ServedRead> status_reads(const RootContext& context);
+/// its run -- so a host asking after a promotion sees the promotion, and
+/// after a build the graph. A read that cannot answer (a config that will
+/// not load, a backend with no history, a store that is not one) answers an
+/// error result with the command's own reason. Only `knowledge_query` may
+/// make a model call -- its question's embedding, through `providers` -- and
+/// never a rerank judge's.
+[[nodiscard]] std::vector<mcp::ServedRead> status_reads(const RootContext& context,
+                                                        ServedProviders providers = {});
 
 /// One backend the served `complete` may name (54b): the entry's name as
 /// written, and the most tokens a call on it generates

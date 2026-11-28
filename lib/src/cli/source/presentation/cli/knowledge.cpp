@@ -597,7 +597,9 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     query->add_flag("--graph", q->graph,
                     "Also walk the knowledge graph from the matched records: the entities their "
                     "reasoning concerns, other decisions about the same things, supersedes chains");
-    query->callback([&context, q]() {
+    auto query_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    add_read_format(query, query_format);
+    query->callback([&context, q, query_format]() {
         or_fail([&]() {
             const KnowledgeQuery request{.question = q->text,
                                          .status = q->status,
@@ -617,18 +619,11 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                 const knowledge::Store store = open_collection(answer.db);
                 graph = knowledge::graph_for_records(store, config, answer.db, result, q->text);
             }
-            if (q->json) {
-                nlohmann::json records = nlohmann::json::array();
-                for (const knowledge::ScoredRecord& scored : result.records) {
-                    records.push_back({{"record", scored.record}, {"score", scored.score}});
-                }
-                nlohmann::json out{
-                    {"records", std::move(records)},
-                    {"retriever", std::string{agentloop::to_string(result.retriever)}},
-                    {"reranked", result.reranked}};
-                if (!result.notes.empty()) {
-                    out["notes"] = result.notes;
-                }
+            if (q->json || *query_format == ReadFormat::Json) {
+                // One object behind both JSON faces (58b): `--json` pretty,
+                // `--output-format json` the one-line document, named.
+                nlohmann::json out =
+                    q->json ? knowledge_answer_json(answer) : knowledge_query_document(answer);
                 if (graph.has_value()) {
                     nlohmann::json section{{"context", graph->context},
                                            {"entities", graph->entities}};
@@ -637,7 +632,11 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
                     }
                     out["graph"] = std::move(section);
                 }
-                std::cout << out.dump(2) << "\n";
+                if (q->json) {
+                    std::cout << out.dump(2) << "\n";
+                } else {
+                    write_document(std::cout, out);
+                }
                 return;
             }
             print_knowledge_answer(std::cout, request, answer);
@@ -712,6 +711,18 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
     auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     add_read_format(info, info_format);
     info->callback([&context, i, info_format]() {
+        if (i->json || *info_format == ReadFormat::Json) {
+            // The record, and under --raw the archived conversation beside
+            // it (M31) -- both JSON faces one read (58b).
+            nlohmann::json document;
+            or_fail([&]() { document = knowledge_info_document(context, i->db, i->id, i->raw); });
+            if (i->json) {
+                std::cout << document.dump(2) << "\n";
+            } else {
+                write_document(std::cout, document);
+            }
+            return;
+        }
         std::filesystem::path config_path;
         const harness::Config config = load_config_lenient(context, config_path);
         const std::string db = resolve_db(config, i->db);
@@ -719,26 +730,6 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         const std::optional<knowledge::Record> record = store.get(i->id);
         if (!record.has_value()) {
             fail_user("no record '" + i->id + "' in '" + db + "'");
-        }
-        // The record, and under --raw the archived conversation beside it
-        // (M31): `raw`, null where the archive cannot be read -- the text's
-        // `(unavailable)`. Both JSON faces carry it; --raw was dropped there.
-        const auto document = [&store, &record, &i]() {
-            nlohmann::json out = nlohmann::json(*record);
-            if (i->raw) {
-                const std::optional<std::string> raw = store.read_raw(*record);
-                out["raw"] = raw.has_value() ? nlohmann::json(harness::valid_utf8(*raw))
-                                             : nlohmann::json(nullptr);
-            }
-            return out;
-        };
-        if (i->json) {
-            std::cout << document().dump(2) << "\n";
-            return;
-        }
-        if (*info_format == ReadFormat::Json) {
-            write_document(std::cout, document());
-            return;
         }
         std::cout << knowledge_record_text(*record);
         if (i->raw) {
@@ -980,6 +971,32 @@ nlohmann::json knowledge_list_document(const KnowledgeRecords& read) {
     return nlohmann::json{{"object", "list"}, {"db", read.db}, {"data", read.records}};
 }
 
+nlohmann::json knowledge_info_document(const RootContext& context, const std::string& db,
+                                       const std::string& id, bool raw) {
+    if (!db.empty()) {
+        if (const std::string refused = harness::collection_read_error(db); !refused.empty()) {
+            throw KnowledgeRefusal{refused, false};
+        }
+    }
+    std::filesystem::path config_path;
+    const harness::Config config = load_config_lenient(context, config_path);
+    const std::string resolved = knowledge_collection(config, db);
+    const knowledge::Store store = open_collection(resolved);
+    const std::optional<knowledge::Record> record = store.get(id);
+    if (!record.has_value()) {
+        throw KnowledgeRefusal{"no record '" + id + "' in '" + resolved + "'", false};
+    }
+    // `raw`, null where the archive cannot be read -- the text's
+    // `(unavailable)`. Both JSON faces carry it; --raw was dropped there.
+    nlohmann::json out = nlohmann::json(*record);
+    if (raw) {
+        const std::optional<std::string> text = store.read_raw(*record);
+        out["raw"] =
+            text.has_value() ? nlohmann::json(harness::valid_utf8(*text)) : nlohmann::json(nullptr);
+    }
+    return out;
+}
+
 std::string knowledge_record_text(const knowledge::Record& record) {
     std::ostringstream out;
     out << "ID:          " << record.id << "\n";
@@ -988,7 +1005,8 @@ std::string knowledge_record_text(const knowledge::Record& record) {
     return out.str();
 }
 
-KnowledgeAnswer run_knowledge_query(const RootContext& context, const KnowledgeQuery& query) {
+KnowledgeAnswer run_knowledge_query(const RootContext& context, const KnowledgeQuery& query,
+                                    const KnowledgeProviders& providers) {
     std::filesystem::path config_path;
     const harness::Config config = load_config_lenient(context, config_path);
     KnowledgeAnswer answer;
@@ -1014,17 +1032,46 @@ KnowledgeAnswer run_knowledge_query(const RootContext& context, const KnowledgeQ
     const std::string rerank_pin = entry != nullptr ? entry->rerank : std::string{};
     const bool judge =
         !agentloop::resolve_turn_rerank(query.rerank, rerank_pin, config).backend.empty();
-    std::optional<Providers> providers;
-    if ((options.retriever_flag != "lexical" && pin != "lexical") || judge) {
-        providers.emplace(config, config_path);
-    }
+    // A caller that keeps its own -- `mcp serve`'s, built once for its life
+    // (58b) -- hands them; otherwise they are built for this one query.
     const harness::Harness bare{config};
-    answer.result = knowledge::query(store, providers.has_value() ? providers->harness : bare,
-                                     config, answer.db, options);
+    const harness::Harness* harness = &bare;
+    std::optional<Providers> built;
+    if ((options.retriever_flag != "lexical" && pin != "lexical") || judge) {
+        if (providers) {
+            harness = &providers();
+        } else {
+            built.emplace(config, config_path);
+            harness = &built->harness;
+        }
+    }
+    answer.result = knowledge::query(store, *harness, config, answer.db, options);
     if (!answer.result.ok()) {
         throw KnowledgeRefusal{answer.result.error, answer.result.backend_error};
     }
     return answer;
+}
+
+nlohmann::json knowledge_answer_json(const KnowledgeAnswer& answer) {
+    const knowledge::QueryResult& result = answer.result;
+    nlohmann::json records = nlohmann::json::array();
+    for (const knowledge::ScoredRecord& scored : result.records) {
+        records.push_back({{"record", scored.record}, {"score", scored.score}});
+    }
+    nlohmann::json out{{"records", std::move(records)},
+                       {"retriever", std::string{agentloop::to_string(result.retriever)}},
+                       {"reranked", result.reranked}};
+    if (!result.notes.empty()) {
+        out["notes"] = result.notes;
+    }
+    return out;
+}
+
+nlohmann::json knowledge_query_document(const KnowledgeAnswer& answer) {
+    nlohmann::json out = knowledge_answer_json(answer);
+    out["object"] = "knowledge.query";
+    out["db"] = answer.db;
+    return out;
 }
 
 void print_knowledge_answer(std::ostream& out, const KnowledgeQuery& query,

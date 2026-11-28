@@ -965,3 +965,165 @@ TEST_CASE(
                    " offers no file to read -- inside a git repository, only what git tracks or "
                    "does not ignore is read.\n") != std::string::npos);
 }
+
+namespace {
+
+/// `graph stats <name> --output-format json`'s document, for a row of `graph
+/// list` to be held to.
+[[nodiscard]] nlohmann::json stats_of(const Fixture& fixture, const std::string& name) {
+    std::string out;
+    std::string err;
+    INFO(err);
+    REQUIRE(fixture.run({"graph", "stats", name, "--output-format", "json"}, &out, &err) == 0);
+    return nlohmann::json::parse(out);
+}
+
+}  // namespace
+
+TEST_CASE(
+    "graph list names every named graph as configured, then each collection holding a graph, "
+    "in text and in JSON",
+    "[commands][graph][list][58b]") {
+    // 58b: Claude could not find a named graph -- `graph list` answered `A
+    // subcommand is required`. One document, each graph with its kind, so
+    // graph_query's graph and collection arguments can be filled from it.
+    const Fixture fixture{"graphs:\n  idle:\n    collections: [notes]\n"};
+    std::string out;
+    std::string err;
+    // Nothing built yet: the configured graph is listed, not built.
+    REQUIRE(fixture.run({"graph", "list", "--output-format", "json"}, &out, &err) == 0);
+    INFO(out << err);
+    {
+        const nlohmann::json empty = nlohmann::json::parse(out);
+        CHECK(empty["object"] == "list");
+        REQUIRE(empty["data"].size() == 1);
+        CHECK(empty["data"][0]["name"] == "idle");
+        CHECK(empty["data"][0]["built"] == false);
+    }
+
+    fixture.ingest();
+    REQUIRE(fixture.run({"graph", "build", "notes", "-q"}, &out, &err) == 0);
+    // A collection with no graph of its own is not a graph.
+    REQUIRE(fixture.run({"embed", "ingest", "plain", (fixture.home.path() / "docs").string()}, &out,
+                        &err) == 0);
+    // A code graph, model-free: the spike's `shop`.
+    write(fixture.home.path() / "shop" / "store.py",
+          "class Store:\n    def charge(self, amount):\n        return amount\n");
+    write(fixture.home.path() / "shop" / "app.py",
+          "from store import Store\n\n\ndef checkout():\n    return Store().charge(5)\n");
+    REQUIRE(fixture.run({"graph", "build", "--source", (fixture.home.path() / "shop").string(),
+                         "--graph", "shop", "-q"},
+                        &out, &err) == 0);
+
+    REQUIRE(fixture.run({"graph", "list", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(err.empty());
+    // One line, the one encoder every read writes through.
+    CHECK(out.find('\n') == out.size() - 1);
+    const nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["object"] == "list");
+    const nlohmann::json& data = document["data"];
+    std::vector<std::string> names;
+    for (const nlohmann::json& row : data) {
+        names.push_back(row["name"].get<std::string>());
+    }
+    // The named graphs in the config's order, then the collections.
+    CHECK(names == std::vector<std::string>{"idle", "shop", "notes"});
+
+    const apogee::harness::Config config = apogee::harness::load_config(fixture.config_path);
+    const nlohmann::json& idle = data[0];
+    CHECK(idle["kind"] == "named");
+    CHECK(idle["built"] == false);
+    CHECK(idle["collections"] == nlohmann::json::array({"notes"}));
+    CHECK(idle["sources"] == nlohmann::json::array());
+    CHECK(idle["nodes"] == 0);
+    CHECK(idle["edges"] == 0);
+    CHECK(idle["last_build"].is_null());
+
+    const nlohmann::json& shop = data[1];
+    CHECK(shop["kind"] == "named");
+    CHECK(shop["built"] == true);
+    CHECK(shop["collections"] == nlohmann::json::array());
+    CHECK(shop["sources"] == nlohmann::json(config.find_graph("shop")->sources));
+    const nlohmann::json& notes = data[2];
+    CHECK(notes["kind"] == "collection");
+    CHECK(notes["built"] == true);
+    CHECK_FALSE(notes.contains("collections"));
+    CHECK_FALSE(notes.contains("sources"));
+    // Each row's counts are its stats' own, and its last build the newest
+    // extraction its store recorded.
+    for (const nlohmann::json* row : {&shop, &notes}) {
+        const nlohmann::json stats = stats_of(fixture, (*row)["name"].get<std::string>());
+        CHECK((*row)["nodes"] == stats["nodes"]);
+        CHECK((*row)["edges"] == stats["edges"]);
+        CHECK((*row)["nodes"].get<std::int64_t>() > 0);
+    }
+    CHECK(notes["last_build"] == fixture.store().last_extracted_at());
+    CHECK(shop["last_build"] ==
+          Store{apogee::agentloop::graph_db_path("shop")}.last_extracted_at());
+    CHECK_FALSE(shop["last_build"].get<std::string>().empty());
+
+    // The text: a line a graph, the same three in the same order.
+    REQUIRE(fixture.run({"graph", "list"}, &out, &err) == 0);
+    CHECK(err.empty());
+    const std::string shop_line = "shop  named  " + shop["nodes"].dump() + " node(s), " +
+                                  shop["edges"].dump() + " edge(s), last built " +
+                                  shop["last_build"].get<std::string>() +
+                                  " (source tree(s) [shop])\n";
+    const std::string notes_line = "notes  collection  " + notes["nodes"].dump() + " node(s), " +
+                                   notes["edges"].dump() + " edge(s), last built " +
+                                   notes["last_build"].get<std::string>() + "\n";
+    CHECK(out == "idle  named  not built (over [notes]) -- run: apogee graph build idle\n" +
+                     shop_line + notes_line);
+}
+
+TEST_CASE("graph list with no graph says how to build one, and a store it cannot read says why",
+          "[commands][graph][list][58b]") {
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "list"}, &out, &err) == 0);
+    CHECK(out ==
+          "no graph yet -- 'apogee graph build <collection>' builds one over a collection\n");
+    REQUIRE(fixture.run({"graph", "list", "--output-format", "json"}, &out, &err) == 0);
+    CHECK(out == "{\"data\":[],\"object\":\"list\"}\n");
+
+    // A named graph whose database is not one: its row says why, and the
+    // rest of the list is still read.
+    REQUIRE(fixture.run({"config", "add-graph", "broken", "--collections", "notes"}, &out, &err) ==
+            0);
+    write(apogee::agentloop::graph_db_path("broken"), "this is not a database");
+    fixture.ingest();
+    REQUIRE(fixture.run({"graph", "build", "notes", "-q"}, &out, &err) == 0);
+    REQUIRE(fixture.run({"graph", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json data = nlohmann::json::parse(out)["data"];
+    REQUIRE(data.size() == 2);
+    CHECK(data[0]["name"] == "broken");
+    CHECK(data[0]["built"] == false);
+    CHECK_FALSE(data[0]["error"].get<std::string>().empty());
+    CHECK(data[1]["name"] == "notes");
+    CHECK_FALSE(data[1].contains("error"));
+    REQUIRE(fixture.run({"graph", "list"}, &out, &err) == 0);
+    CHECK(out.starts_with("broken  named  (unreadable: " + data[0]["error"].get<std::string>() +
+                          ")\n"));
+
+    // A config that will not load is refused in its own words, as stats is.
+    write(fixture.config_path, "backends: [this is not\n");
+    CHECK(fixture.run({"graph", "list"}, &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.starts_with("apogee graph: "));
+}
+
+TEST_CASE("graph list completes as a verb of graph, its format as every read's",
+          "[commands][graph][list][completion][58b]") {
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"__complete", "graph", ""}, &out, &err) == 0);
+    CHECK(out.find("list\n") != std::string::npos);
+    REQUIRE(fixture.run({"__complete", "graph", "li"}, &out, &err) == 0);
+    CHECK(out == "list\n");
+    REQUIRE(fixture.run({"__complete", "graph", "list", "--output-format", ""}, &out, &err) == 0);
+    CHECK(out == "text\njson\n");
+    REQUIRE(fixture.run({"graph", "--help"}, &out, &err) == 0);
+    CHECK(out.find("list") != std::string::npos);
+}

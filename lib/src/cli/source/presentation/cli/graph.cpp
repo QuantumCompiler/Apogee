@@ -1189,17 +1189,23 @@ struct StatsRead {
     std::string embed_model;
     /// The membership the last build recorded, when the entry's has moved.
     std::vector<std::string> as_built;
+    /// When a build last extracted or parsed a source (58b's `graph list`);
+    /// empty when none recorded one.
+    std::string last_build;
 };
 
-/// The read, graphs-first; a refusal throws `GraphRefusal` in the command's
-/// words.
-[[nodiscard]] StatsRead read_stats(const RootContext& context, const std::string& name) {
-    harness::Config config;
+/// The config every graph read loads, a refusal in its own words.
+[[nodiscard]] harness::Config config_for_read(const RootContext& context) {
     try {
-        config = harness::load_config(harness::resolve_config_path(context.config_path));
+        return harness::load_config(harness::resolve_config_path(context.config_path));
     } catch (const harness::ConfigError& e) {
         throw GraphRefusal{e.what()};
     }
+}
+
+/// The read over `config`, graphs-first; a refusal throws `GraphRefusal` in
+/// the command's words.
+[[nodiscard]] StatsRead read_stats_in(const harness::Config& config, const std::string& name) {
     if (const std::string problem = name_problem(name); !problem.empty()) {
         throw GraphRefusal{problem};
     }
@@ -1221,6 +1227,7 @@ struct StatsRead {
         read.totals = std::move(stats.totals);
         read.members = std::move(stats.members);
         read.embed_model = store.graph_meta(embedstore::kGraphMetaEmbedModel);
+        read.last_build = store.last_extracted_at();
         std::vector<std::string> current = named->collections;
         std::ranges::sort(current);
         if (std::vector<std::string> as_built = store.graph_members();
@@ -1236,7 +1243,15 @@ struct StatsRead {
     const embedstore::Store store{path};
     read.totals = store.graph_stats();
     read.built = read.totals.built();
+    if (read.built) {
+        read.last_build = store.last_extracted_at();
+    }
     return read;
+}
+
+/// The read, its config loaded as the command loads it.
+[[nodiscard]] StatsRead read_stats(const RootContext& context, const std::string& name) {
+    return read_stats_in(config_for_read(context), name);
 }
 
 void print_stats(std::ostream& out, const StatsRead& read) {
@@ -1337,6 +1352,62 @@ void print_stats(std::ostream& out, const StatsRead& read) {
     return out;
 }
 
+/// One `graph list` row (58b): the graph's name and kind, a named graph's
+/// entry, and what its stats read -- built, the counts, the last build -- or
+/// why its store could not be read.
+[[nodiscard]] nlohmann::json list_row(const harness::Config& config, const std::string& name,
+                                      const harness::NamedGraphConfig* named) {
+    nlohmann::json row{{"name", name}, {"kind", named != nullptr ? "named" : "collection"}};
+    if (named != nullptr) {
+        row["collections"] = named->collections;
+        row["sources"] = named->sources;
+    }
+    row["built"] = false;
+    row["nodes"] = 0;
+    row["edges"] = 0;
+    row["last_build"] = nullptr;
+    try {
+        const StatsRead read = read_stats_in(config, name);
+        row["built"] = read.built;
+        if (read.built) {
+            row["nodes"] = read.totals.nodes;
+            row["edges"] = read.totals.edges;
+            if (!read.last_build.empty()) {
+                row["last_build"] = read.last_build;
+            }
+        }
+    } catch (const std::exception& e) {
+        row["error"] = e.what();
+    }
+    return row;
+}
+
+/// What a named graph's row says it is over: `over [a, b]`, its source
+/// trees by their member labels, both joined.
+[[nodiscard]] std::string over_text(const nlohmann::json& row) {
+    std::vector<std::string> parts;
+    if (const auto collections = row.value("collections", std::vector<std::string>{});
+        !collections.empty()) {
+        parts.push_back("over [" + join(collections) + "]");
+    }
+    if (const auto sources = row.value("sources", std::vector<std::string>{}); !sources.empty()) {
+        std::vector<std::string> labels;
+        labels.reserve(sources.size());
+        for (const std::string& source : sources) {
+            labels.push_back(source_member_label(source));
+        }
+        parts.push_back("source tree(s) [" + join(labels) + "]");
+    }
+    if (parts.empty()) {
+        return {};
+    }
+    std::string out = " (" + parts.front();
+    for (std::size_t i = 1; i < parts.size(); ++i) {
+        out += " and " + parts[i];
+    }
+    return out + ")";
+}
+
 /// One entity as `graph show --output-format json` states it: what the text
 /// prints, its description and chunk text whole rather than previewed.
 [[nodiscard]] nlohmann::json node_document(const embedstore::Store& store,
@@ -1424,6 +1495,56 @@ std::string graph_stats_text(const RootContext& context, const std::string& name
 
 nlohmann::json graph_stats_document(const RootContext& context, const std::string& name) {
     return stats_document(read_stats(context, name));
+}
+
+nlohmann::json graph_list_document(const RootContext& context) {
+    const harness::Config config = config_for_read(context);
+    nlohmann::json data = nlohmann::json::array();
+    // The named graphs in the config's order, then each collection holding
+    // a graph of its own that no named graph shadows -- graphs-first, as
+    // every graph read resolves a name.
+    for (const auto& [name, graph] : config.graphs) {
+        data.push_back(list_row(config, name, &graph));
+    }
+    for (const CollectionRow& collection : collection_rows()) {
+        if (!collection.error.empty() || config.find_graph(collection.name) != nullptr) {
+            continue;  // unreadable (`embed list` says so), or a named graph's name
+        }
+        nlohmann::json row = list_row(config, collection.name, nullptr);
+        if (row.contains("error") || row["built"].get<bool>()) {
+            data.push_back(std::move(row));  // a collection with no graph is not a graph
+        }
+    }
+    return nlohmann::json{{"object", "list"}, {"data", std::move(data)}};
+}
+
+std::string graph_list_text(const nlohmann::json& document) {
+    const nlohmann::json& data = document.at("data");
+    if (data.empty()) {
+        return "no graph yet -- '" +
+               harness::render(
+                   {.verbs = {"graph", "build"}, .parts = {harness::placeholder("<collection>")}}) +
+               "' builds one over a collection\n";
+    }
+    std::string out;
+    for (const nlohmann::json& row : data) {
+        const std::string name = row.at("name").get<std::string>();
+        out += name + "  " + row.at("kind").get<std::string>() + "  ";
+        if (row.contains("error")) {
+            out += "(unreadable: " + row.at("error").get<std::string>() + ")\n";
+            continue;
+        }
+        if (!row.at("built").get<bool>()) {
+            out += "not built" + over_text(row) + " -- run: " + graph_command("build", name) + "\n";
+            continue;
+        }
+        out += row.at("nodes").dump() + " node(s), " + row.at("edges").dump() + " edge(s)";
+        if (row.at("last_build").is_string()) {
+            out += ", last built " + row.at("last_build").get<std::string>();
+        }
+        out += over_text(row) + "\n";
+    }
+    return out;
 }
 
 void run_graph_build(const RootContext& context, const GraphBuildRequest& request) {
@@ -1536,6 +1657,25 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
     update->add_flag("--show-skipped", u->show_skipped,
                      "Name every file the build skipped, however many");
     update->callback([&context, u]() { run_graph_update(context, *u); });
+
+    // ---- list (58b) ----------------------------------------------------------
+    auto l_format = std::make_shared<ReadFormat>(ReadFormat::Text);
+    CLI::App* list = cmd->add_subcommand(
+        "list", "List every named graph and each collection holding a graph, with its size");
+    add_read_format(list, l_format);
+    list->callback([&context, l_format]() {
+        nlohmann::json document;
+        try {
+            document = graph_list_document(context);
+        } catch (const GraphRefusal& e) {
+            fail_user(e.what());
+        }
+        if (*l_format == ReadFormat::Json) {
+            write_document(std::cout, document);
+            return;
+        }
+        std::cout << graph_list_text(document);
+    });
 
     // ---- stats ---------------------------------------------------------------
     auto s_name = std::make_shared<std::string>();

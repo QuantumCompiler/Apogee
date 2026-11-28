@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | ✨ Feature |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | v0.2.2 |
 | **Component** | `mcp serve` (the MCP server's `initialize`) |
 | **Labels** | `mcp` `claude-awareness` `additive` |
 | **Epic** | Track 58 · Claude aware of Apogee |
-| **Blocked by** | [58b](mcp-serve-graphs-and-knowledge.md) |
+| **Blocked by** | — |
 | **Blocks** | [mod 2a](../../mod/v0.2.2/claude-code-plugin.md) |
 | **Reporter** | The user's idea; the MCP-awareness spike (2026-11-07) |
 | **Created** | 2026-11-07 |
@@ -96,6 +96,7 @@ The when-to-use lines in `server_instructions`:
 |---|---|---|
 | 2026-11-07 | Specced from the MCP-awareness spike (the user's idea; the user's calls: both hosts, opt-in writes, the next release). Track 58, v0.2.2. | the user |
 | 2026-11-07 | Gated on 58b, so the introduction names the graph and knowledge reads it adds. Useful alone, but the inventory of graphs needs 58b's `graph list`. | the spec |
+| 2026-11-28 | **Released: 58b shipped** ([MILESTONES](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records)): `graph list`'s document (`graph_list_document` in `cli/graph.h`) lists every named graph, then each collection holding a graph, each row `name`, `kind`, `built`, `nodes`, `edges` and `last_build`, a named graph's `collections` and `sources` -- the inventory this item reads, whose `sources` are paths the introduction must not say -- and the server lists eleven reads after the native tools, `list_graphs`, `graph_stats`, `graph_report`, `knowledge_list`, `knowledge_info` and `knowledge_query` among them, 28 tools in all where this document says 22. | 58b's build |
 
 ## Out of scope
 
@@ -104,6 +105,6 @@ The when-to-use lines in `server_instructions`:
 
 ## Links
 
-- **Blocked by:** [58b](mcp-serve-graphs-and-knowledge.md) · **Blocks:** the Claude Code plugin (mod [2a](../../mod/v0.2.2/claude-code-plugin.md)), which relies on it for the inventory
+- **Blocked by:** — (58b [shipped 2026-11-28](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records), the graph and knowledge reads this introduction names) · **Blocks:** the Claude Code plugin (mod [2a](../../mod/v0.2.2/claude-code-plugin.md)), which relies on it for the inventory
 - **Relates to:** 54a/54b (the server, the fixed tool list, `complete_backends`); ADR 0006 (additive changes); CLI CLAUDE.md (secrets are unleakable; UTF-8 where it enters)
 - **Follows from:** the MCP-awareness spike, 2026-11-07 (track 58, W1)

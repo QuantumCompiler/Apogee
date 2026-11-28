@@ -466,8 +466,9 @@ gives it as `host_entry`). `apogee mcp serve --help` says the same.
 (`readOnlyHint: true`), and a third you switch on yourself. Nothing writes,
 and nothing asks a question, since a server has nobody to ask. A model
 generates text only where your config lists it ([*Calling a local model:
-`complete`*](#calling-a-local-model-complete), below). The one other model
-call is `search_documents` embedding a query (next):
+`complete`*](#calling-a-local-model-complete), below). The only other model
+calls are `search_documents` and, since 58b, `knowledge_query` embedding a
+query (below):
 
 - **The native read-only tools**: `read_file`, `list_directory`,
   `search_files`, `grep_files`, the git reads (`git_status`, `git_log`,
@@ -500,9 +501,11 @@ call is `search_documents` embedding a query (next):
   `complete`, `chat` and `analyze`, the config's `auto_rag`, an agent's
   collection and `serve --rag` refuse a path before anything is opened, so
   no flag or config value can make Apogee open a database outside its home.
-- **The status reads** (since 54a). Each one answers with the JSON document
-  its command prints under `--output-format json`, byte for byte, minus the
-  newline that ends the command's output:
+- **The status reads** (since 54a), and since 58b the graph and knowledge
+  reads after them. Each one answers with the JSON document its command
+  prints under `--output-format json`, byte for byte, minus the newline that
+  ends the command's output -- `graph_report` with the Markdown `apogee graph
+  report` prints, served as text, the same way:
 
 | Tool | Arguments | The document of |
 |---|---|---|
@@ -511,13 +514,34 @@ call is `search_documents` embedding a query (next):
 | `train_status` | none | `apogee train status`: the cycle, the active pipeline, the newest runs, the active versions |
 | `train_versions` | `backend` | `apogee train versions [<backend>]`: the promoted versions, every ledger or one |
 | `check` | none | `apogee check`: every row with its status, detail and remedy, and the counts. Nothing is repaired: `check --fix` stays yours. |
+| `list_graphs` | none | `apogee graph list` (58b): every named graph, then each collection holding a graph, with its kind (`named` or `collection`), what a named graph is over, whether it is built, its nodes, edges and last build -- the names the [graph tools](#navigating-a-knowledge-graph) take as `graph` |
+| `graph_stats` | `graph` (required) | `apogee graph stats <graph>`: one graph's shape -- nodes by type, edges by origin, coverage, the code it parsed, what is stale, its communities, a named graph's members. A graph not built yet answers `"built": false`. |
+| `graph_report` | `graph`, `collection` | `apogee graph report [--graph G \| --collection C]`, its Markdown, as text: communities, hubs, the origin mix, cross-collection links, decisions, orphans. With neither, the one graph built. |
+| `knowledge_list` | `status` (the branch), `discipline` | `apogee knowledge list [--status] [--discipline]`: the knowledge records, newest first |
+| `knowledge_info` | `id` (required) | `apogee knowledge info <id>`: one record in full. Its archived conversation (`--raw`) is never served. |
+| `knowledge_query` | `question` (required), `top_k` | `apogee knowledge query "<question>" [-n top_k] --rerank off`: the shipped records that best answer a question, each with its score on the retriever that ran |
 
 The shapes are in [machine-mode.md](machine-mode.md#everything-else-is-a-cli-command), since they are the
 very documents a GUI renders. Each read runs at its call, so a host asking
-after a promotion sees the promotion. A read that cannot answer returns an
+after a promotion sees the promotion, and one asking after a `graph build`
+sees the graph. A read that cannot answer returns an
 error result (`isError: true`) with the command's own reason after
 `Error: `: a config that will not load, a backend with no version history,
-an unknown suite, or an argument of the wrong type, named.
+an unknown suite, a graph or record that is not there, a store that is not
+one, or an argument of the wrong type or missing, named.
+
+The knowledge reads answer from the records' collection as the commands
+find it (`knowledge.db` in the config, else `knowledge`). `knowledge_query`
+searches as `apogee knowledge query` does -- the one retriever resolved from
+the collection's pin and the facts, shipped records only -- and is the one
+read that may spend: a vector search embeds the question through the
+records' embedder, one small call made on the host's initiative and billed
+when that embedder is a paid one, under the same rule `search_documents`
+keeps; a lexical search makes no model call and builds no provider. It never
+asks a rerank judge, even where the collection pins one, so its document is
+`knowledge query --rerank off`'s. Every other graph and knowledge read is
+model-free. Chat recall (`chats recall`) is not served: it is your past
+conversations, not the project's knowledge.
 
 **The tool set only grows.** Tools are added and never renamed or removed,
 and a new Apogee keeps every tool an older one served. This is the same
@@ -780,7 +804,10 @@ collection's own) or `collection` (the named graph listing it, else its own).
 With neither, the one graph built is read; with several, the error lists
 them, and with none, it says how to build one. Either is a name, never a path
 (CLI-M45): a path is refused, and so is a named graph whose member is written
-as one.
+as one. `apogee graph list` (58b) names every graph either takes -- each named
+graph, then each collection holding a graph, with its `kind` -- and `apogee
+mcp serve` serves the list as `list_graphs`, beside `graph_stats` and
+`graph_report` ([*Apogee as an MCP server*](#apogee-as-an-mcp-server-apogee-mcp-serve)).
 
 **Always there, never asking.** The toolset is registered with the others
 (switch it off with `tools.disabled: [graph]`, or leave it out of a suite

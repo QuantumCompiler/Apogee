@@ -14,11 +14,16 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "agentloop/graph_context.h"
 #include "cli/complete.h"
 #include "contracts/config.h"
+#include "contracts/layout.h"
 #include "contracts/mcp_serve.h"
+#include "knowledge/record.h"
+#include "knowledge/store.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
 #include "support/cli_home.h"
@@ -216,15 +221,17 @@ TEST_CASE("mcp serve answers the handshake with the native read tools, then the 
         CHECK_FALSE(tool["description"].get<std::string>().empty());
     }
     // The native read tools first (the spike's seventeen among them), the
-    // five status reads last, in their order: added, never renamed. Where
-    // this build cannot start a program (Windows, today) the four git reads
-    // are not served, as they are not offered to a model: each could only
-    // fail (57k).
+    // status reads last, in their order: added, never renamed -- 54a's five,
+    // then 58b's graph and knowledge reads after them. Where this build
+    // cannot start a program (Windows, today) the four git reads are not
+    // served, as they are not offered to a model: each could only fail (57k).
     const bool git = apogee::tools::ToolsetOptions{}.child_processes;
-    REQUIRE(names.size() >= 5 + (git ? 17U : 13U));
-    const std::vector<std::string> tail(names.end() - 5, names.end());
+    REQUIRE(names.size() >= 11 + (git ? 17U : 13U));
+    const std::vector<std::string> tail(names.end() - 11, names.end());
     CHECK(tail == std::vector<std::string>{"models_list", "models_status", "train_status",
-                                           "train_versions", "check"});
+                                           "train_versions", "check", "list_graphs", "graph_stats",
+                                           "graph_report", "knowledge_list", "knowledge_info",
+                                           "knowledge_query"});
     for (const char* native : {"read_file", "list_directory", "grep_files", "list_notes",
                                "search_documents", "graph_query"}) {
         INFO(native);
@@ -383,6 +390,9 @@ TEST_CASE("mcp serve is a public verb: in help and completion, the alias in neit
     CHECK_THAT(out, ContainsSubstring("apogee mcp presets"));
     CHECK_THAT(out, ContainsSubstring("models_list, models_status, train_status, train_versions, "
                                       "check"));
+    // 58b's reads, named where 54a's are.
+    CHECK_THAT(out, ContainsSubstring("list_graphs, graph_stats, graph_report, knowledge_list, "
+                                      "knowledge_info, knowledge_query"));
 
     REQUIRE(home.run({"__complete", "mcp", ""}, &out, &err) == 0);
     CHECK_THAT(out, ContainsSubstring("serve\n"));
@@ -398,7 +408,9 @@ TEST_CASE("the status reads are named once, in order", "[cli][mcp][serve]") {
     const std::vector<std::string_view> names{apogee::commands::status_read_names().begin(),
                                               apogee::commands::status_read_names().end()};
     CHECK(names == std::vector<std::string_view>{"models_list", "models_status", "train_status",
-                                                 "train_versions", "check"});
+                                                 "train_versions", "check", "list_graphs",
+                                                 "graph_stats", "graph_report", "knowledge_list",
+                                                 "knowledge_info", "knowledge_query"});
     const apogee::commands::RootContext context;
     const std::vector<apogee::mcp::ServedRead> reads = apogee::commands::status_reads(context);
     REQUIRE(reads.size() == names.size());
@@ -406,6 +418,26 @@ TEST_CASE("the status reads are named once, in order", "[cli][mcp][serve]") {
         CHECK(reads[i].name == names[i]);
         CHECK(reads[i].input_schema["type"] == "object");
         CHECK_THAT(reads[i].description, ContainsSubstring("byte for byte"));
+    }
+    // The reads that cannot answer without an argument say so in their
+    // schema (58b); the rest require nothing.
+    for (const apogee::mcp::ServedRead& read : reads) {
+        INFO(read.name);
+        const nlohmann::json required =
+            read.input_schema.value("required", nlohmann::json::array());
+        if (read.name == "graph_stats") {
+            CHECK(required == nlohmann::json::array({"graph"}));
+        } else if (read.name == "knowledge_info") {
+            CHECK(required == nlohmann::json::array({"id"}));
+        } else if (read.name == "knowledge_query") {
+            CHECK(required == nlohmann::json::array({"question"}));
+        } else {
+            CHECK(required.empty());
+        }
+        for (const auto& [key, property] : read.input_schema["properties"].items()) {
+            INFO(key);
+            CHECK_FALSE(property.value("description", std::string{}).empty());
+        }
     }
 }
 
@@ -470,7 +502,7 @@ TEST_CASE("with nothing listed, the served set is the read set and complete is a
         INFO(tool["name"]);
         CHECK(tool["annotations"]["readOnlyHint"] == true);
     }
-    CHECK(names.back() == "check");
+    CHECK(names.back() == "knowledge_query");
     const Answer absent = answer_of(served, 10);
     CHECK(absent.is_error);
     CHECK(absent.text == "Error: no such tool 'complete'");
@@ -504,7 +536,7 @@ TEST_CASE("a listed complete is the command's own one-shot, bounded, its descrip
     // Last, after the reads: the set only grows, and every tool before it is
     // read-only.
     REQUIRE(names.back() == "complete");
-    CHECK(names[names.size() - 2] == "check");
+    CHECK(names[names.size() - 2] == "knowledge_query");
     const nlohmann::json& complete = tools.back();
     CHECK(complete["annotations"]["readOnlyHint"] == false);
     for (std::size_t i = 0; i + 1 < tools.size(); ++i) {
@@ -759,4 +791,345 @@ models:
     CHECK_THAT(vector.text, StartsWith("collection: notes  retriever: vector\n"));
     CHECK_THAT(answer_of(served, 11).text, StartsWith("collection: notes  retriever: vector\n"));
     CHECK_THAT(answer_of(served, 12).text, StartsWith("collection: notes  retriever: lexical\n"));
+}
+
+namespace {
+
+void write_file(const std::filesystem::path& path, std::string_view text) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream{path, std::ios::binary} << text;
+}
+
+/// The spike's sandbox (58b): a two-file Python project, its README
+/// ingested as the collection `notes`, and -- when `built` -- the model-free
+/// code graph `shop` over the project.
+void plant_shop(const CliHome& home, bool built = true) {
+    const std::filesystem::path project = home.home() / "project";
+    write_file(project / "store.py",
+               "class Store:\n    def charge(self, amount):\n        return amount\n");
+    write_file(project / "app.py",
+               "from store import Store\n\n\ndef checkout():\n    return Store().charge(5)\n");
+    write_file(home.home() / "readme" / "README.md",
+               "The shop charges at checkout through the store.\n");
+    std::string out;
+    std::string err;
+    INFO(out << err);
+    REQUIRE(home.run({"embed", "ingest", "notes", (home.home() / "readme").string()}, &out, &err) ==
+            0);
+    if (built) {
+        REQUIRE(home.run({"graph", "build", "--source", project.string(), "--graph", "shop", "-q"},
+                         &out, &err) == 0);
+    }
+}
+
+/// What a command printed on stdout as it is, for a read served as text.
+[[nodiscard]] std::string printed_text(const CliHome& home, const std::vector<std::string>& args) {
+    std::string out;
+    std::string err;
+    INFO(err);
+    REQUIRE(home.run(args, &out, &err) == 0);
+    REQUIRE_FALSE(out.empty());
+    return out;
+}
+
+/// Two records in the default collection, one shipped and one rejected.
+void plant_records() {
+    apogee::knowledge::Store store{apogee::harness::embeddings_dir() / "knowledge.db",
+                                   apogee::harness::knowledge_raw_dir()};
+    apogee::knowledge::Record shipped;
+    shipped.id = "kr-20260913T120010Z-00000a";
+    shipped.intent = "the cancel button was removed after testing";
+    shipped.decision = "remove it";
+    shipped.status = "shipped";
+    shipped.discipline = "ux";
+    shipped.timestamp = "2026-09-13T12:00:10.000000Z";
+    store.put(shipped, {}, "Ada: drop the cancel button? Bob: yes");
+    apogee::knowledge::Record rejected;
+    rejected.id = "kr-20260913T120020Z-00000b";
+    rejected.intent = "keep the cancel button for undo";
+    rejected.status = "rejected";
+    rejected.discipline = "eng";
+    rejected.timestamp = "2026-09-13T12:00:20.000000Z";
+    store.put(rejected, {}, "raw");
+}
+
+/// The providers a served read asks for, counted: built once, as the
+/// server's own are (`ServedModels`).
+struct CountedProviders {
+    explicit CountedProviders(const CliHome& home)
+        : models{apogee::harness::load_config(home.config_path()), home.config_path()} {}
+
+    [[nodiscard]] apogee::commands::ServedProviders source() {
+        return [this]() -> const apogee::harness::Harness& {
+            ++asked;
+            (void)models.ready();
+            return models.harness();
+        };
+    }
+
+    apogee::commands::ServedModels models;
+    int asked = 0;
+};
+
+[[nodiscard]] const apogee::mcp::ServedRead& read_named(
+    const std::vector<apogee::mcp::ServedRead>& reads, std::string_view name) {
+    const auto found = std::ranges::find(reads, name, &apogee::mcp::ServedRead::name);
+    REQUIRE(found != reads.end());
+    return *found;
+}
+
+}  // namespace
+
+TEST_CASE("the graph reads answer as their commands do, over the spike's shop and notes",
+          "[cli][mcp][serve][graph][58b]") {
+    // 58b's W2: list_collections named `notes` and never `shop`, and no
+    // served tool listed graphs; graph stats and graph report were unserved.
+    const CliHome home{std::string{kConfig}};
+    plant_shop(home);
+    const Served served =
+        serve(home, {"mcp", "serve"},
+              {call(10, "list_graphs"), call(11, "graph_stats", {{"graph", "shop"}}),
+               call(12, "graph_report", {{"graph", "shop"}}), call(13, "graph_report"),
+               call(14, "graph_stats", {{"graph", "notes"}})});
+    INFO(served.err);
+    REQUIRE(served.code == 0);
+
+    const Answer listed = answer_of(served, 10);
+    CHECK_FALSE(listed.is_error);
+    CHECK(listed.text + "\n" == printed(home, {"graph", "list"}));
+    const nlohmann::json graphs = nlohmann::json::parse(listed.text);
+    // `shop` named, with its kind; `notes` holds no graph, so is not one.
+    REQUIRE(graphs["data"].size() == 1);
+    CHECK(graphs["data"][0]["name"] == "shop");
+    CHECK(graphs["data"][0]["kind"] == "named");
+    CHECK(graphs["data"][0]["built"] == true);
+
+    const Answer stats = answer_of(served, 11);
+    CHECK_FALSE(stats.is_error);
+    CHECK(stats.text + "\n" == printed(home, {"graph", "stats", "shop"}));
+    CHECK(nlohmann::json::parse(stats.text)["nodes"] == graphs["data"][0]["nodes"]);
+
+    // The report is the command's own Markdown, served as text.
+    const Answer report = answer_of(served, 12);
+    CHECK_FALSE(report.is_error);
+    const std::string markdown = printed_text(home, {"graph", "report", "--graph", "shop"});
+    CHECK(report.text + "\n" == markdown);
+    CHECK(report.text.starts_with("#"));
+    CHECK_THROWS(nlohmann::json::parse(report.text));
+    // With no graph named, the one graph built, as the command takes it.
+    CHECK(answer_of(served, 13).text + "\n" == printed_text(home, {"graph", "report"}));
+
+    // A collection with no graph built is a read, not a refusal.
+    const Answer unbuilt = answer_of(served, 14);
+    CHECK_FALSE(unbuilt.is_error);
+    CHECK(unbuilt.text + "\n" == printed(home, {"graph", "stats", "notes"}));
+    CHECK(nlohmann::json::parse(unbuilt.text)["built"] == false);
+}
+
+TEST_CASE("a graph built after the server started is seen by the next call",
+          "[cli][mcp][serve][graph][58b]") {
+    const CliHome home{std::string{kConfig}};
+    plant_shop(home, /*built=*/false);
+    apogee::commands::RootContext context;
+    context.config_path = home.config_path().string();
+    const std::vector<apogee::mcp::ServedRead> reads = apogee::commands::status_reads(context);
+    const apogee::mcp::ServedRead& list = read_named(reads, "list_graphs");
+    const apogee::mcp::ServedRead& stats = read_named(reads, "graph_stats");
+    CHECK(nlohmann::json::parse(list.answer(nlohmann::json::object()).text)["data"].empty());
+    const apogee::mcp::ToolCallResult before = stats.answer({{"graph", "shop"}});
+    CHECK(before.is_error);
+
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"graph", "build", "--source", (home.home() / "project").string(), "--graph",
+                      "shop", "-q"},
+                     &out, &err) == 0);
+    const apogee::mcp::ToolCallResult after = list.answer(nlohmann::json::object());
+    CHECK(after.text + "\n" == printed(home, {"graph", "list"}));
+    CHECK(nlohmann::json::parse(after.text)["data"][0]["name"] == "shop");
+    CHECK(stats.answer({{"graph", "shop"}}).text + "\n" ==
+          printed(home, {"graph", "stats", "shop"}));
+}
+
+TEST_CASE("the knowledge reads answer as knowledge list, info and query do",
+          "[cli][mcp][serve][knowledge][58b]") {
+    // 58b's W3: the records, the project's why, had no MCP tool at all.
+    const CliHome home{std::string{kConfig}};
+    plant_records();
+    const Served served =
+        serve(home, {"mcp", "serve"},
+              {call(10, "knowledge_list"), call(11, "knowledge_list", {{"status", "rejected"}}),
+               call(12, "knowledge_list", {{"discipline", "ux"}}),
+               call(13, "knowledge_info", {{"id", "kr-20260913T120010Z-00000a"}}),
+               call(14, "knowledge_query", {{"question", "cancel button"}}),
+               call(15, "knowledge_query", {{"question", "cancel button"}, {"top_k", 1}}),
+               call(16, "knowledge_query", {{"question", "cancel button"}, {"top_k", "1"}})});
+    INFO(served.err);
+    REQUIRE(served.code == 0);
+    const auto same = [&](int id, const std::vector<std::string>& args) {
+        const Answer answer = answer_of(served, id);
+        INFO("tool " << id);
+        CHECK_FALSE(answer.is_error);
+        CHECK(answer.text + "\n" == printed(home, args));
+    };
+    same(10, {"knowledge", "list"});
+    same(11, {"knowledge", "list", "--status", "rejected"});
+    same(12, {"knowledge", "list", "--discipline", "ux"});
+    same(13, {"knowledge", "info", "kr-20260913T120010Z-00000a"});
+    same(14, {"knowledge", "query", "cancel button"});
+    same(15, {"knowledge", "query", "cancel button", "-n", "1"});
+    same(16, {"knowledge", "query", "cancel button", "-n", "1"});
+
+    // Not vacuous: the filters reach the reads, and the record is whole.
+    CHECK(nlohmann::json::parse(answer_of(served, 10).text)["data"].size() == 2);
+    CHECK(nlohmann::json::parse(answer_of(served, 11).text)["data"].size() == 1);
+    CHECK(nlohmann::json::parse(answer_of(served, 12).text)["data"][0]["discipline"] == "ux");
+    CHECK(nlohmann::json::parse(answer_of(served, 13).text)["decision"] == "remove it");
+    // The private archive is never served.
+    CHECK_FALSE(nlohmann::json::parse(answer_of(served, 13).text).contains("raw"));
+    const nlohmann::json found = nlohmann::json::parse(answer_of(served, 14).text);
+    CHECK(found["retriever"] == "lexical");
+    // query keeps to shipped records, as the command does by default.
+    REQUIRE(found["records"].size() == 1);
+    CHECK(found["records"][0]["record"]["id"] == "kr-20260913T120010Z-00000a");
+}
+
+TEST_CASE("knowledge_query spends nothing on the lexical path and one embedding by vector",
+          "[cli][mcp][serve][knowledge][spend][58b]") {
+    // Nothing spends but a query's embedding (58b, the 2026-09-13 rule): a
+    // lexical search asks for no provider, a vector one asks the server's
+    // own -- built once -- and no query reranks, whatever the collection pins.
+    const apogee::testing::TempDir scripts{"mcp-serve-knowledge-" +
+                                           std::to_string(std::random_device{}())};
+    write_file(
+        scripts.path() / "clerk.json",
+        nlohmann::json{
+            {"turns",
+             {{{"text",
+                R"({"intent": "We dropped the cancel button because testers kept mistaking it for back.", "decision": "Remove the cancel button.", "status": "shipped", "discipline": "ux", "downstream_link": "", "provenance": {"source": "meeting", "attribution": "Ada"}})"}}}}}
+            .dump());
+    write_file(scripts.path() / "judge.json",
+               nlohmann::json{{"turns", {{{"text", "[2, 1]"}}}}}.dump());
+
+    SECTION("a collection pinned lexical, and a rerank judge it pins, ask for nothing") {
+        const CliHome home{
+            "backends:\n  local:\n    type: mock\n  judge:\n    type: mock\n"
+            "    model_path: " +
+            (scripts.path() / "judge.json").string() +
+            "\nmodels:\n  default: local\nembeddings:\n  knowledge:\n"
+            "    retriever: lexical\n    rerank: judge\n"};
+        plant_records();
+        {
+            // A second shipped match, so the judge has an order to give.
+            apogee::knowledge::Store store{apogee::harness::embeddings_dir() / "knowledge.db",
+                                           apogee::harness::knowledge_raw_dir()};
+            apogee::knowledge::Record also;
+            also.id = "kr-20260913T120030Z-00000c";
+            also.intent = "the cancel button moved to the footer";
+            also.status = "shipped";
+            also.timestamp = "2026-09-13T12:00:30.000000Z";
+            store.put(also, {}, "raw");
+        }
+        CountedProviders providers{home};
+        apogee::commands::RootContext context;
+        context.config_path = home.config_path().string();
+        const std::vector<apogee::mcp::ServedRead> reads =
+            apogee::commands::status_reads(context, providers.source());
+        const apogee::mcp::ToolCallResult answer =
+            read_named(reads, "knowledge_query")
+                .answer({{"question", "cancel button"}, {"top_k", 2}});
+        INFO(answer.text);
+        CHECK_FALSE(answer.is_error);
+        CHECK(providers.asked == 0);
+        const nlohmann::json document = nlohmann::json::parse(answer.text);
+        CHECK(document["retriever"] == "lexical");
+        CHECK(document["reranked"] == false);
+        // The command's own answer with the judge off -- and the command
+        // left alone does spend a judge's call, which the served read never
+        // makes.
+        CHECK(answer.text + "\n" ==
+              printed(home, {"knowledge", "query", "cancel button", "-n", "2", "--rerank", "off"}));
+        const nlohmann::json judged = nlohmann::json::parse(
+            printed(home, {"knowledge", "query", "cancel button", "-n", "2"}));
+        CHECK(judged["reranked"] == true);
+    }
+
+    SECTION("a vectorised collection searches by vector through the server's own providers") {
+        const CliHome home{"backends:\n  clerk:\n    type: mock\n    model_path: " +
+                           (scripts.path() / "clerk.json").string() +
+                           "\n  embed:\n    type: mock\n    embedding_model: mock-space\n"
+                           "models:\n  default: clerk\n  default_embedding: embed\n"};
+        std::string out;
+        std::string err;
+        REQUIRE(
+            home.run({"knowledge", "capture", "--retriever", "vector", "Ada: drop it? Bob: yes"},
+                     &out, &err) == 0);
+        CountedProviders providers{home};
+        apogee::commands::RootContext context;
+        context.config_path = home.config_path().string();
+        const std::vector<apogee::mcp::ServedRead> reads =
+            apogee::commands::status_reads(context, providers.source());
+        const apogee::mcp::ServedRead& query = read_named(reads, "knowledge_query");
+        const apogee::mcp::ToolCallResult first = query.answer({{"question", "cancel button"}});
+        INFO(first.text);
+        CHECK_FALSE(first.is_error);
+        CHECK(nlohmann::json::parse(first.text)["retriever"] == "vector");
+        CHECK(providers.asked == 1);
+        CHECK(first.text + "\n" == printed(home, {"knowledge", "query", "cancel button"}));
+        // The providers are the server's, built once for its life.
+        const apogee::backends::BuildResult* built = &providers.models.ready();
+        (void)query.answer({{"question", "cancel button"}});
+        CHECK(providers.asked == 2);
+        CHECK(&providers.models.ready() == built);
+    }
+}
+
+TEST_CASE("a graph or knowledge read that cannot answer says why, and the server goes on",
+          "[cli][mcp][serve][graph][knowledge][58b]") {
+    const CliHome home{std::string{kConfig}};
+    // A graph and a records store that are not databases.
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"config", "add-graph", "broken", "--collections", "notes"}, &out, &err) == 0);
+    write_file(apogee::agentloop::graph_db_path("broken"), "this is not a database");
+    write_file(apogee::harness::embeddings_dir() / "knowledge.db", "this is not a database");
+    const Served served = serve(
+        home, {"mcp", "serve"},
+        {call(1, "graph_stats"), call(2, "graph_stats", {{"graph", 5}}),
+         call(3, "graph_stats", {{"graph", "nope"}}), call(4, "graph_stats", {{"graph", "broken"}}),
+         call(5, "graph_report", {{"graph", "nope"}}), call(6, "knowledge_list"),
+         call(7, "knowledge_info"), call(8, "knowledge_query"),
+         call(9, "knowledge_query", {{"question", "x"}, {"top_k", "lots"}}),
+         call(10, "knowledge_query", {{"question", "x"}, {"top_k", 0}}),
+         call(11, "knowledge_list", {{"status", true}}), call(12, "list_graphs"),
+         call(13, "list_notes")});
+    REQUIRE(served.code == 0);
+    const auto refused = [&served](int id) {
+        const Answer answer = answer_of(served, id);
+        INFO(id << ": " << answer.text);
+        CHECK(answer.is_error);
+        CHECK_THAT(answer.text, StartsWith("Error: "));
+        return answer.text.substr(std::string{"Error: "}.size());
+    };
+    CHECK(refused(1) ==
+          "graph is required: a named graph or a collection, as list_graphs names "
+          "them");
+    CHECK(refused(2) == "graph must be a string");
+    // The command's own words, as it says them after its prefix.
+    CHECK(home.run({"graph", "stats", "nope"}, &out, &err) == 1);
+    CHECK(err == "apogee graph: " + refused(3) + "\n");
+    (void)refused(4);
+    CHECK(home.run({"graph", "report", "--graph", "nope"}, &out, &err) == 1);
+    CHECK(err == "apogee graph: " + refused(5) + "\n");
+    (void)refused(6);
+    CHECK(refused(7) == "id is required: a record id, as knowledge_list names them");
+    CHECK(refused(8) == "question is required: what the records are asked");
+    CHECK(refused(9) == "top_k must be a whole number");
+    CHECK(refused(10) == "top_k must be at least 1");
+    CHECK(refused(11) == "status must be a string");
+    // The list still answers, the broken graph's row saying why.
+    const Answer listed = answer_of(served, 12);
+    CHECK_FALSE(listed.is_error);
+    CHECK(nlohmann::json::parse(listed.text)["data"][0].contains("error"));
+    CHECK_FALSE(answer_of(served, 13).is_error);
 }

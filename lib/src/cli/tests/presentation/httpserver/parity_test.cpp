@@ -267,6 +267,10 @@ const std::map<std::string, Classification>& table() {
         {"complete", read_only()},
         {"analyze", read_only()},
         {"agents list", read_only()},
+        // Every graph a name reaches (58b), as graph stats is read-only beside
+        // its route: GET /v1/admin/graphs serves the entries and
+        // /v1/admin/graph/{id}/stats each graph's counts.
+        {"graph list", read_only()},
         {"graph stats", read_only()},
         {"graph show", read_only()},
         {"graph report", read_only()},

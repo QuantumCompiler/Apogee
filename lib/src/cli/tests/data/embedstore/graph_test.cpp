@@ -363,6 +363,36 @@ TEST_CASE("source states and chunk spans carry the fingerprint", "[embedstore][g
     CHECK(store.source_states().at("a.md").max_chunk_id == 99);
 }
 
+TEST_CASE("the last extraction is the newest state any build recorded, prose or code",
+          "[embedstore][graph][state][58b]") {
+    // What `graph list` says as a graph's last build (58b): the newest
+    // extraction time a build stamped, over every member and both layers.
+    const Scratch scratch;
+    Store store{scratch.db()};
+    CHECK(store.last_extracted_at().empty());
+    store.replace_source("a.md", {"alpha"});
+    store.set_source_state("a.md", 1, 1, "m");
+    store.set_source_state("member", "b.md", 1, 1, "m");
+    store.set_code_file_state(
+        apogee::embedstore::CodeFileState{.collection = "app",
+                                          .file = "pkg/app.py",
+                                          .content_hash = "abc",
+                                          .extractor = "code",
+                                          .facts = "{}",
+                                          .parsed_at = "2026-11-03T08:00:00Z"});
+    raw_exec(
+        scratch.db(),
+        "UPDATE kg_state SET extracted_at = '2026-11-01T09:00:00Z' WHERE source_file = 'a.md';"
+        "UPDATE kg_state SET extracted_at = '2026-11-02T10:00:00Z' WHERE source_file = 'b.md'");
+    CHECK(store.last_extracted_at() == "2026-11-03T08:00:00Z");
+    raw_exec(
+        scratch.db(),
+        "UPDATE kg_state SET extracted_at = '2026-11-04T11:00:00Z' WHERE source_file = 'b.md'");
+    CHECK(store.last_extracted_at() == "2026-11-04T11:00:00Z");
+    store.delete_graph();
+    CHECK(store.last_extracted_at().empty());
+}
+
 TEST_CASE("delete_graph clears every graph row and leaves the chunks alone",
           "[embedstore][graph][delete]") {
     const Scratch scratch;

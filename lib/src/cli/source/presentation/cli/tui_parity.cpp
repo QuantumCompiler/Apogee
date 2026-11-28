@@ -32,7 +32,9 @@ constexpr std::array kSurfaces{
     ShellSurface{"providers", View, "Providers", ShellDoor{.view = "Providers"}},
     ShellSurface{"knowledge", View, "Knowledge", ShellDoor{.view = "Knowledge"}},
     ShellSurface{"embed", View, "Collections", ShellDoor{.view = "Collections"}},
-    ShellSurface{"graph", View, "Graph", ShellDoor{.view = "Graph"}},
+    // The view's rows are `graph list`'s (58b), the read a host's
+    // list_graphs serves.
+    ShellSurface{"graph", View, "Graph (its rows are graph list's)", ShellDoor{.view = "Graph"}},
     ShellSurface{"execute", View, "Session (the picker's execute door)",
                  ShellDoor{.view = "Session", .seen = "Execute"}},
     ShellSurface{"symphonies", View, "Symphonies", ShellDoor{.view = "Symphonies"}},

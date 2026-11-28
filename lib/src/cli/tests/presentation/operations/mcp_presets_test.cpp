@@ -145,6 +145,10 @@ TEST_CASE("self resolves to this binary's mcp serve and is refused into Apogee",
     CHECK_THAT(
         std::string{preset("self").provides},
         ContainsSubstring("models_list, models_status, train_status, train_versions, check"));
+    // 58b's reads, named beside them.
+    CHECK_THAT(std::string{preset("self").provides},
+               ContainsSubstring("the graph and knowledge reads: list_graphs, graph_stats, "
+                                 "graph_report, knowledge_list, knowledge_info, knowledge_query"));
     // The circularity, said.
     CHECK_THAT(refusal_of("self", machine.host()),
                ContainsSubstring("registered into Apogee it would serve Apogee the tools it "

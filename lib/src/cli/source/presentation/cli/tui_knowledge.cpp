@@ -4,8 +4,6 @@
 
 #include <memory>
 #include <mutex>
-#include <optional>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,7 +13,6 @@
 #include "cli/graph_navigate.h"
 #include "cli/knowledge.h"
 #include "cli/tui_common.h"
-#include "contracts/config.h"
 #include "contracts/suggested_command.h"
 #include "knowledge/record.h"
 
@@ -157,35 +154,24 @@ tui::ListOptions graph_view_options(const RootContext& context) {
     options.title = "Graph";
     options.columns = {"GRAPH", "KIND", "NODES", "EDGES"};
     options.load = [&context]() {
-        // The named graphs as configured, then each collection holding a
-        // graph of its own -- every name `graph stats` reads, graphs-first,
-        // each row its document's counts.
-        std::vector<std::string> names;
-        std::set<std::string> named;
-        if (const std::optional<harness::Config> config = config_if_any(config_file(context));
-            config.has_value()) {
-            for (const auto& [name, graph] : config->graphs) {
-                names.push_back(name);
-                named.insert(name);
-            }
-        }
-        for (const CollectionRow& collection : collection_rows()) {
-            if (collection.error.empty() && !named.contains(collection.name)) {
-                names.push_back(collection.name);
-            }
-        }
+        // `graph list`'s rows (58b): the named graphs as configured, then
+        // each collection holding a graph of its own -- every name `graph
+        // stats` reads, graphs-first -- the one read a host's list_graphs
+        // serves too.
+        const nlohmann::json document = graph_list_document(context);
         std::vector<tui::ListRow> rows;
-        for (const std::string& name : names) {
-            const nlohmann::json document = graph_stats_document(context, name);
-            const bool built = document.value("built", false);
-            if (!built && field(document, "kind") == "collection") {
-                continue;  // a collection with no graph is not a graph
+        for (const nlohmann::json& row : document.at("data")) {
+            const bool built = row.value("built", false);
+            const std::string name = field(row, "name");
+            // A store the list could not read says so where its size goes.
+            std::string nodes = built ? field(row, "nodes") : std::string{"not built"};
+            if (row.contains("error")) {
+                nodes = "unreadable";
             }
             rows.push_back(
                 tui::ListRow{.key = name,
-                             .cells = {field(document, "graph"), field(document, "kind"),
-                                       built ? field(document, "nodes") : std::string{"not built"},
-                                       built ? field(document, "edges") : std::string{}},
+                             .cells = {name, field(row, "kind"), std::move(nodes),
+                                       built ? field(row, "edges") : std::string{}},
                              .look = built ? tui::ListRow::Look::Plain : tui::ListRow::Look::Dim});
         }
         std::vector<std::string> heading;

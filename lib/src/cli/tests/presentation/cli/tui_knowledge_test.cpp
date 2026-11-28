@@ -331,3 +331,41 @@ TEST_CASE("the Graph view draws graph stats' documents, and its card is graph ex
     const std::string refused = err.substr(err.find(": ") + 2);
     CHECK(has(stage.frame(), "could not ask: " + refused.substr(0, refused.find('\n'))));
 }
+
+TEST_CASE("the Graph view's rows are graph list's, a collection a named graph shadows left out",
+          "[cli][tui][knowledge][58b]") {
+    // 58b: one read behind the shell's rows and a host's list_graphs. A
+    // named graph's name is compared case-insensitively, graphs-first, so a
+    // collection `work` beside the named `Work` is that graph's name, never
+    // a second row.
+    const apogee::testing::CliHome home{"graphs:\n  Work:\n    collections: [notes]\n"};
+    const apogee::commands::RootContext context = context_of(home);
+    {
+        apogee::embedstore::Store notes{apogee::harness::embeddings_dir() / "notes.db"};
+        apogee::embedstore::Store work{apogee::agentloop::graph_db_path("Work")};
+        apogee::testing::build_navigation_graph(work, notes, "notes");
+        apogee::embedstore::Store shadowed{apogee::harness::embeddings_dir() / "work.db"};
+        apogee::testing::build_navigation_graph(shadowed, shadowed, "");
+        apogee::embedstore::Store docs{apogee::harness::embeddings_dir() / "docs.db"};
+        apogee::testing::build_navigation_graph(docs, docs, "");
+    }
+    const auto [heading, rows] = apogee::commands::graph_view_options(context).load();
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"graph", "list", "--output-format", "json"}, &out, &err) == 0);
+    const nlohmann::json listed = nlohmann::json::parse(out)["data"];
+    REQUIRE(rows.size() == listed.size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        INFO(listed[i].dump());
+        const std::string name = listed[i]["name"].get<std::string>();
+        CHECK(rows[i].key == name);
+        CHECK(rows[i].cells == std::vector<std::string>{name, listed[i]["kind"].get<std::string>(),
+                                                        listed[i]["nodes"].dump(),
+                                                        listed[i]["edges"].dump()});
+    }
+    std::vector<std::string> keys;
+    for (const apogee::tui::ListRow& row : rows) {
+        keys.push_back(row.key);
+    }
+    CHECK(keys == std::vector<std::string>{"Work", "docs"});
+}

@@ -347,14 +347,18 @@ void bind_serve(CLI::App& parent, const RootContext& context) {
         "MCP host to spawn");
     cmd->footer(
         "Speaks MCP's JSON-RPC on stdin and stdout until stdin ends: the read-only native tools "
-        "(files, git, notes, document search, graph navigation) and the status reads "
-        "(models_list, models_status, train_status, train_versions, check), each answering with "
-        "the command's own --output-format json document. Nothing writes, and no port is "
-        "opened. A model generates only where the config lists complete under a backend's "
-        "mcp_serve -- one local and unmetered by its own provider's word, its calls bounded "
-        "(apogee config set-backend <name> --mcp-serve complete). search_documents may embed "
-        "the query through the collection's embedder: one small call per search, which a paid "
-        "embedder bills, as a chat's search does. The entry a host takes: apogee mcp presets.");
+        "(files, git, notes, document search, graph navigation), the status reads "
+        "(models_list, models_status, train_status, train_versions, check) and the graph and "
+        "knowledge reads (list_graphs, graph_stats, graph_report, knowledge_list, "
+        "knowledge_info, knowledge_query), each answering with the command's own "
+        "--output-format json document -- graph_report with its Markdown. Nothing writes, and "
+        "no port is opened. A model generates only where the config lists complete under a "
+        "backend's mcp_serve -- one local and unmetered by its own provider's word, its calls "
+        "bounded (apogee config set-backend <name> --mcp-serve complete). search_documents may "
+        "embed the query through the collection's embedder: one small call per search, which a "
+        "paid embedder bills, as a chat's search does; so may knowledge_query, through the "
+        "records' embedder, and never a rerank judge. "
+        "The entry a host takes: apogee mcp presets.");
     cmd->callback([&context]() { serve_or_fail(context); });
 }
 

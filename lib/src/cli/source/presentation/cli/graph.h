@@ -107,6 +107,19 @@ public:
 [[nodiscard]] nlohmann::json graph_stats_document(const RootContext& context,
                                                   const std::string& name);
 
+/// `graph list` (58b): every named graph the config names, in its order,
+/// then each collection holding a graph of its own that no named graph
+/// shadows -- the names `graph stats` reads, graphs-first -- as one document,
+/// `{"object": "list", "data": [{"name", "kind": "named"|"collection",
+/// "collections", "sources" (a named graph's entry), "built", "nodes",
+/// "edges", "last_build"}, ...]}`, `last_build` the newest extraction a build
+/// recorded (null when none), and a row whose store cannot be read carrying
+/// its `error`; and as a person reads it, a line a graph. What `mcp serve`'s
+/// `list_graphs` serves and the shell's Graph view draws. Throws
+/// `GraphRefusal` for a config that will not load.
+[[nodiscard]] nlohmann::json graph_list_document(const RootContext& context);
+[[nodiscard]] std::string graph_list_text(const nlohmann::json& document);
+
 /// Whether `graph update` refreshes `graph`: it has source trees to re-parse
 /// (27k). The verb's refusal and its completion both ask this.
 [[nodiscard]] bool graph_updatable(const harness::NamedGraphConfig& graph) noexcept;

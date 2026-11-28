@@ -403,6 +403,11 @@ public:
     void set_graph_meta(std::string_view key, std::string_view value);
     [[nodiscard]] std::string graph_meta(std::string_view key) const;
 
+    /// When a build last extracted or parsed a source here (58b): the newest
+    /// `extracted_at` any state row holds -- every member, prose and code --
+    /// RFC 3339, UTC; empty when no build has recorded one.
+    [[nodiscard]] std::string last_extracted_at() const;
+
     /// The member set a named graph was last built over, recorded sorted so
     /// `stats` can compare it with the config's current list. Empty when
     /// never built as a named graph.

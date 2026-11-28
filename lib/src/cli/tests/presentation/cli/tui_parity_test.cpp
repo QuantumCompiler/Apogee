@@ -84,6 +84,10 @@ TEST_CASE("the table is today's truth: the views, no backfill left, the exec lin
     CHECK(kind("__mcp-tools") == ShellSurfaceKind::RunnerCovered);
     CHECK(std::string_view{apogee::commands::find_shell_surface("__mcp-tools")->detail}.find(
               "alias of mcp serve") != std::string_view::npos);
+    // `graph list` (58b) is the Graph view's rows, and the exec line runs it.
+    CHECK(apogee::commands::exec_refusal({"graph", "list"}).empty());
+    CHECK(std::string_view{apogee::commands::find_shell_surface("graph")->detail}.find(
+              "graph list") != std::string_view::npos);
     CHECK(kind("complete") == ShellSurfaceKind::RunnerCovered);
     CHECK(kind("analyze") == ShellSurfaceKind::RunnerCovered);
     for (const char* carved : {"serve", "uninstall", "reset", "acp"}) {

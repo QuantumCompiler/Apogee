@@ -883,3 +883,53 @@ TEST_CASE("a capture into a knowledge.db the config cannot register is written, 
     CHECK(out.find("registered '") == std::string::npos);
     CHECK(bytes(fixture.config_path) == config_before);
 }
+
+TEST_CASE(
+    "knowledge query --output-format json is --json's answer as one document, its collection named",
+    "[commands][knowledge][query][58b]") {
+    // 58b: `mcp serve`'s knowledge_query serves this document, so the read
+    // has its twin on the command line first, as list and info do (37c).
+    const Fixture fixture;
+    {
+        Store store = fixture.store();
+        Record shipped;
+        shipped.id = "kr-20260913T120010Z-00000a";
+        shipped.intent = "the cancel control was removed after testing";
+        shipped.decision = "remove it";
+        shipped.status = "shipped";
+        shipped.discipline = "eng";
+        shipped.timestamp = "2026-09-13T12:00:10.000000Z";
+        store.put(shipped, {}, "raw");
+    }
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"knowledge", "query", "cancel", "--output-format", "json"}, &out, &err) ==
+            0);
+    INFO(out << err);
+    // One line, the one encoder every read writes through.
+    CHECK(out.find('\n') == out.size() - 1);
+    nlohmann::json document = nlohmann::json::parse(out);
+    CHECK(document["object"] == "knowledge.query");
+    CHECK(document["db"] == "knowledge");
+    CHECK(document["retriever"] == "lexical");
+    REQUIRE(document["records"].size() == 1);
+    CHECK(document["records"][0]["record"]["id"] == "kr-20260913T120010Z-00000a");
+
+    // The facts --json prints, whole: the document is that object, named.
+    std::string pretty;
+    REQUIRE(fixture.run({"knowledge", "query", "cancel", "--json"}, &pretty, &err) == 0);
+    document.erase("object");
+    document.erase("db");
+    CHECK(document == nlohmann::json::parse(pretty));
+
+    // The text is unchanged, and a refusal is the command's own.
+    REQUIRE(fixture.run({"knowledge", "query", "cancel"}, &out, &err) == 0);
+    CHECK(out.starts_with("Top 1 result(s) for \"cancel\" in \"knowledge\" [lexical]:"));
+    CHECK(fixture.run({"knowledge", "query", "cancel", "--db", "nope", "--output-format", "json"},
+                      &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK(err.find("no knowledge collection named 'nope'") != std::string::npos);
+    REQUIRE(fixture.run({"__complete", "knowledge", "query", "--output-format", ""}, &out, &err) ==
+            0);
+    CHECK(out == "text\njson\n");
+}

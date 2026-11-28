@@ -27,6 +27,15 @@ namespace apogee::commands {
 /// Adds `report` and `export` under `graph` (the `GraphCommand` binds them).
 void bind_graph_artifacts(CLI::App& graph, const RootContext& context);
 
+/// `graph report`'s Markdown (58b): the graph `graph` or `collection` names,
+/// as every graph read takes them -- with neither, the one graph built --
+/// its report assembled from the store with no model and rendered: the bytes
+/// the command prints, and what `mcp serve`'s `graph_report` serves as text.
+/// Throws `GraphRefusal` in the command's words.
+[[nodiscard]] std::string graph_report_markdown(const RootContext& context,
+                                                const std::string& graph,
+                                                const std::string& collection);
+
 /// Where an export lands without `--out`: `<graph>.html`, `<graph>.graphml`
 /// or `<graph>.mmd` in the working directory, for `kind` `html`, `graphml`
 /// or `mermaid`.

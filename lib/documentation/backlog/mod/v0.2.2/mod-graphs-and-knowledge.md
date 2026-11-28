@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | ✨ Feature |
 | **Project** | Claude plugin (mod) |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | v0.2.2 |
 | **Component** | The `/apogee` commands and the pane's Knowledge section |
 | **Labels** | `graphs` `knowledge` `slash-commands` `pane` |
 | **Epic** | Track 2 · Claude aware of Apogee |
-| **Blocked by** | [CLI 58b](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) (1c shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) |
+| **Blocked by** | — (1c shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born); CLI 58b [shipped 2026-11-28](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records)) |
 | **Blocks** | — |
 | **Reporter** | The MCP-awareness spike (2026-11-07) |
 | **Created** | 2026-11-07 |
@@ -61,7 +61,7 @@ From the MCP-awareness spike (2026-11-07), two capabilities Claude cannot reach 
 | `src/business/` | the reads (`apogee graph list --output-format json`, …) |
 | `src/presentation/` | `/apogee graphs` (each graph with its kind and size), `/apogee knowledge <question>` (the records that answer it); the pane's Knowledge section (graphs and the newest records) |
 
-**Reference.** Mod 1b ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) and 1c ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#2026-11-21--mod-pane-backlog-item-1c-the-pane-beside-the-chat): the pane, `src/presentation/pane/`), whose surfaces this extends; CLI 58b ([`mcp-serve-graphs-and-knowledge.md`](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md)).
+**Reference.** Mod 1b ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) and 1c ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#2026-11-21--mod-pane-backlog-item-1c-the-pane-beside-the-chat): the pane, `src/presentation/pane/`), whose surfaces this extends; CLI 58b ([MILESTONES](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records), shipped 2026-11-28).
 
 ## Testing
 
@@ -82,6 +82,7 @@ From the MCP-awareness spike (2026-11-07), two capabilities Claude cannot reach 
 |---|---|---|
 | 2026-11-07 | Specced from the MCP-awareness spike (the user's calls: both hosts, opt-in writes, the next release). Mod track 2, v0.2.2. | the user |
 | 2026-11-07 | A new item, not an extension of 1b: 1b is a v0.2.1 item and cannot wait on v0.2.2's 58b. | the spec |
+| 2026-11-28 | **Released: CLI 58b shipped** ([MILESTONES](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records)): `mcp serve` lists `list_graphs`, `graph_stats`, `graph_report`, `knowledge_list`, `knowledge_info` and `knowledge_query` after the five status reads, each its command's document byte for byte -- `graph list`, `graph stats`, `graph report`'s Markdown as text, `knowledge list`, `knowledge info` and the new `knowledge query --output-format json` (with `--rerank off`) -- so `/apogee graphs` and `/apogee knowledge` can read the CLI's documents or the served tools; `knowledge_list` takes `status` and `discipline`, `knowledge_query` `question` and `top_k`. The mod's recorded tool list (`tests/support/recorded.ts`) predates them. | CLI 58b's build |
 
 ## Out of scope
 
@@ -89,6 +90,6 @@ From the MCP-awareness spike (2026-11-07), two capabilities Claude cannot reach 
 
 ## Links
 
-- **Blocked by:** [CLI 58b](../../cli/v0.2.2/mcp-serve-graphs-and-knowledge.md) (1c shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)) · **Blocks:** —
+- **Blocked by:** — (1c shipped 2026-11-21, [Milestone A](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born); CLI 58b [shipped 2026-11-28](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records), the reads this item carries) · **Blocks:** —
 - **Relates to:** Mod 1b ([shipped 2026-11-21](../../../assistant/mod/MILESTONES.md#milestone-a--the-mod-is-born)), whose registration carries the tools and whose `/apogee` commands this extends; CLI 58d (the served refresh call); ADR 0001 (the four layers).
 - **Follows from:** the MCP-awareness spike (2026-11-07), walls W2 and W3.

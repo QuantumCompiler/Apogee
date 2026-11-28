@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "cli/graph.h"
 #include "cli/helpers.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -105,6 +106,32 @@ struct ExportFlags {
     std::size_t max_nodes = 0;
 };
 
+/// The report's read (58b): the graph `selection` names, resolved as every
+/// graph read resolves one (27l), its one document assembled from the store
+/// with no model. A refusal throws `GraphRefusal` in the command's words.
+struct ReportRead {
+    std::string graph;
+    nlohmann::json document;
+};
+
+[[nodiscard]] ReportRead read_report(const RootContext& context, const Selection& selection) {
+    harness::Config config;
+    try {
+        config = harness::load_config(harness::resolve_config_path(context.config_path));
+    } catch (const harness::ConfigError& e) {
+        throw GraphRefusal{e.what()};
+    }
+    try {
+        const graph::OpenGraph open{graph::resolve_graph_target(
+            config,
+            graph::GraphSelection{.graph = selection.graph, .collection = selection.collection})};
+        return ReportRead{.graph = open.target().name,
+                          .document = graph::to_json(graph::build_report(open))};
+    } catch (const graph::NavigationError& e) {
+        throw GraphRefusal{e.what()};
+    }
+}
+
 void bind_report(CLI::App& graph_command, const RootContext& context) {
     auto selection = std::make_shared<Selection>();
     auto flags = std::make_shared<ReportFlags>();
@@ -128,31 +155,40 @@ void bind_report(CLI::App& graph_command, const RootContext& context) {
             "Output format: text (default, Markdown) or json -- the report's one document")
         ->type_name(words_value(read_format_names()));
     report->callback([&context, selection, flags]() {
-        with_graph(context, *selection, [&](const graph::OpenGraph& open) {
-            const nlohmann::json document = graph::to_json(graph::build_report(open));
-            std::string text;
-            if (flags->format == ReadFormat::Json) {
-                // The one-line document 27j's reads print; text a store holds
-                // that is not UTF-8 is replaced rather than thrown on.
-                text =
-                    document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
-            } else {
-                text = render::render_graph_report(document);
-            }
-            if (flags->out.empty()) {
-                std::cout << text;
-                std::cout.flush();
-                return;
-            }
-            if (write_artifact(flags->out, text)) {
-                std::cout << "Wrote the report on graph \"" << open.target().name << "\" to "
-                          << flags->out << " (" << size_text(text.size()) << ").\n";
-            }
-        });
+        ReportRead read;
+        try {
+            read = read_report(context, *selection);
+        } catch (const GraphRefusal& e) {
+            fail_user(e.what());
+        }
+        std::string text;
+        if (flags->format == ReadFormat::Json) {
+            // The one-line document 27j's reads print; text a store holds
+            // that is not UTF-8 is replaced rather than thrown on.
+            text =
+                read.document.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
+        } else {
+            text = render::render_graph_report(read.document);
+        }
+        if (flags->out.empty()) {
+            std::cout << text;
+            std::cout.flush();
+            return;
+        }
+        if (write_artifact(flags->out, text)) {
+            std::cout << "Wrote the report on graph \"" << read.graph << "\" to " << flags->out
+                      << " (" << size_text(text.size()) << ").\n";
+        }
     });
 }
 
 }  // namespace
+
+std::string graph_report_markdown(const RootContext& context, const std::string& graph,
+                                  const std::string& collection) {
+    return render::render_graph_report(
+        read_report(context, Selection{.graph = graph, .collection = collection}).document);
+}
 
 std::string default_artifact_name(std::string_view graph, std::string_view kind) {
     if (kind == "html") {

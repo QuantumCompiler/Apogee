@@ -7,9 +7,11 @@ line by line as any MCP host would, and checks that:
 
 - stdout carries JSON-RPC frames and nothing else;
 - both spellings list the same tools, every one marked read-only, no writer
-  among them, the five status reads last and in order;
+  among them, the status reads last and in order -- 54a's five, then 58b's
+  graph and knowledge reads;
 - each status read answers with the document `apogee <verb>
-  --output-format json` printed for the same question, byte for byte.
+  --output-format json` printed for the same question, byte for byte (58b's
+  `graph_report` with the Markdown `apogee graph report` printed).
 
 With `--callables=<name,...>` (54b), the calls the config lists follow the
 status reads, each marked not read-only, and a call's expected text is what
@@ -28,7 +30,10 @@ import json
 import subprocess
 import sys
 
-STATUS_READS = ["models_list", "models_status", "train_status", "train_versions", "check"]
+STATUS_READS = ["models_list", "models_status", "train_status", "train_versions", "check",
+                # 58b: the graphs and the knowledge records, after 54a's five.
+                "list_graphs", "graph_stats", "graph_report", "knowledge_list",
+                "knowledge_info", "knowledge_query"]
 WRITERS = ("write_file", "edit_file", "write_note", "run_command")
 SPELLINGS = (["mcp", "serve"], ["__mcp-tools"])
 

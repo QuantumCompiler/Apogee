@@ -950,6 +950,17 @@ std::string Store::graph_meta(std::string_view key) const {
     return column_text(select.get(), 0);
 }
 
+std::string Store::last_extracted_at() const {
+    // Every row is stamped `%Y-%m-%dT%H:%M:%SZ` (`now_rfc3339`, the code
+    // layer's included), so the text order is the time order.
+    StatementPtr select =
+        prepare(impl_->connection.get(), "SELECT COALESCE(MAX(extracted_at), '') FROM kg_state");
+    if (sqlite3_step(select.get()) != SQLITE_ROW) {
+        return {};
+    }
+    return column_text(select.get(), 0);
+}
+
 void Store::set_graph_members(const std::vector<std::string>& members) {
     std::vector<std::string> sorted = members;
     std::ranges::sort(sorted);
