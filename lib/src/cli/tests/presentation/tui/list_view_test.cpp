@@ -13,7 +13,8 @@
 /// The one list view's additions for track 37 (37b): an action over the
 /// whole view, runnable with no row; a view's own `r` taking the key from
 /// "read again"; and an answer of several lines drawn whole. And 37c's ask
-/// row: typing until Enter asks or Esc closes, the last question kept.
+/// row: typing until Enter asks or Esc closes, the last question kept. And
+/// CLI-M62: an open question waits through the shell's redraws for a key.
 namespace {
 
 using apogee::tui::Key;
@@ -36,6 +37,17 @@ struct Stage {
     void press(const Key& key) {
         (void)shell.press(key);
         (void)frame();
+    }
+
+    /// What the terminal's pump sends after each closure it runs, three
+    /// times, the pump drained between: whether any was handled.
+    [[nodiscard]] bool redraws() {
+        bool handled = false;
+        for (int i = 0; i < 3; ++i) {
+            handled = shell.redraw() || handled;
+            (void)pump.drain();
+        }
+        return handled;
     }
 
     apogee::tui::ManualPump pump;
@@ -168,4 +180,121 @@ TEST_CASE("the ask row takes typing until Enter asks or Esc closes it, the last 
     }
     press(Key::named(Key::Name::Return));
     CHECK(has(frame(), "could not ask: no such thing"));
+}
+
+namespace {
+
+/// The two rows the questions below are asked over.
+[[nodiscard]] std::pair<std::vector<std::string>, std::vector<apogee::tui::ListRow>> two_rows() {
+    return std::pair{std::vector<std::string>{},
+                     std::vector<apogee::tui::ListRow>{{.key = "alpha", .cells = {"alpha"}},
+                                                       {.key = "beta", .cells = {"beta"}}}};
+}
+
+/// Every key but `y` and `Y`: each answers no.
+[[nodiscard]] std::vector<Key> other_keys() {
+    return {Key::character("n"), Key::named(Key::Name::Escape), Key::named(Key::Name::Return),
+            Key::named(Key::Name::Up)};
+}
+
+}  // namespace
+
+TEST_CASE("an open question waits through the shell's redraws, and only a key answers it",
+          "[tui][list][M62]") {
+    std::vector<std::string> runs;
+    apogee::tui::ListOptions options;
+    options.title = "Records";
+    options.columns = {"NAME"};
+    options.load = two_rows;
+    options.actions = {apogee::tui::ListAction{
+        .key = "x",
+        .label = "delete",
+        .confirm = [](const apogee::tui::ListRow& row) { return "Delete " + row.key + "?"; },
+        .run =
+            [&runs](const apogee::tui::ListRow& row) {
+                runs.push_back(row.key);
+                return "removed " + row.key;
+            }}};
+    Stage stage{options};
+    (void)stage.frame();
+
+    // The pump's redraw is not a key: the question stays open, passed on
+    // unanswered.
+    stage.press(Key::character("x"));
+    CHECK_FALSE(stage.redraws());
+    const std::string waiting = stage.frame();
+    CHECK(has(waiting, " Delete alpha? [y/N]\n"));
+    CHECK_FALSE(has(waiting, "not done"));
+    CHECK(runs.empty());
+    stage.press(Key::character("y"));
+    CHECK(runs == std::vector<std::string>{"alpha"});
+    CHECK(has(stage.frame(), " removed alpha\n"));
+
+    // `Y` is yes too, as the line-mode prompts read it.
+    stage.press(Key::character("x"));
+    stage.press(Key::character("Y"));
+    CHECK(runs == std::vector<std::string>{"alpha", "alpha"});
+
+    // Any other key is the question's default, no.
+    for (const Key& key : other_keys()) {
+        stage.press(Key::character("x"));
+        CHECK(has(stage.frame(), "[y/N]"));
+        stage.press(key);
+        const std::string answered = stage.frame();
+        CHECK(has(answered, " not done\n"));
+        CHECK_FALSE(has(answered, "[y/N]"));
+    }
+    CHECK(runs.size() == 2);
+}
+
+TEST_CASE("a typed ask's question waits through the shell's redraws, and only a key answers it",
+          "[tui][list][M62]") {
+    std::vector<std::string> asked;
+    apogee::tui::ListOptions options;
+    options.title = "Datasets";
+    options.columns = {"NAME"};
+    options.load = two_rows;
+    options.asks = {apogee::tui::ListAsk{
+        .key = "p",
+        .label = "prepare",
+        .ask =
+            [&asked](const apogee::tui::ListRow& /*row*/, const std::string& text) {
+                asked.push_back(text);
+                return "started " + text;
+            },
+        .prefill = [](const apogee::tui::ListRow& /*row*/) { return std::string{"prepare "}; },
+        .confirm = [](const apogee::tui::ListRow& /*row*/,
+                      const std::string& text) { return "Start '" + text + "'?"; },
+        .here = true}};
+    Stage stage{options};
+    (void)stage.frame();
+
+    stage.press(Key::character("p"));
+    stage.press(Key::character("a"));
+    stage.press(Key::named(Key::Name::Return));
+    CHECK_FALSE(stage.redraws());
+    const std::string waiting = stage.frame();
+    CHECK(has(waiting, " Start 'prepare a'? [y/N]\n"));
+    CHECK_FALSE(has(waiting, "not done"));
+    CHECK(asked.empty());
+    stage.press(Key::character("y"));
+    CHECK(asked == std::vector<std::string>{"prepare a"});
+    CHECK(has(stage.frame(), " started prepare a\n"));
+
+    // Reopened on the last question asked: `Y` asks it again.
+    stage.press(Key::character("p"));
+    stage.press(Key::named(Key::Name::Return));
+    stage.press(Key::character("Y"));
+    CHECK(asked == std::vector<std::string>{"prepare a", "prepare a"});
+
+    for (const Key& key : other_keys()) {
+        stage.press(Key::character("p"));
+        stage.press(Key::named(Key::Name::Return));
+        CHECK(has(stage.frame(), "[y/N]"));
+        stage.press(key);
+        const std::string answered = stage.frame();
+        CHECK(has(answered, " not done\n"));
+        CHECK_FALSE(has(answered, "[y/N]"));
+    }
+    CHECK(asked.size() == 2);
 }

@@ -34,6 +34,11 @@ records the terminal's modes (`stty -g`) before it and after it:
             and no `apogee-private-*` folder left in its temporary directory.
   pipe      A pipe on stdout: no screen at all, the help as `--help` prints it.
   dumb      TERM=dumb: the refusal said, the help printed, no screen.
+  confirm   A [y/N] question waits for a key (CLI-M62): the Datasets view's
+            `x` on `alpha`, then 3 s with no key, past the monitor's 2 s tick
+            -- the question still drawn by a later frame, never `not done`,
+            the file kept -- then `y`: `removed`, `alpha` gone and `beta`
+            kept -- then Ctrl-D, the terminal put back.
 
 POSIX only: Windows has no pty module, and its console path is the said
 refusal the unit suite pins through a fake probe.
@@ -374,6 +379,55 @@ def main():
         if help_text.splitlines()[0] not in output:
             fail("dumb", "the help was not printed", output)
         print("ok   dumb: the refusal said, the help printed")
+
+    # A [y/N] question answered by a key alone (CLI-M62): the pump redraws
+    # after every closure it runs, the monitor's every 2 s among them, and a
+    # redraw is not a key.
+    with tempfile.TemporaryDirectory(prefix="apogee-tui-confirm-") as home:
+        os.makedirs(os.path.join(home, "config"))
+        with open(os.path.join(home, "config", "config.json"), "w") as out:
+            json.dump({"backends": {"local": {"type": "mock"}}}, out)
+        datasets = os.path.join(home, "training", "datasets")
+        os.makedirs(datasets)
+        row = json.dumps({"messages": [{"role": "user", "content": "hi"},
+                                       {"role": "assistant", "content": "hello"}]})
+        for name in ("alpha", "beta"):
+            with open(os.path.join(datasets, name + ".jsonl"), "w") as out:
+                out.write(row + "\n")
+        alpha = os.path.join(datasets, "alpha.jsonl")
+        beta = os.path.join(datasets, "beta.jsonl")
+        env = dict(os.environ, TERM="xterm-256color", APOGEE_HOME=home, HOME=home)
+        env.pop("NO_COLOR", None)
+
+        def confirm(session):
+            # The Go-to menu (38) to the Datasets view, `alpha` selected.
+            session.send(b"\x07")
+            session.wait_for(b"Go to", 5, "confirm")
+            session.send(b"d")
+            session.read_for(0.3)
+            session.send(b"\r")
+            session.wait_for(b"Datasets]", 5, "confirm")
+            session.wait_for(b"beta", 10, "confirm")
+            mark = len(session.output)
+            session.send(b"x")
+            session.wait_for(b"[y/N]", 5, "confirm")
+            asked = session.output.find(b"[y/N]", mark) + len(b"[y/N]")
+            # No key for 3 s: the monitor ticks at least once meanwhile.
+            session.read_for(3)
+            if b"not done" in session.output[mark:]:
+                fail("confirm", "a redraw answered the open question", session.output)
+            if b"[y/N]" not in session.output[asked:]:
+                fail("confirm", "no later frame drew the open question", session.output)
+            if not os.path.exists(alpha):
+                fail("confirm", "alpha.jsonl went with no yes", session.output)
+            session.send(b"y")
+            session.wait_for(b"removed", 15, "confirm")
+            if os.path.exists(alpha) or not os.path.exists(beta):
+                fail("confirm", "y did not remove alpha alone", session.output)
+            session.send(b"\x04")  # Ctrl-D
+
+        screen_case(binary, env, "confirm", confirm, 0)
+        print("ok   confirm: the question waited 3 s through the redraws, y removed alpha alone")
 
 
 if __name__ == "__main__":

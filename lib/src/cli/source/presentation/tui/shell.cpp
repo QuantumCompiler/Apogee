@@ -515,6 +515,10 @@ bool Shell::press(const Key& key) {
     return state_->root->OnEvent(to_event(key));
 }
 
+bool Shell::redraw() {
+    return state_->root->OnEvent(ftxui::Event::Custom);
+}
+
 std::string Shell::render_text(int width, int height) {
     ftxui::Screen screen =
         ftxui::Screen::Create(ftxui::Dimension::Fixed(width), ftxui::Dimension::Fixed(height));

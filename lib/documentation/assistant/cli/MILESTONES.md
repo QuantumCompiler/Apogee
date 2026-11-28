@@ -9978,10 +9978,82 @@ Decisions taken while building, for veto:
 - **Review.** A code review over the working tree found no critical issue. Taken from it: the rollback's twin run as the built binary, and the prefill pinned in a case that runs with no binary.
 
 **Found, not fixed.** In the real shell, an open `[y/N]` ask is answered no by the next redraw. `TerminalPump::post` raises `ftxui::Event::Custom` for every task it posts, the 2-second monitor tick's among them. The shell hands that event to the view, and `ListView` takes any event but `y` as a no (`list_view.cpp`, `confirming` and `confirming_ask`). On the pseudo-terminal, `x` on a plain `keep` left 3 s without a key drew `not done` and kept the file, while the same ask answered within half a second deleted it. By reading, the same code takes every ask in the list views: the deletes, the rollback, the cycle and the launch asks' confirms. The in-process tests' `ManualPump` raises no such event, so none sees it. No item owns it.
+- *Revised 2026-11-28 ([CLI-M62](#2026-11-28--a-shell-question-waits-for-a-key-maintenance-item-m62-a-yn-question-in-the-shell-waits-for-a-key-never-a-redraw)):* fixed -- a question is answered by a key alone, and the redraw leaves it open; `list_view_test` feeds the redraw through `Shell::redraw()`, and `cli.tui_shell`'s `confirm` check leaves the Datasets view's delete open 3 s on the real terminal.
 
 **Left to CI.** The Windows rows run the child cases against the Windows binary: the JSON-escaped homes, and an enabled `-x` whose `/bin/false` can't start there.
 
 **Left for CLI-M61.** It wires `t`'s prefill (`mcp_view_options` in `tui_agents.cpp`) to `shell_word` for the key, keeping `-- ` before a dash-led key. The spelling is `CommandShell::Posix` on every platform, since `line_tokens` reads POSIX quoting. It also renders the Train and Agents views' confirms, which still print a dash-led name raw (`'apogee agents delete -x'`).
+
+### 2026-11-28 — `a-shell-question-waits-for-a-key` (maintenance item M62): a `[y/N]` question in the shell waits for a key, never a redraw
+
+**Why.** CLI-M51's live drive found it ([its record](#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash), "Found, not fixed"), and an investigation the same day reproduced it on the real binary. In the full-screen shell, the next redraw answered every `[y/N]` question a list view asks with no:
+- **The redraw.** The pump (32b) posts `ftxui::Event::Custom` after every closure it runs, and the shell hands that event to the active view as it hands a key.
+- **The posts.** The monitor bar samples every 2 s (32e), a view with a run going ticks every 2 s, and background reads and stderr notices post too.
+- **The answer.** The list view's two confirm branches, an action's (32d, `confirming`) and a typed ask's (37e, `confirming_ask`), took any event but `y` as a no.
+
+So an untouched question closed as `not done` within two seconds: five of five in 0.10–1.98 s, on the tick's phase. A `y` typed after reading the question found none open, and a `Y` was read as no. Seventeen questions in six view files go through those two branches: the Agents, Knowledge, Collections, Datasets and Chats views' deletes, the Config view's backend removal, the Check view's fix pass, the Providers view's register, the Tasks view's run, resume, halt and cancel, the Train view's typed run, pipeline and promote, its cycle and rollback, the Datasets view's typed prepare and synth, and the Chats view's compact. A question always failed safe. The harm was the window, a task run's grants and a synth run's cost among what it closed on, which their questions spell out to be read. `ManualPump::post` raises no event, so no in-process test had ever seen a redraw reach an open question.
+
+**What was built**
+
+- [x] **A question is answered by a key alone** (`tui/list_view.cpp`). Both branches read one predicate, `answer_of`:
+  - `y` or `Y` is yes, as the line-mode prompts read them (`agents_cmd`, `session_output`, `task_cmd`, `models_pull`);
+  - any other key is no, the question's default, `not done` as before;
+  - an event that is not a key press answers nothing: the pump's `Event::Custom`, a mouse event, or a terminal's report (the cursor's position and shape, its name, emulator and capabilities). The question stays open and the event is passed on unanswered (`return false`), as the typed-ask row (`on_typing`) already passes an event it does not know.
+
+  The redraw still redraws: FTXUI marks the frame stale after every event, handled or not (`App::Internal::HandleTask` at v7.0.3). Nothing else changed. The pump still posts its redraw, no view's actions or question texts changed, and the session view's prompt (`on_prompt_key`, the precedent) is untouched.
+- [x] **`Shell::redraw()`** (`tui/shell.h/.cpp`): the event `TerminalPump::post` sends, dispatched from the shell's root as `press` dispatches a key. A test cannot name FTXUI, so this is how it feeds the shell what the terminal's pump sends (the first ruling below).
+- [x] **`list_view.h`'s two `confirm` comments** say how a question is answered.
+- [x] **Tests**, each watched failing first:
+  - **`tui/list_view_test`** (`[M62]`, two cases). An action's question, and a typed ask's in the Datasets view's shape (`p`, a prefilled line, Enter, its confirm), each stay open through three redraws with the pump drained between: `[y/N]` still drawn, `not done` never, nothing run, and no redraw handled. Then `y` runs it once and `Y` runs it again, and `n`, Escape, Return and Up each draw `not done` and run nothing.
+    - On the old code the first redraw closed each question: the redraw handled, `not done` drawn, nothing ever run, 14 of 40 assertions failed.
+    - With the predicate in and `Y` not yet, only `Y` failed (`{ "alpha" } == { "alpha", "alpha" }`). It passed once `Y` was added.
+  - **`cli.tui_shell`'s new `confirm` check** (`tests/scripts/py/pty_tui_check.py`), on the real binary. A home holds the mock backend and two datasets. The Go-to menu goes to Datasets, `x` asks about `alpha`, and then nothing is pressed for 3 s, past the monitor's tick: a later frame still draws the question, `not done` is never drawn, and `alpha.jsonl` is kept. Then `y` draws `removed`, `alpha` is gone and `beta` kept, and Ctrl-D restores the modes. On the unfixed binary it failed with `a redraw answered the open question`, the frame showing `not done`.
+- [x] **Docs.** DEVELOPER.md's `tui/` row (the question's rule and `Shell::redraw`), the `tui/list_view_test.cpp` row and `cli.tui_shell`'s paragraph. [CLI-M51's record](#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash) has its "Found, not fixed" revised in place. No file was added or moved, so the codebase map is unchanged. No invariant changed, and SPEC and the reference docs are unchanged: none describes the shell's confirms.
+
+**Mode parity** ([ADR 0002](../../adrs/cli/mode-parity.md)). Only the shell asks this way. The line-mode `[y/N]` prompts read a whole line and already wait, and no HTTP or machine-mode surface asks a `[y/N]` question.
+
+**Decisions made while building** (2026-11-28, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - a key press answers and nothing else does;
+  - `Y` is yes, and a typed-out `yes` is not offered, because the question reads one key;
+  - there is no timeout: the question waits as the session view's prompt waits.
+- **Build-time rulings** (the most conservative reading; for the user's veto):
+  - **The test feeds the redraw through a new `Shell::redraw()`, not by naming `ftxui::Event::Custom`.** The ticket's Testing has the in-process test feed `ftxui::Event::Custom`, and its Constraints let FTXUI's events into `tui/`'s tests. But no test can include FTXUI:
+    - `apogee_presentation_tui` links it privately, and `list_view_test.cpp` compiles with no FTXUI include path (its compile command, read);
+    - `cmake/ApogeeLinkPolicy.cmake` refuses any other target that links it.
+
+    So the shell, which already names FTXUI's key events without FTXUI (`Key`, `press`), gains the one event the pump sends that is not a key. It is the same event, dispatched from the same root, minus FTXUI's loop. `ManualPump` and `TerminalPump` are unchanged, as the ticket says.
+  - **What is not a key, read from FTXUI v7.0.3's `event.hpp`:** `Event::Custom`, `is_mouse()`, `is_cursor_position()`, `is_cursor_shape()`, `IsTerminalNameVersion()`, `IsTerminalEmulator()` and `IsTerminalCapabilities()`. The last three exist at this pin beyond the ticket's list, and each is a terminal's report, not a key. Every other event is a key, an `Event::Special` no key names among them. In the terminal, FTXUI's loop consumes the cursor and terminal reports before any component sees them, and the shell turns mouse tracking off (`TrackMouse(false)`). So the redraw is the one non-key that reaches a question in practice, and it is the one the in-process test feeds.
+  - **A NUL byte passes an open question as a redraw does.** Most terminals send NUL for Ctrl-Space, and FTXUI reads it as `Event::Custom` itself: its parser makes every C0 byte a special event, and events compare by their bytes (its own parser test pins `{0}` as `Event::Custom`). So Ctrl-Space no longer answers no; it leaves the question open. Seen on the real binary, two of two runs. No question names that key, and every key a person types to answer still answers.
+  - **Ctrl-D with a question open answers it no**, as before: it is a key, so the first Ctrl-D draws `not done` and a second one quits. These are unchanged too:
+    - `q` and the shell's own keys (a digit, the F-keys, `:`, `!`, Ctrl-G) are the shell's before the view sees them;
+    - Ctrl-C with a run going stops the run first and leaves the question open.
+
+**Verified.**
+- **Red first**, as **Tests** says: the two `[M62]` cases (14 of 40 assertions, then `Y` alone) and the `confirm` check, each on the code before the fix.
+- **Targeted suites on the final build, all passing**, the Catch2 binary run from an empty scratch folder with stdin `/dev/null`:
+  - Catch2: `[M62]` (2 cases, 40 assertions), `[list]` (13 cases, 320 assertions) and `[tui]` (159 cases, 2,596 assertions);
+  - ctest: `cli.tui_shell` (its sixteen checks before and the new `confirm`), `cli.tui_doors`, `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.one_suggested_command` and its planted twin, and `cli.no_stdout_notes` and its twin. Also every entry `ctest -N` matches for `tui|pty`, 91 in all, `cli.tui_shell` among them a second time.
+- **On the real binary.** The build tree's `apogee`, rebuilt from the working tree (it reports `apogee 0.2.2 (e6417134, 2026-11-28, macos-arm64)`, the commit its version was configured at). It ran under `env -i PATH=/usr/bin:/bin` with `HOME` and `APOGEE_HOME` in the scratchpad, on a 140×45 pseudo-terminal over a mock-backend home with `alpha` and `beta`, following the ticket's steps to reproduce:
+
+  | Run | Key after `x` | The question | Datasets left |
+  |---|---|---|---|
+  | 1–3 | none for 6 s | still open, `not done` never drawn | alpha, beta |
+  | 4 | `Y` at 0.1 s | `removed` after 0.16 s | beta |
+  | 5 | `y` at 2.5 s | `removed` after 2.61 s | beta |
+  | 6 | `y` at 0.1 s | `removed` after 0.17 s | beta |
+  | 7 | `n` at 0.1 s | `not done` after 0.16 s | alpha, beta |
+  | 8 | Escape at 2.5 s | `not done` after 2.61 s | alpha, beta |
+
+  Evidence 2's cases now pass (no key, `Y` at once, `y` at 2.5 s, `y` at once as the control), beside two noes. Every run exited 0 on Ctrl-D, and in runs 1–3 the first Ctrl-D answered the open question and a second quit (the ruling above).
+- **Scans.** Homebrew clang-format 22 over the five changed C++ files: `--dry-run --Werror` clean. The MinGW scan (`x86_64-w64-mingw32-g++`, the windows-x64 tree's flags) over the three changed `.cpp` files: 0 with errors, 0 warnings of ours. Homebrew clang-tidy 22 with the main build's compile database over the same three: no error (`.clang-tidy`'s errors are the ownership checks and a few others). Its warnings are style ones the existing code raises too, and cognitive complexity, which `on_key` already exceeded and four of the file's five Catch2 cases exceed, the two new ones and two older ones; none names a line of `answer_of`, the two branches or `Shell::redraw`.
+- **The gate**, run on the final tree (2026-11-28, from 01:59), `lib/scripts/cicd.sh --app cli --test`, with nothing else running: exit 0. **4,828 ctest cases**, 4,824 passed and the same four skipped by platform as CLI-M61's run -- two more than its 4,826 -- in 721 s.
+
+**Not done:**
+- **CI has not run this.** Neither `make pr-ci` nor the whole-tree `make lint` was run.
+- **No live check on `apogee-dev`.** This session runs no installed binary.
+- **Windows** has no PTY check, like every check in `pty_tui_check.py`. The change is platform-free, and the MinGW scan compiled it here.
+- **A mouse event and a terminal report are covered by the predicate but fed by no test.** The shell never turns the mouse on, and FTXUI consumes the reports before any view, so no surface can deliver one to a question today.
 
 ## Milestone AI — Effort and permission modes
 

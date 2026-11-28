@@ -55,6 +55,23 @@ constexpr std::size_t kColumnCap = 40;
     return lines;
 }
 
+/// How `event` answers an open `[y/N]` question (CLI-M62): a key press does
+/// -- `y` or `Y` yes, as the line-mode prompts read them, any other key no,
+/// the question's default -- and an event that is not one answers nothing,
+/// the question left open: the pump's redraw (`Event::Custom`, posted after
+/// every closure it runs, 32b), a mouse event, a terminal's report. The
+/// session view's prompt holds the same line.
+[[nodiscard]] std::optional<bool> answer_of(const ftxui::Event& event) {
+    const bool key = event != ftxui::Event::Custom && !event.is_mouse() &&
+                     !event.is_cursor_position() && !event.is_cursor_shape() &&
+                     !event.IsTerminalNameVersion() && !event.IsTerminalEmulator() &&
+                     !event.IsTerminalCapabilities();
+    if (!key) {
+        return std::nullopt;
+    }
+    return event == ftxui::Event::Character('y') || event == ftxui::Event::Character('Y');
+}
+
 }  // namespace
 
 struct ListView::State : std::enable_shared_from_this<ListView::State> {
@@ -471,9 +488,13 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return true;
         }
         if (confirming_ask.has_value()) {
+            const std::optional<bool> yes = answer_of(event);
+            if (!yes.has_value()) {
+                return false;  // not a key: the question stays open
+            }
             PendingAsk pending = std::move(*confirming_ask);
             confirming_ask.reset();
-            if (event == ftxui::Event::Character('y')) {
+            if (*yes) {
                 ask(pending.index, std::move(pending.row), std::move(pending.text));
             } else {
                 notice = "not done";
@@ -481,10 +502,13 @@ struct ListView::State : std::enable_shared_from_this<ListView::State> {
             return true;
         }
         if (confirming.has_value()) {
+            const std::optional<bool> yes = answer_of(event);
+            if (!yes.has_value()) {
+                return false;  // not a key: the question stays open
+            }
             const std::size_t action = *confirming;
             confirming.reset();
-            if (event == ftxui::Event::Character('y') &&
-                (selected < rows.size() || options.actions.at(action).whole_view)) {
+            if (*yes && (selected < rows.size() || options.actions.at(action).whole_view)) {
                 run(action, selected < rows.size() ? rows.at(selected) : ListRow{});
             } else {
                 notice = "not done";

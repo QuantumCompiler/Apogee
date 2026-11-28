@@ -110,6 +110,12 @@ public:
     /// shell or its view handled it.
     bool press(const Key& key);
 
+    /// The redraw the terminal's pump sends after each closure it runs
+    /// (`TerminalPump::post`), dispatched as the terminal delivers it: not a
+    /// key, so it answers no open question (CLI-M62). True when the shell or
+    /// its view handled it.
+    bool redraw();
+
     /// The frame at `width` x `height`, as text: a line per row, trailing
     /// spaces trimmed, styling dropped -- what the headless goldens pin.
     [[nodiscard]] std::string render_text(int width, int height);

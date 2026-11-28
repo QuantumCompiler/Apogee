@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 1 maintenance item can be picked up any time: the CLI's M62 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53, M54, M55, M56, M57, M58 and M59 shipped 2026-11-27, M60 and M61 shipped 2026-11-28, M62 specced 2026-11-27); the Apple apps have none. It waits on no other maintenance item, and on no decision from you.
+Outside the release, no maintenance item is waiting: the last, the CLI's M62, shipped 2026-11-28 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53, M54, M55, M56, M57, M58 and M59 shipped 2026-11-27, M62 specced 2026-11-27, M60, M61 and M62 shipped 2026-11-28); the Apple apps have none.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M62).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); no maintenance item is left.
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -54,7 +54,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M62 | [A [y/N] question in the shell waits for a key, never a redraw](cli/maintenance/a-shell-question-waits-for-a-key.md) | — |
 
 ## Later releases
 

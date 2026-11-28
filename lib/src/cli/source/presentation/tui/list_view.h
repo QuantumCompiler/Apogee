@@ -38,8 +38,9 @@ struct ListAction {
     std::string label;
     /// Whether it applies to `row`; null: every row.
     std::function<bool(const ListRow&)> applies{};
-    /// The question asked first, answered `y` or anything else, no; null
-    /// runs it at once.
+    /// The question asked first, answered by a key -- `y` or `Y`, or any
+    /// other key, no -- and left open by a redraw (CLI-M62); null runs it at
+    /// once.
     std::function<std::string(const ListRow&)> confirm{};
     /// Runs it, on the view's worker thread, and returns what to say -- a
     /// line on the notice row, or several, drawn whole under the table until
@@ -67,9 +68,9 @@ struct ListAsk {
     /// What the input row opens with when nothing was asked on this key yet
     /// (37f: a command's own words, `run `, for its arguments); null, empty.
     std::function<std::string(const ListRow& row)> prefill{};
-    /// The question put before it is asked, answered `y` or anything else,
-    /// no (37e: a task's goal and its policy, before the run spends model
-    /// turns); null asks at once.
+    /// The question put before it is asked, answered as an action's is (37e:
+    /// a task's goal and its policy, before the run spends model turns);
+    /// null asks at once.
     std::function<std::string(const ListRow& row, const std::string& text)> confirm{};
     /// The question is about the selected row (the collection searched, the
     /// graph a node is in): offered only with one.
