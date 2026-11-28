@@ -7,6 +7,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "contracts/types.h"
@@ -22,6 +23,7 @@ namespace {
 using apogee::harness::ChatMessage;
 using apogee::training::chat_line;
 using apogee::training::CreateSource;
+using apogee::training::dataset_create_error;
 using apogee::training::dataset_read_error;
 using apogee::training::dataset_write_error;
 using apogee::training::DatasetInfo;
@@ -93,6 +95,98 @@ TEST_CASE("the write rule is today's, said before anything is written",
     CHECK_FALSE(dataset_write_error("../x").empty());
     CHECK_FALSE(dataset_write_error(".hidden").empty());
     CHECK_FALSE(dataset_write_error(std::string(129, 'a')).empty());
+}
+
+TEST_CASE("a new dataset name is one every verb reads as a name: the create rule's table",
+          "[training][datasets][M56]") {
+    // CLI-M56: one `.jsonl` dropped, as `write` drops it, then the read
+    // rule (its own words), the first character, the character set and
+    // cap, the Windows device names, the eval-suite slot and a `.jsonl`
+    // left over -- each refusal `'<n>' is not a dataset name: ` and the
+    // clause it breaks.
+    const auto said = [](const std::string& name, const std::string& clause) {
+        return "'" + name + "' is not a dataset name: " + clause;
+    };
+    const std::string dash = "it starts with '-', which every verb reads as an option";
+    CHECK(dataset_create_error("-h") == said("-h", dash));
+    CHECK(dataset_create_error("-h.jsonl") == said("-h.jsonl", dash));
+    CHECK(dataset_create_error(".x") == said(".x", "it starts with '.'"));
+    for (const std::string name : {"con", "CON", "Lpt1", "lpt9"}) {
+        INFO(name);
+        CHECK(dataset_create_error(name) ==
+              said(name, "'" + name +
+                             "' is a Windows device name, which Windows does not keep as a file"));
+    }
+    for (const auto& [name, part] : {std::pair{"Con.txt", "Con"}, std::pair{"com1.x", "com1"},
+                                     std::pair{"nul.jsonl", "nul"}}) {
+        INFO(name);
+        CHECK(dataset_create_error(name) ==
+              said(name, std::string{"'"} + part +
+                             "' is a Windows device name, which Windows does not keep as a file"));
+    }
+    const std::string slot =
+        "'x.eval.jsonl' is the eval-suite slot 'train eval --suite x' reads, which 'datasets "
+        "prepare --as-eval' fills";
+    CHECK(dataset_create_error("x.eval") == said("x.eval", slot));
+    CHECK(dataset_create_error("x.eval.jsonl") == said("x.eval.jsonl", slot));
+    CHECK(dataset_create_error("x.EVAL") ==
+          said("x.EVAL",
+               "'x.EVAL.jsonl' is the eval-suite slot 'train eval --suite x' reads, which "
+               "'datasets prepare --as-eval' fills"));
+    CHECK(dataset_create_error("x.EVAL.jsonl").find("eval-suite slot") != std::string::npos);
+    CHECK(dataset_create_error("x.jsonl.jsonl") ==
+          said("x.jsonl.jsonl", "one '.jsonl' is dropped, and 'x.jsonl' would be the dataset 'x'"));
+    const std::string charset = "letters, digits, '-', '_' and '.', at most 128 bytes";
+    for (const std::string& name : {std::string{"my set"}, std::string{"café"}, std::string{"a\tb"},
+                                    std::string{"a\x01"
+                                                "b"},
+                                    std::string(129, 'a')}) {
+        INFO(name);
+        CHECK(dataset_create_error(name) == said(name, charset));
+    }
+
+    // CLI-M55's read-rule refusals keep M55's words.
+    for (const std::string name : {"", "..", "a/b", "a\\b", "../x", "/abs/x"}) {
+        INFO(name);
+        CHECK(dataset_create_error(name) == dataset_read_error(name));
+        CHECK_FALSE(dataset_create_error(name).empty());
+    }
+
+    // Accepted: names that only look like the refused ones, one `.jsonl`
+    // dropped, and today's plain names up to the cap.
+    for (const std::string& name :
+         {std::string{"com10"}, std::string{"console"}, std::string{"lpt"}, std::string{"x.jsonl"},
+          std::string{"a..b"}, std::string{"my-set_1.v2"}, std::string{"eval"},
+          std::string{"x.evals"}, std::string(128, 'a'), std::string(128, 'a') + ".jsonl"}) {
+        INFO(name);
+        CHECK(dataset_create_error(name).empty());
+    }
+    // None of the refusals reads as a conflict, which HTTP maps to 409.
+    for (const std::string name : {"-h", "CON", "x.eval", "x.jsonl.jsonl", "my set"}) {
+        CHECK(dataset_create_error(name).find("already exists") == std::string::npos);
+    }
+}
+
+TEST_CASE("the store's write keeps today's floor, so a regime's work folder takes any kit name",
+          "[training][datasets][store][M56]") {
+    // Guard: the create rule runs at the doors that name a new dataset in
+    // `training/datasets/`, never inside `write`, whose other caller is a
+    // regime writing `<kit name>.jsonl` into its own work folder.
+    const apogee::testing::TempDir root{"datasets-m56-" + std::to_string(std::random_device{}())};
+    const DatasetStore store{root.path() / "work"};
+    std::vector<std::string> kits{"-x", "x.eval"};
+#ifndef _WIN32
+    // Windows keeps no file named `CON`, which is why new datasets are
+    // refused it; elsewhere the floor takes it as before.
+    kits.emplace_back("CON");
+#endif
+    for (const std::string& name : kits) {
+        INFO(name);
+        std::filesystem::path written;
+        CHECK(store.write(name, {chat_line("q", "a")}, false, &written).empty());
+        CHECK(written == root.path() / "work" / (name + ".jsonl"));
+    }
+    CHECK_FALSE(store.write("my set", {}, false).empty());
 }
 
 TEST_CASE("the store's readers never join a refused name to the folder",

@@ -20,14 +20,7 @@ bool name_leaves_folder(std::string_view name) {
     return std::filesystem::path{std::string{name}}.has_root_name();
 }
 
-namespace {
-
-/// The config's add rule as a collection's words: `/` is the read rule's.
-constexpr std::string_view kNewNameRule =
-    "a name is letters, digits, '_', '-' and '.', first neither '-' nor '.', and not null";
-
-/// Whether `name`, before any `.`, is a name Windows keeps for a device.
-[[nodiscard]] bool device_name(std::string_view name) {
+bool windows_device_name(std::string_view name) {
     std::string stem{name.substr(0, name.find('.'))};
     std::ranges::transform(stem, stem.begin(), [](char c) {
         return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
@@ -39,6 +32,12 @@ constexpr std::string_view kNewNameRule =
     return stem.size() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) &&
            stem[3] >= '1' && stem[3] <= '9';
 }
+
+namespace {
+
+/// The config's add rule as a collection's words: `/` is the read rule's.
+constexpr std::string_view kNewNameRule =
+    "a name is letters, digits, '_', '-' and '.', first neither '-' nor '.', and not null";
 
 }  // namespace
 
@@ -78,7 +77,7 @@ std::string collection_create_error(std::string_view name,
         return "collection name " + quoted + " is " + std::to_string(name.size()) +
                " bytes -- a new name is at most " + std::to_string(kNewCollectionNameMax);
     }
-    if (device_name(name)) {
+    if (windows_device_name(name)) {
         return "collection name " + quoted +
                " is a device name on Windows -- a new name is none of con, prn, aux, nul, "
                "com1-com9 and lpt1-lpt9, before any '.'";

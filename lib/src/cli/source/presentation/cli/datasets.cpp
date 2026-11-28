@@ -294,6 +294,22 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
         if (!std::filesystem::exists(source, code)) {
             fail_user("no such file or directory: " + source.string());
         }
+        // The name the output takes from its source, judged by the create
+        // rule before the script or the environment is asked (CLI-M56): the
+        // stem is what is judged, so `x.jsonl.csv` is refused rather than
+        // written as `x.jsonl.jsonl`. An explicit `--out` is a path, never
+        // a dataset name, and is not judged.
+        std::string stem;
+        if (prep_out->empty()) {
+            stem = source.stem().string();
+            if (stem.empty()) {
+                stem = "dataset";
+            }
+            if (const std::string refused = training::dataset_create_error(stem + ".jsonl");
+                !refused.empty()) {
+                fail_user(refused + "; pass --out");
+            }
+        }
         const std::filesystem::path script = harness::training_scripts_dir() / "prepare_dataset.py";
         if (!std::filesystem::is_regular_file(script, code)) {
             fail_user("the shipped script is missing: " + script.string() + " -- run '" +
@@ -315,20 +331,10 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
                 harness::printed_program() + " train setup --with prepare'");
         }
 
-        std::filesystem::path out;
-        if (!prep_out->empty()) {
-            out = *prep_out;
-        } else {
-            std::string stem = source.stem().string();
-            if (stem.empty()) {
-                stem = "dataset";
-            }
-            if (!training::valid_dataset_name(stem)) {
-                fail_user("'" + stem + "' is not a dataset name; pass --out");
-            }
-            out =
-                harness::training_datasets_dir() / (stem + (*prep_eval ? ".eval.jsonl" : ".jsonl"));
-        }
+        const std::filesystem::path out =
+            !prep_out->empty() ? std::filesystem::path{*prep_out}
+                               : harness::training_datasets_dir() /
+                                     (stem + (*prep_eval ? ".eval.jsonl" : ".jsonl"));
         if (!*prep_force && std::filesystem::exists(out, code)) {
             fail_user("output already exists: " + out.string() + " (pass --force to overwrite it)");
         }
@@ -459,9 +465,10 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     synth->add_flag("-f,--force", *synth_force, "Overwrite an existing dataset");
     synth->callback([&context, synth_name, synth_teacher, synth_kit, synth_count, synth_topic,
                      synth_temperature, synth_max_tokens, synth_parallel, synth_force]() {
-        // The write rule first (CLI-M55): a name the writer will refuse is
-        // refused before the store, the kit or the teacher is asked.
-        if (const std::string refused = training::dataset_write_error(*synth_name);
+        // The create rule first (CLI-M55's order, CLI-M56's rule): a name
+        // some verb would misread is refused before the store, the kit or
+        // the teacher is asked, `--force` or not.
+        if (const std::string refused = training::dataset_create_error(*synth_name);
             !refused.empty()) {
             fail_user(refused);
         }

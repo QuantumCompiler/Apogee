@@ -3,12 +3,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cli/registry.h"
@@ -47,6 +50,28 @@ std::string bytes(const std::filesystem::path& path) {
     std::ostringstream out;
     out << in.rdbuf();
     return out.str();
+}
+
+/// Every entry's name in `folder`, sorted: a refusal that wrote nothing
+/// leaves it as it was, temporary files included.
+std::vector<std::string> entries(const std::filesystem::path& folder) {
+    std::vector<std::string> names;
+    std::error_code code;
+    for (const auto& entry : std::filesystem::directory_iterator(folder, code)) {
+        names.push_back(entry.path().filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+/// The last line `err` holds, without its newline.
+std::string last_line(const std::string& err) {
+    std::string text = err;
+    while (!text.empty() && text.back() == '\n') {
+        text.pop_back();
+    }
+    const std::size_t start = text.rfind('\n');
+    return start == std::string::npos ? text : text.substr(start + 1);
 }
 
 std::string script_of(std::string_view text, bool metered = false) {
@@ -205,19 +230,20 @@ TEST_CASE("datasets create --from sessions mines completed exchanges with the fi
     CHECK_FALSE(std::filesystem::exists(fixture.dataset("bad")));
 }
 
-TEST_CASE("datasets synth's next step keeps a dash-led name as the option value it is",
-          "[commands][datasets][synth][M48]") {
-    // CLI-M48: `--dataset -x` parses whole, so the hint names it bare, by
-    // the one renderer -- and a plain name's line is today's bytes.
+TEST_CASE("datasets synth's next step is rendered, and a dash-led name is never made",
+          "[commands][datasets][synth][M48][M56]") {
+    // CLI-M48 rendered the hint, so `--dataset -x` would parse whole (the
+    // renderer's own table holds a dash-led option value bare); since
+    // CLI-M56 synth refuses `-x` before the teacher, so a plain name's line,
+    // today's bytes, is the one this verb prints.
     const Fixture fixture;
     std::string out;
     std::string err;
-    REQUIRE(fixture.run({"datasets", "synth", "--teacher", "teacher", "--kit", "reasoning",
-                         "--count", "1", "--", "-x"},
-                        &out, &err) == 0);
-    INFO(err);
-    CHECK(out.find("Train on it with:  apogee train run <snapshot> --dataset -x\n") !=
-          std::string::npos);
+    CHECK(fixture.run({"datasets", "synth", "--teacher", "teacher", "--kit", "reasoning", "--count",
+                       "1", "--", "-x"},
+                      &out, &err) == 1);
+    CHECK(out.empty());
+    CHECK_FALSE(std::filesystem::exists(fixture.dataset("-x")));
     REQUIRE(fixture.run({"datasets", "synth", "plain", "--teacher", "teacher", "--kit", "reasoning",
                          "--count", "1"},
                         &out, &err) == 0);
@@ -410,7 +436,7 @@ TEST_CASE("every listed dataset reads and deletes by its listed name",
     CHECK(std::filesystem::exists(fixture.dataset("ok")));
 }
 
-TEST_CASE("datasets synth asks the write rule before the existence check, the kit and the teacher",
+TEST_CASE("datasets synth asks the create rule before the existence check, the kit and the teacher",
           "[commands][datasets][synth][M55]") {
     // `prose` yields nothing usable, so a teacher that ran ends `no usable
     // examples`; refused first, the teacher is never called.
@@ -422,20 +448,208 @@ TEST_CASE("datasets synth asks the write rule before the existence check, the ki
                       &out, &err) == 1);
     CHECK(err ==
           "apogee datasets: 'my set' is not a dataset name: letters, digits, '-', '_' and '.', "
-          "not starting with a dot\n");
+          "at most 128 bytes\n");
     CHECK(err.find("[synth] teacher") == std::string::npos);
     CHECK_FALSE(std::filesystem::exists(fixture.dataset("my set")));
 
     // An existing file reached by a climb (the home's own `outside.jsonl`)
     // is never "already exists": the name is refused before the store is
-    // asked.
+    // asked -- in the read rule's words, which the create rule keeps
+    // (CLI-M56).
     write(fixture.home.path() / "outside.jsonl", "{}\n");
     CHECK(fixture.run(
               {"datasets", "synth", "--teacher", "prose", "--kit", "nokit", "--", "../../outside"},
               &out, &err) == 1);
-    CHECK(err.find("is not a dataset name:") != std::string::npos);
+    CHECK(err ==
+          "apogee datasets: '../../outside' is not a dataset name -- a name, never a "
+          "path\n");
     CHECK(err.find("already exists") == std::string::npos);
     CHECK(err.find("no kit named") == std::string::npos);
+}
+
+TEST_CASE("a new dataset name some verb would misread is refused at create, and nothing is written",
+          "[commands][datasets][create][M56]") {
+    // CLI-M56's bug as a fixture: each of these exited 0 and wrote
+    // `<n>.jsonl` -- `-h` a name every verb reads as its help flag, `CON` a
+    // Windows device, `x.eval` the eval-suite slot, `x.jsonl.jsonl` the
+    // dataset `x`.
+    const Fixture fixture;
+    const std::filesystem::path folder = fixture.home.path() / "training" / "datasets";
+    std::filesystem::create_directories(folder);
+    const std::string dash = "it starts with '-', which every verb reads as an option";
+    const std::string device = "is a Windows device name";
+    const std::string slot = "is the eval-suite slot 'train eval --suite x' reads";
+    const std::string doubled = "one '.jsonl' is dropped, and 'x.jsonl' would be the dataset 'x'";
+    const std::vector<std::pair<std::string, std::string>> refused{
+        {"-h", dash},
+        {"CON", device},
+        {"con", device},
+        {"con.txt", device},
+        {"Lpt1", device},
+        {"x.eval", slot},
+        {"x.EVAL", "is the eval-suite slot"},
+        {"x.jsonl.jsonl", doubled}};
+    const auto refuses = [&fixture, &folder](const std::string& name, const std::string& clause,
+                                             const std::vector<std::string>& extra = {}) {
+        INFO(name);
+        const std::vector<std::string> before = entries(folder);
+        std::string out;
+        std::string err;
+        std::vector<std::string> line{"datasets", "create", "--from", "empty"};
+        line.insert(line.end(), extra.begin(), extra.end());
+        line.insert(line.end(), {"--", name});
+        CHECK(fixture.run(line, &out, &err) == 1);
+        const std::string said = last_line(err);
+        CHECK(said.starts_with("apogee datasets: '" + name + "' is not a dataset name: "));
+        CHECK(said.find(clause) != std::string::npos);
+        CHECK(said.find("already exists") == std::string::npos);
+        CHECK(out.empty());
+        CHECK(entries(folder) == before);
+    };
+    for (const auto& [name, clause] : refused) {
+        refuses(name, clause);
+    }
+    // `x.jsonl.jsonl` names the dataset `x`, whether or not it exists: with
+    // `x` present, refused in the rule's words, not "already exists", and
+    // `x.jsonl` untouched, `--force` or not.
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"datasets", "create", "x"}, &out, &err) == 0);
+    const std::string kept = bytes(fixture.dataset("x"));
+    refuses("x.jsonl.jsonl", doubled);
+    refuses("x.jsonl.jsonl", doubled, {"--force"});
+    CHECK(bytes(fixture.dataset("x")) == kept);
+
+    // The rule binds `--force` over a file whose name it refuses: the file
+    // is left as it was, and `datasets delete --yes -- -h` is the way out.
+    write(fixture.dataset("-h"), chat_line("q", "a") + "\n");
+    refuses("-h", dash, {"--force"});
+    CHECK(bytes(fixture.dataset("-h")) == chat_line("q", "a") + "\n");
+
+    // No new `x` is offered as an eval suite (a hand-placed one is: the
+    // completion reads the folder).
+    REQUIRE(fixture.run({"__complete", "train", "eval", "--suite", ""}, &out, &err) == 0);
+    CHECK(("\n" + out).find("\nx\n") == std::string::npos);
+    write(folder / "y.eval.jsonl", "{\"prompt\": \"p\", \"expected\": \"e\"}\n");
+    REQUIRE(fixture.run({"__complete", "train", "eval", "--suite", ""}, &out, &err) == 0);
+    CHECK(("\n" + out).find("\ny\n") != std::string::npos);
+}
+
+TEST_CASE("the names today's rule takes still create, and every existing odd name still reads",
+          "[commands][datasets][create][M56]") {
+    // Guards: what created before still creates, a 129-byte name is refused
+    // as before, and a dataset already on disk keeps reading and deleting
+    // through CLI-M55's read rule, whatever the create rule says of its name.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    for (const std::string& name :
+         {std::string{"a..b"}, std::string(128, 'a'), std::string{"my-set_1.v2"}}) {
+        INFO(name);
+        CHECK(fixture.run({"datasets", "create", "--from", "empty", "--", name}, &out, &err) == 0);
+        CHECK(std::filesystem::exists(fixture.dataset(name)));
+    }
+    // One `.jsonl` is dropped: `x.jsonl` is the dataset `x`, as today.
+    CHECK(fixture.run({"datasets", "create", "--from", "empty", "x.jsonl"}, &out, &err) == 0);
+    CHECK(std::filesystem::exists(fixture.dataset("x")));
+    CHECK(fixture.run({"datasets", "create", "--from", "empty", std::string(129, 'a')}, &out,
+                      &err) == 1);
+    CHECK(last_line(err).find("at most 128 bytes") != std::string::npos);
+    // `--force` over a plain name still overwrites.
+    REQUIRE(fixture.run({"datasets", "create", "starter"}, &out, &err) == 0);
+    REQUIRE(fixture.run({"datasets", "create", "--force", "--from", "empty", "starter"}, &out,
+                        &err) == 0);
+    CHECK(bytes(fixture.dataset("starter")).empty());
+
+    std::vector<std::string> existing{"-h", "x.eval"};
+#ifndef _WIN32
+    // Windows keeps no file named `CON`, which is why new ones are refused.
+    existing.emplace_back("CON");
+#endif
+    for (const std::string& name : existing) {
+        INFO(name);
+        write(fixture.dataset(name), chat_line("q", "a") + "\n");
+        CHECK(fixture.run({"datasets", "info", "--", name}, &out, &err) == 0);
+        CHECK(out.find("lines:  1") != std::string::npos);
+        CHECK(fixture.run({"datasets", "delete", "--yes", "--", name}, &out, &err) == 0);
+        CHECK_FALSE(std::filesystem::exists(fixture.dataset(name)));
+    }
+}
+
+TEST_CASE("datasets synth refuses a name some verb would misread before the kit and the teacher",
+          "[commands][datasets][synth][M56]") {
+    // Today `synth -- -h` called the teacher once, wrote `-h.jsonl` and
+    // printed its next step. The create rule is synth's first check, so the
+    // refusal costs nothing: no `[synth]` line, nothing written.
+    const Fixture fixture;
+    const std::filesystem::path folder = fixture.home.path() / "training" / "datasets";
+    std::filesystem::create_directories(folder);
+    const std::vector<std::string> before = entries(folder);
+    for (const std::string name : {"-h", "CON", "x.eval", "x.jsonl.jsonl"}) {
+        INFO(name);
+        std::string out;
+        std::string err;
+        CHECK(fixture.run({"datasets", "synth", "--teacher", "teacher", "--kit", "reasoning",
+                           "--count", "1", "--", name},
+                          &out, &err) == 1);
+        CHECK(err == "apogee datasets: " + apogee::training::dataset_create_error(name) + "\n");
+        CHECK(err.find("[synth]") == std::string::npos);
+        CHECK(out.empty());
+        CHECK(entries(folder) == before);
+    }
+    // `--force` over an existing `-h.jsonl` is refused too, its bytes kept.
+    write(fixture.dataset("-h"), "{}\n");
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"datasets", "synth", "--force", "--teacher", "teacher", "--kit", "reasoning",
+                       "--count", "1", "--", "-h"},
+                      &out, &err) == 1);
+    CHECK(err.find("it starts with '-'") != std::string::npos);
+    CHECK(bytes(fixture.dataset("-h")) == "{}\n");
+}
+
+TEST_CASE("datasets prepare judges the name it derives before the environment, never an --out",
+          "[commands][datasets][prepare][M56]") {
+    // The fixture has no Python environment, so a name judged after it
+    // would be refused as `train setup` first: these refuse before it, in
+    // the create rule's words and `pass --out`.
+    const Fixture fixture;
+    const std::filesystem::path folder = fixture.home.path() / "training" / "datasets";
+    std::filesystem::create_directories(folder);
+    const std::vector<std::string> before = entries(folder);
+    std::vector<std::pair<std::string, std::string>> sources{
+        {"-h.csv", "'-h.jsonl' is not a dataset name: it starts with '-'"},
+        {"x.eval.csv", "'x.eval.jsonl' is the eval-suite slot"},
+        {"x.jsonl.csv", "'x.jsonl' would be the dataset 'x'"}};
+#ifndef _WIN32
+    // A source named `CON.csv` exists only off Windows.
+    sources.emplace_back("CON.csv", "'CON' is a Windows device name");
+#endif
+    for (const auto& [file, clause] : sources) {
+        INFO(file);
+        const std::filesystem::path source = fixture.home.path() / "raw" / file;
+        write(source, "prompt,completion\np,c\n");
+        std::string out;
+        std::string err;
+        CHECK(fixture.run({"datasets", "prepare", source.string()}, &out, &err) == 1);
+        const std::string said = last_line(err);
+        CHECK(said.starts_with("apogee datasets: '"));
+        CHECK(said.find(clause) != std::string::npos);
+        CHECK(said.ends_with("; pass --out"));
+        CHECK(err.find("train setup") == std::string::npos);
+        CHECK(err.find("never touching the system Python") == std::string::npos);
+        CHECK(entries(folder) == before);
+    }
+    // An explicit `--out` is a path, never judged by the rule: the run goes
+    // on to the environment's refusal.
+    const std::filesystem::path source = fixture.home.path() / "raw" / "-h.csv";
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"datasets", "prepare", source.string(), "--out",
+                       (fixture.home.path() / "-h.jsonl").string()},
+                      &out, &err) == 1);
+    CHECK(err.find("apogee train setup") != std::string::npos);
+    CHECK(err.find("is not a dataset name") == std::string::npos);
 }
 
 TEST_CASE("datasets prepare refuses on a pipe until the environment exists, naming the command",

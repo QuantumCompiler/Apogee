@@ -38,8 +38,9 @@ struct DatasetCreateResult {
     int skipped = 0;
 };
 
-/// Creates the dataset in `store`. Throws std::runtime_error on a refusal
-/// (a bad name, an existing dataset without force, a bad date).
+/// Creates the dataset in `store`. Throws std::runtime_error on a refusal:
+/// a name the create rule refuses (`training::dataset_create_error`, asked
+/// first, CLI-M56), a bad date, an existing dataset without force.
 [[nodiscard]] DatasetCreateResult create_dataset(const training::DatasetStore& store,
                                                  const DatasetCreateRequest& request);
 

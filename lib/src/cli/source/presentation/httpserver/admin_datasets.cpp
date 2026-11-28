@@ -23,12 +23,6 @@ constexpr std::string_view kSynthJobKind = "datasets-synth";
 constexpr std::string_view kConfigError = "config_error";
 constexpr int kNotImplemented = 501;
 
-/// The write rule, for the routes that name a new dataset (POST create and
-/// synth). GET and DELETE read, so they take the read rule (CLI-M55).
-[[nodiscard]] bool plain_name(std::string_view name) {
-    return training::valid_dataset_name(name);
-}
-
 [[nodiscard]] std::optional<harness::Config> load_now(const AdminConfigContext& context,
                                                       HttpResponse& failure) {
     try {
@@ -130,8 +124,11 @@ HttpResponse admin_create_dataset(const AdminConfigContext& /*context*/,
     if (create.name.empty()) {
         return error_response(400, "name is required");
     }
-    if (!plain_name(create.name)) {
-        return error_response(400, "'" + create.name + "' is not a dataset name");
+    // The routes that name a new dataset take the create rule, in the CLI's
+    // words after its prefix (CLI-M56); GET and DELETE read, so they take
+    // the read rule (CLI-M55).
+    if (const std::string refused = training::dataset_create_error(create.name); !refused.empty()) {
+        return error_response(400, refused);
     }
     const std::optional<training::CreateSource> source = training::create_source_from_string(from);
     if (!source.has_value()) {
@@ -227,8 +224,8 @@ HttpResponse admin_synth_dataset(const AdminConfigContext& context, Handler& pla
     if (name.empty() || teacher.empty() || kit_name.empty()) {
         return error_response(400, "name, teacher and kit are required");
     }
-    if (!plain_name(name)) {
-        return error_response(400, "'" + name + "' is not a dataset name");
+    if (const std::string refused = training::dataset_create_error(name); !refused.empty()) {
+        return error_response(400, refused);
     }
     if (plane.options().served.empty()) {
         return error_response(kNotImplemented,

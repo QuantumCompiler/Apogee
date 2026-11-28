@@ -6,7 +6,8 @@
 # naming `apogee train setup`, `train setup` creating the environment from
 # the host's python3 (installing nothing), `check` reporting it, and
 # `prepare` converting a JSONL file through the SEEDED script under the
-# environment's interpreter -- then list, info, delete.
+# environment's interpreter, and `--as-eval` filling the suite slot -- then
+# list, info, delete; and a new name some verb would misread (`-h`) refused.
 #
 # POSIX only, like the other shell checks. Exits 77 (ctest's skip code)
 # when the host has no python3: the environment cannot be created without
@@ -50,6 +51,16 @@ grep -q "tool-use" "$WORK_DIR/kits.txt" && fail "the deferred tool kit was liste
 "$APOGEE_BIN" datasets create starter >/dev/null || fail "datasets create"
 [ "$(wc -l < "$DATASETS/starter.jsonl" | tr -d ' ')" = "2" ] || fail "template lines"
 
+# A new name some verb would misread is refused, its words the last stderr
+# line, and nothing is written (CLI-M56).
+if "$APOGEE_BIN" datasets create --from empty -- -h </dev/null >"$WORK_DIR/dash.out" 2>"$WORK_DIR/dash.err"; then
+    fail "a dash-led dataset name was created"
+fi
+[ "$(tail -n 1 "$WORK_DIR/dash.err")" = "apogee datasets: '-h' is not a dataset name: it starts with '-', which every verb reads as an option" ] \
+    || fail "dash refusal wording: $(cat "$WORK_DIR/dash.err")"
+[ ! -s "$WORK_DIR/dash.out" ] || fail "a refused create printed on stdout: $(cat "$WORK_DIR/dash.out")"
+[ ! -f "$DATASETS/-h.jsonl" ] || fail "a refused create wrote -h.jsonl"
+
 "$APOGEE_BIN" datasets synth maths --teacher teacher --kit reasoning --count 2 </dev/null >"$WORK_DIR/synth.txt" 2>&1 || fail "synth: $(cat "$WORK_DIR/synth.txt")"
 grep -q "2 example(s)" "$WORK_DIR/synth.txt" || fail "synth count: $(cat "$WORK_DIR/synth.txt")"
 grep -q '"role":"user","content":"What is 15% of 240?"' "$DATASETS/maths.jsonl" || fail "synth content: $(cat "$DATASETS/maths.jsonl")"
@@ -83,6 +94,10 @@ grep -q "ok   python env" "$WORK_DIR/check2.txt" || fail "check does not report 
 "$APOGEE_BIN" datasets prepare "$WORK_DIR/raw.jsonl" </dev/null >"$WORK_DIR/prepare.txt" 2>&1 || fail "prepare: $(cat "$WORK_DIR/prepare.txt")"
 grep -q "1 row(s) written" "$WORK_DIR/prepare.txt" || fail "prepare summary: $(cat "$WORK_DIR/prepare.txt")"
 grep -q '"role": "assistant", "content": "hello"' "$DATASETS/raw.jsonl" || fail "prepared content: $(cat "$DATASETS/raw.jsonl")"
+# `--as-eval` still fills the eval-suite slot the create rule keeps for it.
+cp "$WORK_DIR/raw.jsonl" "$WORK_DIR/suite.jsonl"
+"$APOGEE_BIN" datasets prepare --as-eval "$WORK_DIR/suite.jsonl" </dev/null >"$WORK_DIR/prepare-eval.txt" 2>&1 || fail "prepare --as-eval: $(cat "$WORK_DIR/prepare-eval.txt")"
+grep -q '"expected": "hello"' "$DATASETS/suite.eval.jsonl" || fail "prepared suite: $(cat "$DATASETS/suite.eval.jsonl" 2>&1)"
 
 # --- list, info, delete ------------------------------------------------------
 "$APOGEE_BIN" datasets list >"$WORK_DIR/list.txt" || fail "datasets list"

@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -134,7 +135,8 @@ struct Fixture {
         return home.path() / "training" / "datasets" / (std::string{name} + ".jsonl");
     }
 
-    int cli(const std::vector<std::string>& args, std::string* out = nullptr) const {
+    int cli(const std::vector<std::string>& args, std::string* out = nullptr,
+            std::string* err = nullptr) const {
         std::ostringstream captured_out;
         std::ostringstream captured_err;
         std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
@@ -151,6 +153,9 @@ struct Fixture {
         std::cerr.rdbuf(old_err);
         if (out != nullptr) {
             *out = captured_out.str();
+        }
+        if (err != nullptr) {
+            *err = captured_err.str();
         }
         return code;
     }
@@ -269,6 +274,66 @@ TEST_CASE("get and delete take every listed name, and refuse a path with the CLI
 
     // Guard: a new name is still the create rule's.
     CHECK(fixture.create({{"name", "my set"}, {"force", true}}).status == 400);
+}
+
+TEST_CASE("POST create and synth refuse a new name some verb would misread, in the CLI's words",
+          "[httpserver][admin][datasets][M56]") {
+    // CLI-M56: `{"name":"-h","from":"empty"}` answered 201 and wrote
+    // `-h.jsonl`. Now 400, `invalid_request_error`, the message exactly the
+    // CLI's line after `apogee datasets: `, nothing written and no job.
+    Fixture fixture;
+    const std::filesystem::path folder = fixture.home.path() / "training" / "datasets";
+    std::filesystem::create_directories(folder);
+    const auto listing = [&folder]() {
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(folder)) {
+            names.push_back(entry.path().filename().string());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+    const std::vector<std::string> before = listing();
+    for (const std::string name : {"-h", "CON", "x.eval", "x.EVAL", "x.jsonl.jsonl", "my set"}) {
+        INFO(name);
+        const std::string words = apogee::training::dataset_create_error(name);
+        REQUIRE_FALSE(words.empty());
+        for (const HttpResponse& refused :
+             {fixture.create({{"name", name}, {"from", "empty"}}),
+              fixture.create({{"name", name}, {"from", "empty"}, {"force", true}}),
+              fixture.synth({{"name", name}, {"teacher", "mock"}, {"kit", "reasoning"}}),
+              fixture.synth(
+                  {{"name", name}, {"teacher", "mock"}, {"kit", "reasoning"}, {"force", true}})}) {
+            CHECK(refused.status == 400);
+            CHECK(parsed(refused)["error"]["message"] == words);
+            CHECK(parsed(refused)["error"]["type"] == "invalid_request_error");
+        }
+        CHECK(listing() == before);
+    }
+    CHECK(fixture.jobs.list().empty());
+
+    // The CLI says the same words after its prefix.
+    std::string cli_out;
+    std::string cli_err;
+    CHECK(fixture.cli({"datasets", "create", "--from", "empty", "--", "-h"}, &cli_out, &cli_err) ==
+          1);
+    CHECK(cli_err == "apogee datasets: " + apogee::training::dataset_create_error("-h") + "\n");
+
+    // Guards: a name created before still creates, and an existing odd name
+    // still reads and deletes over HTTP (CLI-M55's read rule).
+    CHECK(fixture.create({{"name", "a..b"}, {"from", "empty"}}).status == 201);
+    CHECK(fixture.create({{"name", "x.jsonl"}, {"from", "empty"}}).status == 201);
+    CHECK(std::filesystem::exists(fixture.dataset("x")));
+    std::vector<std::string> existing{"-h", "x.eval"};
+#ifndef _WIN32
+    existing.emplace_back("CON");
+#endif
+    for (const std::string& name : existing) {
+        INFO(name);
+        std::ofstream{fixture.dataset(name), std::ios::binary} << chat_line("q", "a") << "\n";
+        CHECK(apogee::httpserver::admin_get_dataset(fixture.context(), name).status == 200);
+        CHECK(apogee::httpserver::admin_delete_dataset(fixture.context(), name).status == 200);
+        CHECK_FALSE(std::filesystem::exists(fixture.dataset(name)));
+    }
 }
 
 TEST_CASE("the kits route lists the seeded kits", "[httpserver][admin][datasets][kits]") {

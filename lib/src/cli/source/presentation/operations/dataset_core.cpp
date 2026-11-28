@@ -34,6 +34,13 @@ LoadedSessions load_session_views() {
 
 DatasetCreateResult create_dataset(const training::DatasetStore& store,
                                    const DatasetCreateRequest& request) {
+    // The create rule before any work (CLI-M56): no session is mined, and
+    // nothing is written, for a name some verb would misread -- `--force`
+    // over such a file included.
+    if (const std::string refused = training::dataset_create_error(request.name);
+        !refused.empty()) {
+        throw std::runtime_error(refused);
+    }
     DatasetCreateResult result;
     std::vector<std::string> lines;
     if (!request.lines.empty()) {

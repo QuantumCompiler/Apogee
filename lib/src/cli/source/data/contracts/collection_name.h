@@ -41,6 +41,14 @@ struct Config;
 /// (`training::dataset_read_error`, CLI-M55).
 [[nodiscard]] bool name_leaves_folder(std::string_view name);
 
+/// Whether `name`, before its first `.`, is a name Windows keeps for a
+/// device -- `con`, `prn`, `aux`, `nul`, `com1`-`com9` or `lpt1`-`lpt9`,
+/// case-folded -- so a file of that name cannot exist in a Windows home.
+/// One list for every create rule: a new collection's (CLI-M46) and a new
+/// dataset's (`training::dataset_create_error`, CLI-M56) both ask it, on
+/// every platform, so a home moves between platforms whole.
+[[nodiscard]] bool windows_device_name(std::string_view name);
+
 /// Why `name` cannot name a collection to read, in the words every reader
 /// says; empty when it can.
 [[nodiscard]] std::string collection_read_error(std::string_view name);

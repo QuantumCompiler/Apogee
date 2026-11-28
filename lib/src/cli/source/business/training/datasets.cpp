@@ -75,6 +75,46 @@ std::string dataset_write_error(std::string_view name) {
     return {};
 }
 
+std::string dataset_create_error(std::string_view name) {
+    if (std::string refused = dataset_read_error(name); !refused.empty()) {
+        return refused;
+    }
+    const std::string_view bare = without_extension(name);
+    const auto refuse = [name](std::string_view clause) {
+        return "'" + std::string{name} + "' is not a dataset name: " + std::string{clause};
+    };
+    if (bare.front() == '-') {
+        return refuse("it starts with '-', which every verb reads as an option");
+    }
+    if (bare.front() == '.') {
+        return refuse("it starts with '.'");
+    }
+    if (!valid_dataset_name(bare)) {
+        return refuse("letters, digits, '-', '_' and '.', at most 128 bytes");
+    }
+    if (harness::windows_device_name(bare)) {
+        return refuse("'" + std::string{bare.substr(0, bare.find('.'))} +
+                      "' is a Windows device name, which Windows does not keep as a file");
+    }
+    constexpr std::string_view kEval = ".eval";
+    if (bare.size() > kEval.size()) {
+        std::string ending{bare.substr(bare.size() - kEval.size())};
+        std::ranges::transform(ending, ending.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (ending == kEval) {
+            const std::string_view suite = bare.substr(0, bare.size() - kEval.size());
+            return refuse("'" + std::string{bare} + ".jsonl' is the eval-suite slot 'train eval " +
+                          "--suite " + std::string{suite} +
+                          "' reads, which 'datasets prepare --as-eval' fills");
+        }
+    }
+    if (const std::string_view again = without_extension(bare); again.size() != bare.size()) {
+        return refuse("one '.jsonl' is dropped, and '" + std::string{bare} +
+                      "' would be the dataset '" + std::string{again} + "'");
+    }
+    return {};
+}
+
 std::string dataset_shape(const std::filesystem::path& path, int& lines) {
     lines = 0;
     std::ifstream in{path, std::ios::binary};

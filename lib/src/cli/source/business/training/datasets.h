@@ -34,7 +34,9 @@ struct DatasetInfo {
     std::string shape;
 };
 
-/// Letters, digits, `-`, `_` and `.`, not starting with a dot, at most 128.
+/// Letters, digits, `-`, `_` and `.`, not starting with a dot, at most 128
+/// bytes: the character-set half of the create rule, and the floor `write`
+/// keeps for every caller (CLI-M56). No reader asks it.
 [[nodiscard]] bool valid_dataset_name(std::string_view name) noexcept;
 
 /// **A dataset is named, not pathed** (CLI-M55): why `name` cannot name a
@@ -49,10 +51,30 @@ struct DatasetInfo {
 /// so no reader joins a refused name to the folder.
 [[nodiscard]] std::string dataset_read_error(std::string_view name);
 
-/// Why `name` cannot name a dataset to write, or empty when it can: the
-/// check `write` runs (`valid_dataset_name` after one `.jsonl` is dropped),
-/// in its words, which synth asks before anything else (CLI-M55).
+/// Why `write` refuses `name`, or empty: its floor, `valid_dataset_name`
+/// after one `.jsonl` is dropped, in today's words. Narrower than the read
+/// rule and wider than the create rule, so a regime's work folder, which
+/// `write` also fills with `<kit name>.jsonl` and reads by path, takes a kit
+/// named `-x` as before (CLI-M56).
 [[nodiscard]] std::string dataset_write_error(std::string_view name);
+
+/// **A new dataset name is one every verb reads as a name** (CLI-M56): why
+/// `name` cannot name a NEW dataset in `training/datasets/`, or empty when
+/// it can. One trailing `.jsonl` is dropped, as `write` drops it, and what
+/// is left is judged in order: the read rule (in its own words); the first
+/// character neither `-` (every verb reads it as an option) nor `.`; the
+/// character set and the 128-byte cap (`valid_dataset_name`); no Windows
+/// device name (`harness::windows_device_name`, the list CLI-M46's
+/// collection rule asks); no `.eval` ending, case-folded (the eval-suite
+/// slot `train eval --suite` reads and `datasets prepare --as-eval`
+/// fills); and no `.jsonl` left over, which would be another dataset.
+/// Every other refusal is `'<name>' is not a dataset name: ` and the clause
+/// the name breaks, and no clause says `already exists`, which HTTP answers
+/// with a 409. Asked by every door that names a new dataset, before any other
+/// work -- `create_dataset` (both create doors), synth's first check on the
+/// CLI and over HTTP, and `prepare`'s derived name -- and by no reader, so
+/// every dataset already on disk keeps reading whatever its name.
+[[nodiscard]] std::string dataset_create_error(std::string_view name);
 
 /// The shape of a JSONL file's lines, and their count.
 [[nodiscard]] std::string dataset_shape(const std::filesystem::path& path, int& lines);

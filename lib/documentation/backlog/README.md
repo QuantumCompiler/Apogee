@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 7 maintenance items can be picked up any time: the CLI's M56–M62 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53, M54 and M55 shipped 2026-11-27, M62 specced 2026-11-27); the Apple apps have none. One waits on another maintenance item: the CLI's M60 on M58. None of the 7 waits on a decision from you.
+Outside the release, 6 maintenance items can be picked up any time: the CLI's M57–M62 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53, M54, M55 and M56 shipped 2026-11-27, M62 specced 2026-11-27); the Apple apps have none. One waits on another maintenance item: the CLI's M60 on M58. None of the 6 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M56–M59, M61 and M62).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M57–M59, M61 and M62).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -54,7 +54,6 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 
 | Product | # | Item | Waits on |
 |---|---|---|---|
-| CLI | M56 | [A new dataset name is one every verb reads as a name](cli/maintenance/a-new-dataset-name-is-one-every-verb-reads.md) | — |
 | CLI | M57 | [A saved chat names only its own files](cli/maintenance/a-saved-chat-names-only-its-own-files.md) | — |
 | CLI | M58 | [A run's notes are said once, on stderr, as `apogee <verb>: …`](cli/maintenance/a-runs-notes-are-said-once-on-stderr.md) | — |
 | CLI | M59 | [The HTTP graph jobs say what the CLI says, and build a mixed graph's code as the CLI does](cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) | — |

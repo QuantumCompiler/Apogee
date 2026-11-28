@@ -196,6 +196,31 @@ reads:
 {"messages":[{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}
 ```
 
+### Naming a new dataset
+
+A new dataset is named by one rule (since CLI-M56), wherever a name is made:
+`datasets create`, `datasets synth`, the name `datasets prepare` derives
+from its source, and their HTTP twins. One trailing `.jsonl` is dropped
+first (`create x.jsonl` makes `x`), and what is left is judged before any
+work -- no session mined, no kit loaded, no teacher called, no Python
+environment asked, `--force` or not. A refusal is exit 1 and one stderr
+line, `apogee datasets: '<name>' is not a dataset name: ` and the clause:
+
+| The name | Refused because | Words after the prefix |
+|---|---|---|
+| empty, `..`, `a/b`, `a\b`, an absolute path | it could leave the folder (CLI-M55's read rule) | the read rule's own: `'<name>' is not a dataset name -- a name, never a path` |
+| `-h`, `.x` | its first character | `it starts with '-', which every verb reads as an option` · `it starts with '.'` |
+| `my set`, `café`, a tab, 129 bytes | letters, digits, `-`, `_` and `.` only, at most 128 bytes | `letters, digits, '-', '_' and '.', at most 128 bytes` |
+| `CON`, `con.txt`, `Lpt1` | a Windows device name (`con`, `prn`, `aux`, `nul`, `com1`-`com9`, `lpt1`-`lpt9`, the part before the first `.`, any case), on every platform, so a home moves to Windows whole | `'CON' is a Windows device name, which Windows does not keep as a file` |
+| `x.eval`, `x.EVAL` | it ends `.eval`, in any case: `x.eval.jsonl` is the eval-suite slot `train eval --suite x` reads, which `prepare --as-eval` fills | `'x.eval.jsonl' is the eval-suite slot 'train eval --suite x' reads, which 'datasets prepare --as-eval' fills` |
+| `x.jsonl.jsonl` | a `.jsonl` is left after the one dropped, so it would be the dataset `x` | `one '.jsonl' is dropped, and 'x.jsonl' would be the dataset 'x'` |
+
+`a..b`, `my-set_1.v2`, `com10` and a 128-byte name are taken. The rule
+judges only a name a verb is asked to make: every dataset already in
+`training/datasets/`, whatever its name, keeps reading and deleting by its
+listed name (a dash-led one after `--`, `datasets delete --yes -- -h`), and
+the way to a plain name for one is to delete it and make it again.
+
 ### `datasets prepare`
 
 ```bash
@@ -224,6 +249,13 @@ Without `--format` the preset is detected from the column names; with none
 matching, the command fails listing the columns and an example `--map`.
 `--flat` emits `{prompt, completion}`; `--as-eval` emits `{prompt,
 expected}`; `--out` names another path; `--force` overwrites.
+
+Without `--out`, the output is named after the source's stem, judged as a
+new dataset's name ([above](#naming-a-new-dataset)) before the script or
+the environment is asked: `-h.csv`, `x.eval.csv` or `x.jsonl.csv` is
+refused with the rule's words and `; pass --out`. `--out` is a path, never a
+dataset name, and is not judged; `--as-eval` still writes
+`<stem>.eval.jsonl`, the suite slot, for a stem the rule takes.
 
 ### `datasets create`
 

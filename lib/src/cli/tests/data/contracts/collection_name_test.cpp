@@ -133,6 +133,23 @@ TEST_CASE("a Windows device name is refused on every platform, folded",
     }
 }
 
+TEST_CASE("one device-name list for every create rule: the part before the first '.', folded",
+          "[harness][collection_name][M56]") {
+    // CLI-M56: the dataset create rule asks the same function M46's
+    // collection rule asks, so the two lists cannot drift.
+    using apogee::harness::windows_device_name;
+    for (const std::string name : {"con", "CON", "Con.txt", "prn", "aux", "NUL", "com1", "COM9",
+                                   "com1.x", "lpt1", "Lpt1", "lpt9", "nul.notes.jsonl"}) {
+        INFO(name);
+        CHECK(windows_device_name(name));
+    }
+    for (const std::string name : {"", "console", "com", "com10", "lpt", "lpt0", "com0",
+                                   "auxiliary", "x.con", ".con", "conx"}) {
+        INFO(name);
+        CHECK_FALSE(windows_device_name(name));
+    }
+}
+
 TEST_CASE("a new name that folds onto one that exists is refused, naming it",
           "[harness][collection_name][M46]") {
     const std::vector<std::string> existing{"notes", "Team"};

@@ -1332,8 +1332,14 @@ The twin of `apogee datasets create`: `{"name", "from"?: "template" |
 `sessions` mines the server's own persisted chats, one example per completed
 exchange, filtered by backend and `YYYY-MM-DD` dates; explicit `lines` (JSON
 objects, written one per line) override the source. `201 {name, path,
-examples[, sessions, skipped]}`; `400` for a bad name, a bad `from`, a bad
-date or a non-object line; `409` for an existing dataset without `force`.
+examples[, sessions, skipped]}`; `400` for a bad `from`, a bad date, a
+non-object line, or a name the create rule refuses (CLI-M56: a leading `-`
+or `.`, a Windows device name, an `.eval` ending, a `.jsonl` left after the
+one dropped, outside letters, digits, `-`, `_` and `.`, over 128 bytes, or
+one that could leave the folder -- [training.md](training.md#naming-a-new-dataset)),
+its message exactly the CLI's line after `apogee datasets: `, judged before
+`from`, any session or file, `force` or not, and never a `409`; `409` for an existing
+dataset without `force`.
 The file is byte-identical to the CLI's -- the same writer, the same
 `role`-before-`content` line shape.
 
@@ -1349,7 +1355,9 @@ and is never a vendor CLI; an API backend runs `parallel` batches in flight
 (default 4), a local one runs one. `202 {"job_id"}`; progress `synthesising
 examples {produced, target}`; the result `{name, path, examples, calls,
 failed_batches, retries}`. `400` for a missing field, an unknown kit, an
-unknown or vendor-CLI teacher; `409` for an existing dataset without `force`;
+unknown or vendor-CLI teacher, or a name the create rule refuses (CLI-M56,
+as `POST /v1/admin/datasets`: the CLI's words, before any job starts);
+`409` for an existing dataset without `force`;
 `501` with no served backend. A teacher that produces nothing usable fails the
 job and writes nothing.
 

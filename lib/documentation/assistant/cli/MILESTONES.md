@@ -7035,6 +7035,62 @@ Every input reaching the unchecked readers was the person's own typing, and HTTP
 
 **Verified.** The full gate, `lib/scripts/cicd.sh --test`; clang-format; Homebrew clang 22 and MinGW g++ over every changed source, no warning of ours; and the built binary in a sandbox home three levels deep: the victim kept, `my set` completed and deleted. A Windows root name and `\` are proven by CI's Windows rows.
 
+### 2026-11-27 — `a-new-dataset-name-is-one-every-verb-reads` (maintenance item M56): a new dataset name is one every verb reads as a name
+
+**Why.** The APP-M21 and APP-M22 probes' CLI aside ("datasets have no name rule"), then the same sandboxed investigation, two skeptics and a critic (2026-11-26), found that the rule existed and admitted names some verb misreads. **No dataset name rule had been recorded**: the training-datasets entry above says only that the store validates the name, and `training.md` stated none, so the rule below is new, not a reversal.
+- `datasets create --from empty -- -h` wrote `-h.jsonl` and exited 0. From then on every verb read `-h` as its help flag unless it came after `--`, and the full-screen shell's delete printed the help and kept the file.
+- `CON` wrote `CON.jsonl`, a name Windows keeps for a device. `x.eval` filled the eval-suite slot `train eval --suite x` reads, and `__complete train eval --suite ''` offered `x`. `x.jsonl.jsonl`, after `write`'s one strip, named the dataset `x`, refused only when `x` existed, as `dataset already exists`.
+- `datasets synth -- -h` called the teacher before writing `-h.jsonl`. `POST /v1/admin/datasets {"name":"-h"}` answered 201, and its refusal words were shorter than the CLI's.
+- The one predicate, `valid_dataset_name`, was also every reader's gate, so it could not be tightened in place. CLI-M55 moved the readers onto a read rule of their own first.
+
+**What was built**
+
+- [x] **One create rule, in the store** (`business/training/datasets.h/.cpp`). `dataset_create_error(name)` drops one trailing `.jsonl`, as `write` does, and judges what is left, in order. Every refusal but the read rule's is `'<name>' is not a dataset name: ` and the clause:
+  - CLI-M55's read rule, in its own words (`-- a name, never a path`);
+  - the first character: `it starts with '-', which every verb reads as an option` · `it starts with '.'`;
+  - the character set and cap, `valid_dataset_name`, now its character-set half: `letters, digits, '-', '_' and '.', at most 128 bytes`;
+  - a Windows device name on every platform, the part before the first `.` case-folded: `'CON' is a Windows device name, which Windows does not keep as a file`;
+  - an `.eval` ending, case-folded: `'x.eval.jsonl' is the eval-suite slot 'train eval --suite x' reads, which 'datasets prepare --as-eval' fills`;
+  - a `.jsonl` left over: `one '.jsonl' is dropped, and 'x.jsonl' would be the dataset 'x'`.
+
+  No clause says `already exists`, which HTTP answers with a 409. `a..b`, `x.jsonl` (the dataset `x`), `com10`, `console`, `my-set_1.v2` and 128 bytes still create.
+- [x] **One device-name list** (`contracts/collection_name.h/.cpp`). CLI-M46's private `device_name` is now `windows_device_name`, which the collection rule and the dataset rule both ask, so the two lists can't drift.
+- [x] **Every door that names a new dataset asks it first**, and no reader does:
+  - `create_dataset` (`operations/dataset_core.cpp`), before any session is mined, serves `datasets create` and `POST /v1/admin/datasets`.
+  - synth's first check, on the CLI and in `POST /v1/admin/datasets/synth`: no `[synth]` line, no kit loaded, no teacher called, no job started.
+  - `datasets prepare`'s derived name is judged as `<stem>.jsonl` right after the source is found, before the seeded script and the Python environment, with `; pass --out` appended. So `-h.csv`, `x.eval.csv` and `x.jsonl.csv` are refused. An explicit `--out` is a path and is not judged, and `--as-eval` still writes `<stem>.eval.jsonl`.
+  - The rule binds `--force`, so a file whose name it refuses is left as it was; the way out is `datasets delete --yes -- <name>`.
+  - Over HTTP a refusal is 400 `invalid_request_error`, its message exactly the CLI's line after `apogee datasets: `. `plain_name`, a second spelling of the old rule, is gone.
+  - `DatasetStore::write` keeps the old check, `dataset_write_error`, as its floor, in today's words. A regime writes `<kit name>.jsonl` into its own work folder and runs its stages by path, so it takes a kit named `-x` as before.
+- [x] **Every dataset already on disk keeps reading.** `datasets info -- <n>`, `datasets delete --yes -- <n>`, GET and DELETE, train's resolvers and completion still take CLI-M55's read rule, so a hand-placed `-h`, `CON` or `x.eval` reads and deletes by its listed name.
+- [x] **Tests**, each failing on the old code unless named a guard:
+  - `training/datasets_test`: the rule's table with each refusal's exact words, the read rule's refusals in M55's words, the names taken, none saying `already exists`. Guard: `write` still takes `-x`, `x.eval` and, off Windows, `CON` into a work folder.
+  - `contracts/collection_name_test`: `windows_device_name`'s table.
+  - `cli/datasets_test`, create as a fixture: `-h`, `CON`, `con`, `con.txt`, `Lpt1`, `x.eval`, `x.EVAL` and `x.jsonl.jsonl` exit 1 with the rule's line last on stderr, stdout empty and the folder unchanged. `x.jsonl.jsonl` with `x` present, with and without `--force`, leaves `x.jsonl`'s bytes. `--force` over a hand-placed `-h.jsonl` keeps its bytes, and no new suite is offered at Tab.
+  - `cli/datasets_test`, guards: `a..b`, 128 bytes, `my-set_1.v2`, `x.jsonl` as `x`, 129 bytes refused, `--force` over `starter`, and hand-placed `-h`, `x.eval` and, off Windows, `CON` read and deleted after `--`.
+  - `cli/datasets_test`, synth and prepare: synth refuses `-h`, `CON`, `x.eval` and `x.jsonl.jsonl` (and `--force` over `-h.jsonl`) with no `[synth]` line. `prepare` refuses a derived `-h`, `x.eval`, `x.jsonl` and, off Windows, `CON` before the environment, and an explicit `--out` goes on unjudged to the environment's refusal.
+  - `httpserver/admin_datasets_test`: POST create and synth with `-h`, `CON`, `x.eval`, `x.EVAL`, `x.jsonl.jsonl` and `my set`, `force` or not, answer 400 with `dataset_create_error`'s words, write no file and start no job; the CLI says the same after its prefix. Guards: `a..b` and `x.jsonl` create, and existing odd names read and delete.
+  - On the real binary, `cli.datasets_lifecycle`: `datasets create --from empty -- -h` refused, its words the last stderr line, nothing written. In the half that runs with `python3`, `prepare --as-eval` still writes `<stem>.eval.jsonl` (guard).
+  - Two older cases were updated on purpose. CLI-M55's synth refusal takes the new words, and a climb keeps the read rule's. CLI-M48's dash-led synth case now asserts the refusal, since synth can no longer make `-x`; the renderer's own table still holds a dash-led option value bare.
+- [x] **Docs.** [training.md](../../reference/cli/training.md) gains a "Naming a new dataset" section with the rule's table and the note that existing names keep reading, and its prepare paragraph says that `--out` is a path. [http-api.md](../../reference/cli/http-api.md)'s `POST /v1/admin/datasets` and `/synth` list the 400 in the CLI's words. DEVELOPER.md's `training/`, `collection_name` and test rows and `cli.datasets_lifecycle`'s paragraph are updated, and the CLAUDE.md map notes `windows_device_name`. SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - a leading `-` is refused, one plain-name rule with CLI-M46's and 55f's;
+  - `.eval` is refused at create, synth and `prepare`'s derived name, case-folded;
+  - the device names are refused on every platform, from CLI-M46's list (not measured on Windows);
+  - the rule binds `--force`;
+  - it runs at the doors and never inside `write`, which keeps its floor for a regime's work folder.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **The clauses' order**: the read rule, the first character, the character set and cap, the device name, `.eval`, then `.jsonl`. `valid_dataset_name` refuses a leading `.` too, so the first character comes first and `.x` is told it starts with `.`.
+  - **The device clause names the part before the first `.` as typed** (`'CON'`, `'con'` for `con.txt`), never folded.
+  - **The left-over `.jsonl` is matched as the strip matches, case-sensitively.** `x.JSONL` makes `x.JSONL.jsonl`, listed and read by that name. Only `.eval` is folded.
+  - **The `.eval` clause names its verbs in prose, not rendered**: the document's words, a reference and not a command to copy, so no program or root flag joins them and the two surfaces' words stay one string.
+  - **`prepare`'s refusal names `<stem>.jsonl`**, the name the rule is handed. So `prepare .` says `'..jsonl'` and `prepare --as-eval x.eval.csv` hears the slot clause that names `--as-eval` (found by the build's review; left, since the default gives prepare the same clause).
+  - **`dataset_write_error` stays as `write`'s floor**, and HTTP's `plain_name` goes.
+
+**Verified.** The full gate, `lib/scripts/cicd.sh --test`; clang-format; Homebrew clang 22 and MinGW g++ over every changed source, with no warning of ours; and the built binary in a sandbox home three levels deep. There, `-h`, `CON`, `con.txt`, `Lpt1`, `x.eval`, `x.EVAL` and `x.jsonl.jsonl` were refused with nothing written, `a..b`, `x.jsonl`, `my-set_1.v2` and 128 bytes were created, and no suite `x` was offered. A Windows host's own refusal of a `CON` file is proven by CI's Windows rows.
+
 ## Milestone AA — The four layers
 
 **Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free the way Go's ban on import cycles does, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.
