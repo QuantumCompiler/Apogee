@@ -864,7 +864,20 @@ or `graph.enabled cannot be set on '<name>' ...` for a store the config cannot
 register (the edit is not attempted, and retrieval does not expand through
 that graph), `could not register ...` or `could not set graph.enabled ...` for
 trouble after the build; for a named graph `graph` and `collections`, and nothing enabled:
-the entry is the enablement). `DELETE /v1/admin/jobs/{id}` cancels between
+the entry is the enablement). Since CLI-M59 (2026-11-27) a finished build
+also carries **`warnings`**, present only when not empty: the notes `apogee
+graph build` says for the same build, each a bare sentence in the CLI's words
+with no prefix or tag, the shape `POST /v1/admin/graphs` answers with. In the
+CLI's order: `member collection "<m>" has no database -- it contributes
+nothing this build.` for each member of a named graph without one, then, when
+no embedder will build entity vectors, `entity vectors skipped for "<id>" --
+<why>; entity search will be full-text only.`, where `<why>` is the
+embedder's reason (`backend '<b>' cannot embed`, no embedding backend
+configured, or the spend rule's words for a paid embedder). A fact another
+field carries stays in that field alone: a gone or empty tree in `code`, a
+stopped embed in `embed_error`, a failed edit in `config_warning`, a failed
+chunk in `chunks_failed`. Like every result field, `warnings` rides on the
+`admin.job.completed` event. `DELETE /v1/admin/jobs/{id}` cancels between
 chunks; what finished stays, and the next build resumes. **A named graph's
 build holds its build lock** (57t) -- a `FileLock` on `<graph db>.build.lock`
 beside its database, the one the CLI's builds and deletes take -- for the
@@ -881,7 +894,10 @@ collection's `graph:` block, or a named graph's own) > the extraction role
 a metered backend on Apogee's initiative**: a fall-through to a metered
 default is a `400` naming the three ways to say so. `400` for a vendor-CLI or
 unserved backend (as a chat request's `model` would get), `404` when the
-collection has no data or no member of a named graph has any, `501` when the
+collection has no data or no member of a named graph has any -- for a named
+graph, since CLI-M59 (2026-11-27), only one with no source trees: one with
+trees builds its code instead, as the CLI does (Source trees, below) -- `501`
+when the
 server serves no generation backend. Entity vectors follow the embedding
 spend rule: a collection's through its own embedder when it is unmetered or
 the collection pins `retriever: vector`; a named graph's through the default
@@ -931,7 +947,13 @@ server that serves none, and `model` is not consulted. **`"update": true`**
 is the twin of `apogee graph update {id}`: the trees re-parsed where they
 changed, the collections left as they are, never a model call -- `400` when
 `{id}` is not a named graph or has no source trees. A graph holding
-collections too still needs its extractor for them (the rules above).
+collections too still needs its extractor for them (the rules above), unless
+no member holds any data. Since CLI-M59 (2026-11-27) such a graph builds as
+`apogee graph build {id}` builds it: its code alone, with no generation
+backend, served or not, and `model` not consulted. The job's `warnings` say
+each member without a database, then `no member collection of "<id>" has any
+data yet -- only its code was built.` Until then it answered `404` (`501`
+with nothing served).
 
 ### `GET /v1/admin/graph/{id}/stats`
 
@@ -1044,11 +1066,16 @@ community costs nothing, a changed one is pruned and regenerated, `force`
 regenerates all. One call per new or changed cluster, so it is an **async
 job** (`graph-communities`): `202 {"job_id"}`, progress `summarising
 communities {done, total}`, and at `GET /v1/admin/jobs/{id}` the counts
-`{detected, summarized, unchanged, failed, pruned, embedded[, embed_error]}`
--- a summariser failure is soft (the community is skipped and an existing
-summary kept). Summary vectors follow the same spend rule as the build's
-entity vectors, and a summary still without one is vectorised on the next
-run with an embedder.
+`{detected, summarized, unchanged, failed, pruned, embedded[, embed_error][,
+warnings]}` -- a summariser failure is soft (the community is skipped and an
+existing summary kept). Summary vectors follow the same spend rule as the
+build's entity vectors, and a summary still without one is vectorised on the
+next run with an embedder. Since CLI-M59 (2026-11-27), with summaries and no
+embedder that will build their vectors, the result carries `warnings:
+["summary vectors skipped for \"<id>\" -- <why>; summaries will be full-text
+searchable only."]`, the note `apogee graph communities` says, `<why>` as
+the build's; with `"summaries": false` no embedder is asked and nothing is
+said.
 
 Body, every field optional: `model`, `force`, `min_size`, and **`summaries`**
 (27k, default `true`): `false` is `--no-summaries` -- the clusters detected

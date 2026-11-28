@@ -68,6 +68,17 @@ nlohmann::json parsed(const HttpResponse& response) {
     return body;
 }
 
+/// A job result's `warnings` (CLI-M59), or null when it carries none.
+nlohmann::json warnings_of(const apogee::httpserver::JobRecord& record) {
+    const auto it = record.result.find("warnings");
+    return it == record.result.end() ? nlohmann::json{} : *it;
+}
+
+/// The embedding role's backend: none -- the role falls to the default,
+/// `mock`, which cannot embed -- or a mock embedder, free or billed per
+/// call (CLI-M59).
+enum class Embedder { None, Free, Metered };
+
 struct Fixture {
     apogee::testing::TempDir home{"admin-graph-" + std::to_string(std::random_device{}())};
     apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
@@ -84,15 +95,18 @@ struct Fixture {
 
     /// `metered_default` makes the default a paid backend (Anthropic with a
     /// key) that the cost policy refuses by fall-through; `extra_config` is
-    /// appended verbatim.
+    /// appended verbatim; `embedder` names the embedding role's backend.
     explicit Fixture(std::vector<MockTurn> turns = {MockTurn{std::string{kExtraction}}},
                      bool serve = true, bool metered_default = false,
-                     std::string_view extra_config = {}) {
+                     std::string_view extra_config = {}, Embedder embedder = Embedder::None) {
         std::filesystem::create_directories(config_path.parent_path());
+        const bool embeds = embedder != Embedder::None;
         std::ofstream{config_path, std::ios::binary}
             << "models:\n  default: " << (metered_default ? "paid" : "mock") << "\n"
+            << (embeds ? "  default_embedding: embed\n" : "")
             << "backends:\n  mock:\n    type: mock\n  vendor:\n    type: claude-cli\n"
             << "  paid:\n    type: anthropic\n    api_key: sk-ant-test\n"
+            << (embeds ? "  embed:\n    type: mock\n    embedding_model: mock-space\n" : "")
             << extra_config;
         config = apogee::harness::load_config(config_path);
         harness = std::make_unique<apogee::harness::Harness>(config);
@@ -108,6 +122,12 @@ struct Fixture {
         paid_options.turns = {MockTurn{std::string{kExtraction}}};
         paid_options.metered = true;
         harness->register_provider("paid", std::make_shared<MockProvider>(std::move(paid_options)));
+        if (embeds) {
+            auto embedding = std::make_shared<apogee::backends::MockEmbeddingProvider>("embed");
+            embedding->set_model_name("mock-space");
+            embedding->set_metered(embedder == Embedder::Metered);
+            harness->register_provider("embed", embedding);
+        }
         harness->use_default_router();
         HandlerOptions served;
         if (serve) {
@@ -228,6 +248,11 @@ TEST_CASE(
     CHECK(done.result["mentions_added"] == 4);
     CHECK(done.result["record_nodes"] == 0);
     CHECK(done.result["enabled"] == true);
+    // `mock` cannot embed: why the entities stay full-text only, in the words
+    // `graph build notes` says (CLI-M59).
+    CHECK(warnings_of(done) == nlohmann::json::array({"entity vectors skipped for \"notes\" -- "
+                                                      "backend 'mock' cannot embed; entity search "
+                                                      "will be full-text only."}));
     CHECK(fixture.provider->requests().size() == 2);
     CHECK(fixture.provider->requests().front().transient.side_request);
     CHECK(fixture.store().graph_stats().nodes == 2);
@@ -542,6 +567,13 @@ TEST_CASE(
     CHECK(done.status == JobStatus::Succeeded);
     CHECK(done.result["graph"] == "work");
     CHECK(done.result["collections"].size() == 3);
+    // The CLI's lines for the same build, in its order (CLI-M59): the member
+    // without a database, then why the entities stay full-text only.
+    CHECK(warnings_of(done) ==
+          nlohmann::json::array(
+              {"member collection \"absent\" has no database -- it contributes nothing this build.",
+               "entity vectors skipped for \"work\" -- backend 'mock' cannot embed; entity search "
+               "will be full-text only."}));
     CHECK(done.result["files_planned"] == 3);
     CHECK(done.result["nodes_upserted"] == 2);
     CHECK(done.result["mentions_added"] == 6);
@@ -627,6 +659,11 @@ TEST_CASE(
     CHECK(done.result["summarized"] == 1);
     CHECK(done.result["unchanged"] == 0);
     CHECK(done.result["embedded"] == 0);
+    // Why the summaries stay full-text only, in the words `graph communities`
+    // says (CLI-M59).
+    CHECK(warnings_of(done) == nlohmann::json::array({"summary vectors skipped for \"notes\" -- "
+                                                      "backend 'mock' cannot embed; summaries "
+                                                      "will be full-text searchable only."}));
     // One plain call, a side request, the community prompt as the system
     // message and no schema: prose, not JSON.
     REQUIRE(fixture.provider->requests().size() == 3);  // two chunks, one summary
@@ -816,6 +853,15 @@ struct SourceTree {
         return "graphs:\n  code:\n    sources: [\"" + dir.path().generic_string() +
                "\"]\n  prose:\n    collections: [notes]\n";
     }
+
+    /// A mixed graph (CLI-M59): this tree and `collections`, the entry
+    /// `graph build <name> --source <tree>` leaves over a graph made with
+    /// `config add-graph <name> --collections <collections>`.
+    [[nodiscard]] std::string mixed(std::string_view name, std::string_view collections) const {
+        return "graphs:\n  " + std::string{name} + ":\n    sources: [\"" +
+               dir.path().generic_string() + "\"]\n    collections: [" + std::string{collections} +
+               "]\n";
+    }
 };
 
 }  // namespace
@@ -835,6 +881,7 @@ TEST_CASE("a code graph builds and updates over the plane with no generation bac
     CHECK(code.at("references_resolved").get<int>() >= 2);
     CHECK(code.at("references_unresolved") == 1);  // len, a name -- never a guess
     CHECK(code.at("skipped").empty());
+    CHECK_FALSE(built.result.contains("warnings"));  // trees alone: nothing to say (CLI-M59)
     CHECK(fixture.provider->requests().empty());
 
     const nlohmann::json stats = parsed(fixture.stats("code"));
@@ -881,6 +928,7 @@ TEST_CASE(
     CHECK(clustered.result.at("summarized") == 0);
     CHECK(clustered.result.at("clustered").get<int>() >= 1);
     CHECK(clustered.result.at("summaries_absent").get<int>() >= 1);
+    CHECK_FALSE(clustered.result.contains("warnings"));  // no embedder asked, nothing said
     CHECK(fixture.provider->requests().empty());
     const nlohmann::json listed = parsed(fixture.list_communities("code"));
     REQUIRE_FALSE(listed.at("data").empty());
@@ -945,4 +993,233 @@ TEST_CASE("a code build's job names a file that is not UTF-8 under mended, and u
     REQUIRE(code.at("mended").size() == 1);
     CHECK(code.at("mended")[0].at("file") == "pkg/m.py");
     CHECK(code.at("mended")[0].at("bytes") == 1);
+}
+
+TEST_CASE(
+    "a mixed graph whose members hold no data builds its code over the plane, with no model, "
+    "and says why, as the CLI does",
+    "[httpserver][admin][graph][code][M59]") {
+    // CLI-M59: the route told a code-only graph by its having no collections,
+    // so `ghosty` -- a tree and a member with no database -- answered `404 no
+    // member collection of graph 'ghosty' has any data` (c-http), and `501`
+    // with nothing served, while `graph build ghosty` built its code and
+    // exited 0 (c-n1b).
+    const SourceTree tree;
+    const auto built = [](Fixture& fixture, const nlohmann::json& body,
+                          const nlohmann::json& warnings) {
+        const HttpResponse response = fixture.build("ghosty", body);
+        INFO(response.body);
+        REQUIRE(response.status == 202);
+        const apogee::httpserver::JobRecord done = fixture.wait(parsed(response).at("job_id"));
+        INFO(done.error);
+        REQUIRE(done.status == JobStatus::Succeeded);
+        CHECK(done.kind == "graph-build");
+        CHECK(done.result.at("graph") == "ghosty");
+        CHECK(done.result.at("code").at("files_parsed") == 2);
+        CHECK(done.result.at("code").at("missing_sources").empty());
+        CHECK(warnings_of(done) == warnings);
+        CHECK_FALSE(done.result.contains("files_planned"));  // no prose build ran
+        CHECK(fixture.provider->requests().empty());         // no extractor call
+    };
+    const nlohmann::json ghost = nlohmann::json::array(
+        {"member collection \"ghost\" has no database -- it contributes nothing this build.",
+         "no member collection of \"ghosty\" has any data yet -- only its code was built."});
+    SECTION("on a server that serves a generation backend") {
+        Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                        /*serve=*/true,
+                        false,
+                        tree.mixed("ghosty", "ghost")};
+        built(fixture, nlohmann::json::object(), ghost);
+    }
+    SECTION("with a model that names no backend: it is never consulted") {
+        Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                        /*serve=*/true,
+                        false,
+                        tree.mixed("ghosty", "ghost")};
+        built(fixture, nlohmann::json{{"model", "nothing-by-that-name"}}, ghost);
+    }
+    SECTION("on a server that serves none, as a graph of trees alone builds") {
+        Fixture fixture{{}, /*serve=*/false, false, tree.mixed("ghosty", "ghost")};
+        built(fixture, nlohmann::json::object(), ghost);
+    }
+    SECTION("a member whose database holds nothing: only the outcome is said") {
+        Fixture fixture{{}, /*serve=*/false, false, tree.mixed("ghosty", "ghost")};
+        {
+            Store empty{fixture.home.path() / "embeddings" / "ghost.db"};
+        }
+        built(fixture, nlohmann::json::object(),
+              nlohmann::json::array({"no member collection of \"ghosty\" has any data yet -- only "
+                                     "its code was built."}));
+    }
+}
+
+TEST_CASE(
+    "a named graph with no trees, a collection never ingested and a mixed graph with data keep "
+    "their refusals; a gone tree stays in missing_sources",
+    "[httpserver][admin][graph][refusals][M59]") {
+    const SourceTree tree;
+    const std::string entries = tree.entry() + "  mix:\n    sources: [\"" +
+                                tree.dir.path().generic_string() +
+                                "\"]\n    collections: [notes, ghost]\n";
+    {
+        Fixture fixture{{MockTurn{std::string{kExtraction}}}, true, false, entries};
+        HttpResponse refused = fixture.build("prose");
+        CHECK(refused.status == 404);
+        CHECK(parsed(refused)["error"]["message"] ==
+              "no member collection of graph 'prose' has any data");
+        refused = fixture.build("notes");
+        CHECK(refused.status == 404);
+        CHECK(parsed(refused)["error"]["message"] == "no graph or collection named 'notes'");
+        CHECK(fixture.jobs.list().empty());
+    }
+    {
+        // Nothing served: the graph of collections, and a mixed graph whose
+        // member holds data, still need their extractor.
+        Fixture unserved{{}, /*serve=*/false, false, entries};
+        unserved.ingest();
+        for (const std::string_view name : {"prose", "mix"}) {
+            INFO(name);
+            const HttpResponse refused = unserved.build(name);
+            CHECK(refused.status == 501);
+            CHECK(parsed(refused)["error"]["message"] ==
+                  "this server has no generation backend to run the extractor on");
+        }
+        CHECK(unserved.jobs.list().empty());
+    }
+    {
+        // A tree gone from a graph of trees alone: `missing_sources` says it,
+        // and `warnings` does not repeat it.
+        const std::filesystem::path gone =
+            tree.dir.path().parent_path() / (tree.dir.path().filename().string() + "-gone");
+        Fixture fixture{{},
+                        /*serve=*/false,
+                        false,
+                        "graphs:\n  code:\n    sources: [\"" + tree.dir.path().generic_string() +
+                            "\", \"" + gone.generic_string() + "\"]\n"};
+        const HttpResponse response = fixture.build("code");
+        REQUIRE(response.status == 202);
+        const apogee::httpserver::JobRecord done = fixture.wait(parsed(response).at("job_id"));
+        INFO(done.error);
+        REQUIRE(done.status == JobStatus::Succeeded);
+        CHECK(done.result.at("code").at("missing_sources").size() == 1);
+        CHECK(done.result.at("code").at("files_parsed") == 2);
+        CHECK_FALSE(done.result.contains("warnings"));
+    }
+}
+
+TEST_CASE(
+    "a mixed graph with data says its empty member and the entity-vector skip beside its "
+    "code, and its update says neither",
+    "[httpserver][admin][graph][code][M59]") {
+    // CLI-M59: `build-named-mix` listed `collections: ["notes","ghost"]` and
+    // nothing more (http-jobs), where `graph build mix` said both (g6).
+    const SourceTree tree;
+    Fixture fixture{
+        {MockTurn{std::string{kExtraction}}}, true, false, tree.mixed("mix", "notes, ghost")};
+    fixture.ingest();
+    HttpResponse response = fixture.build("mix");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord done = fixture.wait(parsed(response).at("job_id"));
+    INFO(done.error);
+    REQUIRE(done.status == JobStatus::Succeeded);
+    CHECK(done.result.at("code").at("files_parsed") == 2);
+    CHECK(done.result.at("files_planned") == 2);
+    CHECK(done.result.at("collections") == nlohmann::json::array({"notes", "ghost"}));
+    CHECK(warnings_of(done) ==
+          nlohmann::json::array(
+              {"member collection \"ghost\" has no database -- it contributes nothing this build.",
+               "entity vectors skipped for \"mix\" -- backend 'mock' cannot embed; entity search "
+               "will be full-text only."}));
+
+    response = fixture.build("mix", nlohmann::json{{"update", true}});
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord updated = fixture.wait(parsed(response).at("job_id"));
+    REQUIRE(updated.status == JobStatus::Succeeded);
+    CHECK(updated.result.at("code").at("files_unchanged") == 2);
+    CHECK_FALSE(updated.result.contains("warnings"));
+}
+
+TEST_CASE(
+    "a paid embedder's skip carries the spend rule's words, on the build and the communities "
+    "run",
+    "[httpserver][admin][graph][communities][M59]") {
+    Fixture fixture{{MockTurn{std::string{kExtraction}}}, true, false, {}, Embedder::Metered};
+    fixture.ingest();
+    const std::string why =
+        "indexed for text search only: 'mock-space' is a paid embedder, and vectorising a whole "
+        "collection through it takes --retriever vector (or a retriever: vector pin)";
+    HttpResponse response = fixture.build("notes");
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord built = fixture.wait(parsed(response).at("job_id"));
+    INFO(built.error);
+    REQUIRE(built.status == JobStatus::Succeeded);
+    CHECK(built.result.at("entities_embedded") == 0);
+    CHECK(warnings_of(built) ==
+          nlohmann::json::array({"entity vectors skipped for \"notes\" -- " + why +
+                                 "; entity search will be full-text only."}));
+
+    response = fixture.communities("notes", nlohmann::json{{"min_size", 2}});
+    REQUIRE(response.status == 202);
+    const apogee::httpserver::JobRecord summarized = fixture.wait(parsed(response).at("job_id"));
+    INFO(summarized.error);
+    REQUIRE(summarized.status == JobStatus::Succeeded);
+    CHECK(summarized.result.at("embedded") == 0);
+    CHECK(warnings_of(summarized) ==
+          nlohmann::json::array({"summary vectors skipped for \"notes\" -- " + why +
+                                 "; summaries will be full-text searchable only."}));
+}
+
+TEST_CASE("with an embedder that embeds and every member present, no graph job carries warnings",
+          "[httpserver][admin][graph][communities][M59]") {
+    Fixture fixture{{MockTurn{std::string{kExtraction}}},
+                    true,
+                    false,
+                    "graphs:\n  work:\n    collections: [notes, meetings]\n",
+                    Embedder::Free};
+    fixture.ingest();
+    fixture.ingest_meetings();
+    for (const std::string_view name : {"notes", "work"}) {
+        INFO(name);
+        HttpResponse response = fixture.build(name);
+        REQUIRE(response.status == 202);
+        const apogee::httpserver::JobRecord built = fixture.wait(parsed(response).at("job_id"));
+        INFO(built.error);
+        REQUIRE(built.status == JobStatus::Succeeded);
+        CHECK(built.result.at("entities_embedded") == 2);
+        CHECK_FALSE(built.result.contains("embed_error"));
+        CHECK_FALSE(built.result.contains("warnings"));
+
+        response = fixture.communities(name, nlohmann::json{{"min_size", 2}});
+        REQUIRE(response.status == 202);
+        const apogee::httpserver::JobRecord summarized =
+            fixture.wait(parsed(response).at("job_id"));
+        INFO(summarized.error);
+        REQUIRE(summarized.status == JobStatus::Succeeded);
+        CHECK(summarized.result.at("summarized") == 1);
+        CHECK(summarized.result.at("embedded") == 1);
+        CHECK_FALSE(summarized.result.contains("warnings"));
+    }
+}
+
+TEST_CASE("a job's warnings reach the admin.job.completed event as they are on the record",
+          "[httpserver][admin][graph][events][M59]") {
+    Fixture fixture;
+    fixture.ingest();
+    apogee::events::Subscription subscription = apogee::events::subscribe(fixture.bus);
+    const HttpResponse response = fixture.build("notes");
+    REQUIRE(response.status == 202);
+    const std::string id = parsed(response).at("job_id");
+    const apogee::httpserver::JobRecord done = fixture.wait(id);
+    REQUIRE(done.status == JobStatus::Succeeded);
+    std::optional<apogee::events::Event> completed;
+    while (const std::optional<apogee::events::Event> event =
+               subscription.subscriber().wait_for(std::chrono::seconds{5})) {
+        if (event->type == apogee::events::kJobCompleted && event->data.value("job_id", "") == id) {
+            completed = event;
+            break;
+        }
+    }
+    REQUIRE(completed.has_value());
+    REQUIRE(warnings_of(done).is_array());
+    CHECK(completed->data.at("warnings") == warnings_of(done));
 }

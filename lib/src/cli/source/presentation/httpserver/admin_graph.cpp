@@ -25,6 +25,7 @@
 #include "operations/collections.h"
 #include "operations/graph_dedupe_pass.h"
 #include "operations/graph_members.h"
+#include "operations/graph_notes.h"
 #include "operations/graph_sources.h"
 #include "platform/file_lock.h"
 
@@ -170,6 +171,16 @@ struct Generation {
     }
     return graph::resolve_entity_embedder(plane.harness(), config, target.entry->backend,
                                           target.entry->retriever);
+}
+
+/// What a mixed graph's code-only build says when no member holds data
+/// (CLI-M59): each member without a database, then that only its code was
+/// built -- the CLI's lines, in `build_named`'s order.
+[[nodiscard]] std::vector<std::string> code_only_warnings(const Target& target,
+                                                          const commands::GraphMembers& members) {
+    std::vector<std::string> warnings = commands::members_without_database(members);
+    warnings.push_back(commands::only_code_built(target.name));
+    return warnings;
 }
 
 [[nodiscard]] nlohmann::json stats_json(const embedstore::GraphStats& stats) {
@@ -357,12 +368,15 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         update = it->get<bool>();
     }
     // A named graph of source trees alone (27k) is built with no model: no
-    // generation backend is needed, and none is asked for.
-    const auto start_code_only = [&](const Target& target) {
+    // generation backend is needed, and none is asked for. So is a mixed
+    // graph whose members hold no data (CLI-M59), its `warnings` the CLI's
+    // lines for it.
+    const auto start_code_only = [&](const Target& target, std::vector<std::string> warnings) {
         const JobRegistry::Started started =
             jobs.start(std::string{kBuildJobKind}, nlohmann::json{{"graph", target.name}});
         const std::string job_id = started.id;
         workers.run(started.cancellation, [&jobs, job_id, target, force,
+                                           warnings = std::move(warnings),
                                            cancellation = started.cancellation] {
             try {
                 // The graph build lock, as the CLI's build holds it (57t).
@@ -378,8 +392,11 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
                 if (build.result.cancelled) {
                     return;
                 }
-                jobs.finish(job_id,
-                            nlohmann::json{{"graph", target.name}, {"code", code_fields(build)}});
+                nlohmann::json fields{{"graph", target.name}, {"code", code_fields(build)}};
+                if (!warnings.empty()) {
+                    fields["warnings"] = warnings;
+                }
+                jobs.finish(job_id, std::move(fields));
             } catch (const std::exception& e) {
                 jobs.fail(job_id, e.what());
             }
@@ -405,14 +422,24 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         if (target.named->sources.empty()) {
             return error_response(400, "graph '" + target.name + "' has no source trees");
         }
-        return start_code_only(target);
+        return start_code_only(target, {});
     }
     if (plane.options().served.empty()) {
         HttpResponse unused;
         if (const std::optional<harness::Config> config = load_now(context, unused);
             config.has_value()) {
-            if (const Target target = resolve_target(*config, name); code_only(target)) {
-                return start_code_only(target);
+            const Target target = resolve_target(*config, name);
+            if (code_only(target)) {
+                return start_code_only(target, {});
+            }
+            // A mixed graph whose members hold no data needs no extractor
+            // either (CLI-M59), decided before the 501 as the CLI decides it
+            // before resolving one.
+            if (target.is_named() && !target.named->sources.empty()) {
+                const commands::GraphMembers members = commands::open_graph_members(*target.named);
+                if (!members.any_data()) {
+                    return start_code_only(target, code_only_warnings(target, members));
+                }
             }
         }
         return error_response(kNotImplemented,
@@ -426,7 +453,7 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
     }
     const Target target = resolve_target(*config, name);
     if (code_only(target)) {
-        return start_code_only(target);
+        return start_code_only(target, {});
     }
     // What must hold data: a collection's own store, or at least one of a
     // named graph's members (the graph's database is what the build makes).
@@ -439,6 +466,11 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
         members =
             std::make_shared<commands::GraphMembers>(commands::open_graph_members(*target.named));
         if (!members->any_data()) {
+            // A mixed graph builds its code and says so, as `graph build`
+            // does (CLI-M59); one with no trees has nothing to build.
+            if (!target.named->sources.empty()) {
+                return start_code_only(target, code_only_warnings(target, *members));
+            }
             return error_response(
                 404, "no member collection of graph '" + target.name + "' has any data",
                 kNotFoundError);
@@ -456,6 +488,17 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
     const graph::EntityEmbedder entity_embedder = resolve_embedder(plane, *config, target);
     const graph::EmbedFn embed = entity_embedder.embed;
     const std::string embed_model = entity_embedder.model;
+    // What the CLI says beside this build, in its order (CLI-M59): each member
+    // without a database, then why the entities stay full-text only. A fact a
+    // field already carries -- a gone tree, a stopped embed, a registration
+    // that failed -- stays in that field alone.
+    std::vector<std::string> warnings;
+    if (members != nullptr) {
+        warnings = commands::members_without_database(*members);
+    }
+    if (!embed) {
+        warnings.push_back(commands::entity_vectors_skipped(target.name, entity_embedder.note));
+    }
     // The edits a collection's first build makes, dry-run before the job
     // starts (CLI-M46), as the CLI's build does: one the config would refuse
     // is never attempted, and the job's warning names it.
@@ -479,7 +522,7 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
     const std::string backend = generation->key;
     const std::string kg_model = generation->kg_model;
     workers.run(started.cancellation, [&plane, &jobs, job_id, target, members, backend, kg_model,
-                                       embed, embed_model, force, limit, write, plan,
+                                       embed, embed_model, force, limit, write, plan, warnings,
                                        cancellation = started.cancellation] {
         try {
             graph::BuildOptions options;
@@ -529,6 +572,9 @@ HttpResponse admin_build_graph(const AdminConfigContext& context, Handler& plane
             nlohmann::json fields = build_fields(target, result);
             if (code.has_value()) {
                 fields["code"] = std::move(*code);
+            }
+            if (!warnings.empty()) {
+                fields["warnings"] = warnings;
             }
             // A collection's first successful build records that the graph
             // exists, through the same editor the CLI uses -- byte-identical,
@@ -863,13 +909,20 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
     }
     std::optional<Generation> generation;
     graph::EmbedFn embed;
+    // Why the summaries stay full-text only, in the CLI's words (CLI-M59);
+    // with no summaries no embedder is asked, and nothing is said.
+    std::vector<std::string> warnings;
     if (summaries) {
         generation =
             resolve_generation(*config, plane, model, target, "community summary run", failure);
         if (!generation.has_value()) {
             return failure;
         }
-        embed = resolve_embedder(plane, *config, target).embed;
+        const graph::EntityEmbedder embedder = resolve_embedder(plane, *config, target);
+        embed = embedder.embed;
+        if (!embed) {
+            warnings.push_back(commands::summary_vectors_skipped(target.name, embedder.note));
+        }
     }
 
     const JobRegistry::Started started =
@@ -880,7 +933,8 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
     const std::string kg_model = generation.has_value() ? generation->kg_model : std::string{};
     const std::filesystem::path db_path = target.db_path;
     workers.run(started.cancellation, [&plane, &jobs, job_id, db_path, backend, kg_model, embed,
-                                       force, min_size, cancellation = started.cancellation] {
+                                       force, min_size, warnings = std::move(warnings),
+                                       cancellation = started.cancellation] {
         try {
             embedstore::Store store{db_path};
             graph::CommunitiesOptions options;
@@ -907,6 +961,9 @@ HttpResponse admin_build_communities(const AdminConfigContext& context, Handler&
                 {"clustered", result.clustered}, {"summaries_absent", result.summaries_absent}};
             if (!result.embed_error.empty()) {
                 fields["embed_error"] = result.embed_error;
+            }
+            if (!warnings.empty()) {
+                fields["warnings"] = warnings;
             }
             jobs.finish(job_id, std::move(fields));
         } catch (const std::exception& e) {

@@ -302,7 +302,7 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 - **The other verbs that open a job stream**: `video generate`, `video compose`, `voice say`, `datasets pull`, and the training verbs under stream-json (55h, `train.cpp:87-95`). Sweep them with the same writer only if a note is found on their stdout; none is listed today.
 - **`models delete`'s stranded preview** (`models_pull.cpp:4065-4078`), a prediction before the confirmation, and **`models info`'s `note:` rows**, a read's fields. Both are kept.
 - **The other families' notes** (graph, embed, knowledge, agents), and the writer itself: [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27).
-- **The HTTP graph jobs' missing notes**: [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md).
+- **The HTTP graph jobs' missing notes**: [CLI-M59](../../../assistant/cli/MILESTONES.md#2026-11-27--the-http-graph-jobs-say-what-the-cli-says-maintenance-item-m59-the-http-graph-jobs-say-what-the-cli-says-and-build-a-mixed-graphs-code-as-the-cli-does) (shipped 2026-11-27).
 - **A card for a Downloads job's notes in the Mac app**: APP-M22's follow-up.
 - **An event type for warnings** (Open questions).
 - **59d's relay of house-voice stderr lines**: CLI-M58 writes that constraint into 59d.
@@ -312,7 +312,7 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 ## Links
 
 - **Blocked by:** — (CLI-M58 [shipped 2026-11-27](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice), the writer this item extends) · **Blocks:** —
-- **Sibling** (the same investigation's seams): [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27), the CLI's other notes on stderr; [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), the HTTP graph jobs' notes.
+- **Sibling** (the same investigation's seams): [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27), the CLI's other notes on stderr; [CLI-M59](../../../assistant/cli/MILESTONES.md#2026-11-27--the-http-graph-jobs-say-what-the-cli-says-maintenance-item-m59-the-http-graph-jobs-say-what-the-cli-says-and-build-a-mixed-graphs-code-as-the-cli-does) (shipped 2026-11-27), the HTTP graph jobs' notes.
 - **Relates to:**
   - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose stdout-warnings question this answers for the models verbs, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27), whose constraint keeps its own notes in the house voice on stderr;
