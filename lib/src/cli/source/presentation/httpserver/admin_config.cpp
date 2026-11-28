@@ -590,15 +590,24 @@ HttpResponse admin_create_mcp_server(const AdminConfigContext& context,
             return error_response(400, e.what());
         }
     }
+    // A config this route cannot read is answered, before a scaffold is
+    // written, as every admin read and write answers it (CLI-M52). A
+    // registration writes no file and keeps its own answer.
+    if (spec.command.empty()) {
+        if (const Loaded now = load_now(context); !now.config.has_value()) {
+            return now.failure;
+        }
+    }
     scaffold::McpServerResult result;
     try {
         result = scaffold::create_mcp_server(context.config_path, spec);
     } catch (const std::exception& e) {
+        // A collision, or an existing entry or folder, is a conflict; every
+        // other refusal is the error table's 400 (CLI-M52).
         const std::string what = e.what();
         const bool collision = what.find("already exists") != std::string::npos ||
-                               what.find("collides") != std::string::npos;
-        return error_response(collision ? 409 : 400, what,
-                              collision ? kConflict : std::string_view{});
+                               what.find(" collides with existing '") != std::string::npos;
+        return collision ? error_response(409, what, kConflict) : error_response(400, what);
     }
     const Loaded after = load_now(context);
     if (!after.config.has_value()) {

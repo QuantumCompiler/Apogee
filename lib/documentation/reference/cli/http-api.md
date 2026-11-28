@@ -498,8 +498,17 @@ this machine (what is missing and its fix in the message), an unknown one
 (the presets named), and `self` (Apogee's own tools, refused into Apogee with
 the reason). `201` with the view plus `directory` (empty for register-only)
 and `restart_required: true` — servers connect at startup. `409` (`type:
-conflict`) on a name collision without `force`; `400` on a name that is not a
-server name or a malformed body.
+conflict`) on a name that collides, case-folded, with an entry, or an entry
+or a scaffold folder that exists without `force`; `400` (`type:
+invalid_request_error`) on a name that is not a server name or one the
+config cannot hold, a new scaffolded name past 200 bytes, or a malformed
+body; `500` (`type: config_error`) when a scaffold's config cannot be read
+(a registration, which writes no file, answers that `400` in the edit's own
+words). Since CLI-M52 a scaffold says each of these before anything is
+written, so a refused one leaves no `mcp/<name>/`; only trouble after the
+first write (a lock another edit holds past its wait, an edit raced in
+between) leaves the folder, and its message names the folder and every file
+in it.
 
 ### `GET /v1/admin/mcp-servers/{id}`
 
@@ -541,12 +550,21 @@ written to `prompts/<name>.txt` and the schema to
 `schemas/<name>-output.json` under the data directory -- starter texts when
 no body is given -- and the entry is appended through the CLI's own edit,
 so the result is byte-identical to the CLI's. `201` with the view plus
-`prompt_path` and `schema_path`; `409` (`type: conflict`) when the agent or
-its files exist without `force`; `400` on an invalid name, policy, format, or
-body, and on a `collection` written as a path (CLI-M45), in the CLI's words
-(`'../x' is not a plain collection name`), or a new collection the config
-cannot hold, with no store on disk and no other reference in the config
-(CLI-M46), before any file is written. No restart is needed: `analyze` reads the config on every run.
+`prompt_path` and `schema_path`; `409` (`type: conflict`) when the name
+collides, case-folded, with an entry (`agent 'FOO' collides with existing
+'foo'`), or the agent or its files exist without `force`; `400` (`type:
+invalid_request_error`) on an invalid name, policy, format, or body, a name
+the config cannot hold (`agent name '-x' is not one both config formats can
+edit -- …`), a new name past 200 bytes, and on a `collection` written as a
+path (CLI-M45), in the CLI's words (`'../x' is not a plain collection
+name`), or a new collection the config cannot hold, with no store on disk
+and no other reference in the config (CLI-M46); `500` (`type: config_error`)
+when the config cannot be read. Since CLI-M52 every one of these is said
+before any file is written: the CLI's own add runs on the config's text
+first, so a refusal leaves no prompt or schema and the same request answers
+the same again. Only trouble after the first write (a lock another edit
+holds past its wait, an edit raced in between) leaves files, and its message
+names each. No restart is needed: `analyze` reads the config on every run.
 
 ### `GET /v1/admin/agents/{id}`
 
@@ -559,8 +577,11 @@ unknown.
 
 The twin of `apogee agents edit`: the same body as `POST`, with the name
 from the path and `force` implied, so `prompt_body` and `schema_body`
-replace the files in place. `200` with the view; `400` on a malformed body
-or a `collection` written as a path, as at `POST`.
+replace the files in place. `200` with the view; `400` (`type:
+invalid_request_error`) on a malformed body, a name the config cannot hold
+(`PUT /v1/admin/agents/-x`), or a `collection` written as a path, and `500`
+(`type: config_error`) when the config cannot be read, each before any file
+is written, as at `POST` (CLI-M52).
 
 ### `DELETE /v1/admin/agents/{id}`
 

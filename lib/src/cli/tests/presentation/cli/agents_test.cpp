@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
@@ -46,6 +47,25 @@ struct Home {
         std::ostringstream out;
         out << in.rdbuf();
         return out.str();
+    }
+};
+
+/// stdout and stderr captured for one run, restored however it ends.
+struct Captured {
+    std::ostringstream out;
+    std::ostringstream err;
+    std::streambuf* old_out = std::cout.rdbuf(out.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(err.rdbuf());
+
+    Captured() = default;
+    Captured(const Captured&) = delete;
+    Captured& operator=(const Captured&) = delete;
+    Captured(Captured&&) = delete;
+    Captured& operator=(Captured&&) = delete;
+
+    ~Captured() {
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
     }
 };
 
@@ -94,4 +114,38 @@ TEST_CASE("delete removes the entry; --purge removes the files, --keep-files kee
     CHECK(home.run({"agents", "delete", "ghost"}) != 0);
     CHECK(home.run({"agents", "delete", "security-review"}) != 0);  // bundled: no entry
     CHECK(home.run({"agents", "delete", "existing", "--purge", "--keep-files"}) != 0);
+}
+
+TEST_CASE("a refused name writes nothing, and every rerun gives the same refusal",
+          "[commands][agents][M52]") {
+    // CLI-M52: `agents create -- -x` wrote prompts/-x.txt and
+    // schemas/-x-output.json before the config refused the name; the rerun
+    // said "prompt file already exists", and `--force` wrote them again.
+    const Home home;
+    const std::string before = home.bytes();
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"agents", "create", "--", "-x"},
+          std::vector<std::string>{"agents", "create", "--", "-x"},
+          std::vector<std::string>{"agents", "create", "--force", "--", "-x"},
+          std::vector<std::string>{"agents", "create", "--", ".x"}}) {
+        INFO(args.back() << " " << args[2]);
+        std::string err;
+        std::string out;
+        int code = 0;
+        {
+            const Captured captured;
+            code = home.run(args);
+            err = captured.err.str();
+            out = captured.out.str();
+        }
+        CHECK(code == 1);
+        CHECK(out.empty());
+        CHECK(err.starts_with("apogee agents: agent name '" + args.back() + "'"));
+        CHECK(err.find("is not one both config formats can edit") != std::string::npos);
+        CHECK(err.find('\n') == err.size() - 1);
+        CHECK(err.find("already exists") == std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(home.root.path() / "prompts" / "-x.txt"));
+        CHECK_FALSE(std::filesystem::exists(home.root.path() / "schemas" / "-x-output.json"));
+        CHECK(home.bytes() == before);
+    }
 }

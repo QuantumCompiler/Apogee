@@ -1,11 +1,14 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 
 /// The TTY-free core that creates an agent: the same function `apogee agents
 /// create` and `POST /v1/admin/agents` call, so an agent made over HTTP is
@@ -51,12 +54,26 @@ struct AgentResult {
     std::filesystem::path config_path;
 };
 
+/// The longest new agent name, in bytes (CLI-M52, CLI-M46's cap): the
+/// schema's temporary file, `<name>-output.json.tmp.<10 digits>`, then fits
+/// NAME_MAX's 255. An existing entry with a longer name keeps working, and is
+/// replaced under `force`.
+inline constexpr std::size_t kNewAgentNameMax = 200;
+
 /// Throws std::runtime_error with the reason on any refusal: an empty or
-/// unusable name, an invalid policy or format, a file that exists without
-/// `force`, a config collision, or a write failure. On a config failure the
-/// scaffold files are left on disk and the error says so.
-[[nodiscard]] AgentResult create_agent(const std::filesystem::path& config_path,
-                                       const AgentSpec& spec);
+/// unusable name, an invalid policy or format, a new name (one the add
+/// would not replace) past `kNewAgentNameMax`, a file that exists without
+/// `force`, or what the
+/// config's add refuses. A refusal the config is certain to give -- a
+/// missing or broken config, the name rule, a case-folded collision, an
+/// existing entry without `force` -- is found by running that add on the
+/// config's text first, so it writes nothing (CLI-M52); when the sanitizer
+/// mapped the name, the words name both forms. Only trouble after that --
+/// a write failure, a lock held past `lock_wait`, an edit raced in between
+/// -- leaves files, and the words name every one written.
+[[nodiscard]] AgentResult create_agent(
+    const std::filesystem::path& config_path, const AgentSpec& spec,
+    std::chrono::milliseconds lock_wait = harness::kConfigLockWait);
 
 /// `.` and `:` become `-`; anything outside letters, digits, `_`, `-` is
 /// refused -- the same rule as an MCP server name, so a name that is one

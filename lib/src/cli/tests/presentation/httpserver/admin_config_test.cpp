@@ -780,6 +780,45 @@ TEST_CASE("the MCP server twins leave the same bytes the CLI leaves, and never l
     CHECK(admin_delete_mcp_server(fixture.context(), "ext").status == 404);
 }
 
+TEST_CASE(
+    "a refused MCP scaffold is a 400 invalid_request_error with no folder; a broken config 500",
+    "[httpserver][admin][mcp][M52]") {
+    // CLI-M52: `POST {"name":"-y"}` made mcp/-y/ and its three files, then
+    // answered 400 with an empty type. The core's dry run refuses first, in
+    // the error table's type; a config the route cannot read is answered as
+    // every admin route answers it, before the core.
+    const Fixture fixture;
+    const std::filesystem::path mcp = fixture.home.path() / "mcp";
+    const std::string before = Fixture::bytes(fixture.http_config);
+    for (int round = 0; round < 2; ++round) {
+        INFO("round " << round);
+        const HttpResponse refused =
+            admin_create_mcp_server(fixture.context(), post(nlohmann::json{{"name", "-y"}}));
+        CHECK(refused.status == 400);
+        CHECK(parsed(refused)["error"]["type"] == "invalid_request_error");
+        CHECK(parsed(refused)["error"]["message"].get<std::string>().find(
+                  "MCP server name '-y' is not one both config formats can edit") !=
+              std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(mcp / "-y"));
+    }
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+
+    std::ofstream{fixture.http_config, std::ios::binary} << "backends: [not, a, mapping]\n";
+    const HttpResponse broken =
+        admin_create_mcp_server(fixture.context(), post(nlohmann::json{{"name", "plain"}}));
+    CHECK(broken.status == 500);
+    CHECK(parsed(broken)["error"]["type"] == "config_error");
+    CHECK_FALSE(std::filesystem::exists(mcp / "plain"));
+    // Register-only writes no file and keeps its answer: the edit's own
+    // words, now in the error table's type for a 400.
+    const HttpResponse registered = admin_create_mcp_server(
+        fixture.context(), post(nlohmann::json{{"name", "plain"}, {"command", "/opt/srv"}}));
+    CHECK(registered.status == 400);
+    CHECK(parsed(registered)["error"]["type"] == "invalid_request_error");
+    CHECK(
+        parsed(registered)["error"]["message"].get<std::string>().starts_with("updating config: "));
+}
+
 TEST_CASE("a preset registered over HTTP is byte-identical to the CLI's --from and typed twin",
           "[httpserver][admin][mcp][presets]") {
     // 47c: `from` resolves the preset through the same core `mcp create

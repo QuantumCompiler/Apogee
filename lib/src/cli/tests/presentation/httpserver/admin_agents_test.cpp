@@ -257,3 +257,78 @@ TEST_CASE(
               with_body("POST", nlohmann::json{{"name", "reader"}, {"collection", "new_one"}}))
               .status == 201);
 }
+
+TEST_CASE("a name the config refuses is a 400 invalid_request_error, twice, and writes nothing",
+          "[httpserver][admin][agents][parity][M52]") {
+    // CLI-M52: `POST {"name":"-x"}` wrote both files, then answered 400 with
+    // an empty type -- and the same POST again answered 409. The core's dry
+    // run refuses first, so every answer is the first one, in the error
+    // table's type for a 400.
+    const Fixture fixture;
+    const std::filesystem::path http = fixture.home.path() / "http";
+    const std::string before = Fixture::bytes(fixture.http_config);
+    for (int round = 0; round < 2; ++round) {
+        INFO("round " << round);
+        const HttpResponse posted = admin_create_agent(
+            fixture.context(), with_body("POST", nlohmann::json{{"name", "-x"}}));
+        CHECK(posted.status == 400);
+        CHECK(parsed(posted)["error"]["type"] == "invalid_request_error");
+        CHECK(parsed(posted)["error"]["message"].get<std::string>().find(
+                  "agent name '-x' is not one both config formats can edit") != std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(http / "prompts" / "-x.txt"));
+        CHECK_FALSE(std::filesystem::exists(http / "schemas" / "-x-output.json"));
+    }
+    // A name that holds the word is still the name rule's 400, not a 409.
+    const HttpResponse worded = admin_create_agent(
+        fixture.context(), with_body("POST", nlohmann::json{{"name", "-collides"}}));
+    CHECK(worded.status == 400);
+    CHECK(parsed(worded)["error"]["type"] == "invalid_request_error");
+    const HttpResponse put =
+        admin_put_agent(fixture.context(), "-x", with_body("PUT", nlohmann::json::object()));
+    CHECK(put.status == 400);
+    CHECK(parsed(put)["error"]["type"] == "invalid_request_error");
+    CHECK_FALSE(std::filesystem::exists(http / "prompts" / "-x.txt"));
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+}
+
+TEST_CASE("a case variant is a 409 conflict before any file, its neighbour's files gone",
+          "[httpserver][admin][agents][M52]") {
+    const Fixture fixture;
+    const std::filesystem::path http = fixture.home.path() / "http";
+    REQUIRE(
+        admin_create_agent(fixture.context(), with_body("POST", nlohmann::json{{"name", "foo2"}}))
+            .status == 201);
+    std::filesystem::remove(http / "prompts" / "foo2.txt");
+    std::filesystem::remove(http / "schemas" / "foo2-output.json");
+    const std::string before = Fixture::bytes(fixture.http_config);
+    const HttpResponse posted =
+        admin_create_agent(fixture.context(), with_body("POST", nlohmann::json{{"name", "FOO2"}}));
+    CHECK(posted.status == 409);
+    CHECK(parsed(posted)["error"]["type"] == "conflict");
+    CHECK(parsed(posted)["error"]["message"].get<std::string>().find(
+              "collides with existing 'foo2'") != std::string::npos);
+    CHECK(std::filesystem::is_empty(http / "prompts"));
+    CHECK(std::filesystem::is_empty(http / "schemas"));
+    CHECK(Fixture::bytes(fixture.http_config) == before);
+}
+
+TEST_CASE("a config broken after the server started is a 500 config_error, and nothing written",
+          "[httpserver][admin][agents][M52]") {
+    // As every admin read and write answers a config it cannot read
+    // (`load_now`), before the core runs.
+    const Fixture fixture;
+    const std::filesystem::path http = fixture.home.path() / "http";
+    std::ofstream{fixture.http_config, std::ios::binary} << "backends: [not, a, mapping]\n";
+    for (const HttpResponse& answered :
+         {admin_create_agent(fixture.context(),
+                             with_body("POST", nlohmann::json{{"name", "plain"}})),
+          admin_put_agent(fixture.context(), "plain",
+                          with_body("PUT", nlohmann::json::object()))}) {
+        CHECK(answered.status == 500);
+        CHECK(parsed(answered)["error"]["type"] == "config_error");
+        CHECK(parsed(answered)["error"]["message"].get<std::string>().starts_with(
+            "the config cannot be read: "));
+    }
+    CHECK_FALSE(std::filesystem::exists(http / "prompts"));
+    CHECK_FALSE(std::filesystem::exists(http / "schemas"));
+}

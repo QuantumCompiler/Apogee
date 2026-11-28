@@ -753,6 +753,140 @@ if(NOT DB_AFTER STREQUAL DB_BEFORE)
 endif()
 file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
 
+# --- CLI-M52: a refused agent or MCP scaffold writes nothing ---------------
+# `agents create -- -x` wrote prompts/-x.txt and schemas/-x-output.json, then
+# the config refused the name: the rerun looped on "prompt file already
+# exists", `--force` wrote them again, and on APFS `--force FOO` beside `foo`
+# replaced foo. `mcp create -- -m` left mcp/-m/ the same way. The config's
+# own add now runs on its text before the first file.
+set(SCAFFOLDS "${APOGEE_WORK_DIR}/prompts" "${APOGEE_WORK_DIR}/schemas"
+    "${APOGEE_WORK_DIR}/mcp")
+function(scaffold_listing out)
+    set(listing "")
+    foreach(dir ${SCAFFOLDS})
+        file(GLOB_RECURSE found LIST_DIRECTORIES true "${dir}/*")
+        list(APPEND listing ${found})
+    endforeach()
+    list(SORT listing)
+    set(${out} "${listing}" PARENT_SCOPE)
+endfunction()
+# Refused twice (and a third time with --force when FORCE is set), each run
+# one stderr line in the verb's voice naming `said`, stdout empty, the same
+# words both times, and the scaffold folders and the config as they were.
+function(expect_scaffold_refusal verb said)
+    cmake_parse_arguments(PARSE_ARGV 2 refusal "FORCE" "" "")
+    scaffold_listing(listing_before)
+    file(READ "${CONFIG_FILE}" config_before)
+    set(runs plain again)
+    if(refusal_FORCE)
+        list(APPEND runs force)
+    endif()
+    set(first "")
+    foreach(run ${runs})
+        set(args ${verb} create ${refusal_UNPARSED_ARGUMENTS})
+        if(run STREQUAL "force")
+            set(args ${verb} create --force ${refusal_UNPARSED_ARGUMENTS})
+        endif()
+        apogee_run(1 ${args})
+        list(JOIN args " " shown)
+        string(STRIP "${APOGEE_ERR}" err)
+        string(FIND "${err}" "${said}" at)
+        if(NOT APOGEE_OUT STREQUAL "" OR err MATCHES "\n" OR NOT err MATCHES "^apogee ${verb}: "
+           OR at EQUAL -1)
+            message(FATAL_ERROR "apogee ${shown}: expected one 'apogee ${verb}: ' line naming "
+                "'${said}', stdout empty; got\n  stdout: ${APOGEE_OUT}\n  stderr: ${APOGEE_ERR}")
+        endif()
+        if(first STREQUAL "")
+            set(first "${err}")
+        elseif(NOT err STREQUAL first)
+            message(FATAL_ERROR "apogee ${shown} ('${run}') refused otherwise than the first run:\n"
+                "  first: ${first}\n  now:   ${err}")
+        endif()
+        scaffold_listing(listing_after)
+        if(NOT listing_after STREQUAL listing_before)
+            message(FATAL_ERROR "a refused apogee ${shown} wrote files: ${listing_after}")
+        endif()
+        expect_config_is("${config_before}" "a refused apogee ${shown}")
+    endforeach()
+endfunction()
+
+set(BOTH_FORMATS "is not one both config formats can edit")
+string(REPEAT "n" 201 LONG_201)
+expect_scaffold_refusal(agents "agent name '-x' ${BOTH_FORMATS}" FORCE -- -x)
+expect_scaffold_refusal(agents "agent name '.x' (as '-x') ${BOTH_FORMATS}" -- .x)
+expect_scaffold_refusal(agents "agent name ':y' (as '-y') ${BOTH_FORMATS}" -- :y)
+expect_scaffold_refusal(agents "agent name 'null' ${BOTH_FORMATS}" null)
+expect_scaffold_refusal(agents "is 201 bytes -- a new name is at most 200" -- "${LONG_201}")
+expect_scaffold_refusal(mcp "MCP server name '-m' ${BOTH_FORMATS}" FORCE -- -m)
+expect_scaffold_refusal(mcp "MCP server name '.z' (as '-z') ${BOTH_FORMATS}" -- .z)
+expect_scaffold_refusal(mcp "MCP server name ':y' (as '-y') ${BOTH_FORMATS}" -- :y)
+expect_scaffold_refusal(mcp "MCP server name 'null' ${BOTH_FORMATS}" null)
+expect_scaffold_refusal(mcp "is 201 bytes -- a new name is at most 200" -- "${LONG_201}")
+
+# A case variant collides first, its neighbour's files there or not, and the
+# neighbour's entry and prompt are as they were.
+apogee_run(0 agents create foo --description "the original")
+apogee_run(0 mcp create foo)
+file(READ "${APOGEE_WORK_DIR}/prompts/foo.txt" FOO_PROMPT)
+expect_scaffold_refusal(agents "agent 'FOO' collides with existing 'foo'" FOO)
+expect_scaffold_refusal(mcp "MCP server 'FOO' collides with existing 'foo'" FOO)
+file(READ "${APOGEE_WORK_DIR}/prompts/foo.txt" FOO_PROMPT_AFTER)
+file(READ "${CONFIG_FILE}" WITH_FOO)
+if(NOT FOO_PROMPT_AFTER STREQUAL FOO_PROMPT OR NOT WITH_FOO MATCHES "the original")
+    message(FATAL_ERROR "a refused FOO changed foo")
+endif()
+file(REMOVE "${APOGEE_WORK_DIR}/prompts/foo.txt" "${APOGEE_WORK_DIR}/schemas/foo-output.json")
+file(REMOVE_RECURSE "${APOGEE_WORK_DIR}/mcp/foo")
+expect_scaffold_refusal(agents "agent 'FOO' collides with existing 'foo'" FOO)
+expect_scaffold_refusal(mcp "MCP server 'FOO' collides with existing 'foo'" FOO)
+# Its own files gone, an existing entry is refused as existing.
+expect_scaffold_refusal(agents "agent 'foo' already exists; pass --force to replace it" foo)
+expect_scaffold_refusal(mcp "MCP server 'foo' already exists; pass --force to replace it" foo)
+file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
+
+# A config-less home and a broken config: refused, nothing written.
+file(RENAME "${CONFIG_FILE}" "${CONFIG_FILE}.away")
+foreach(verb agents mcp)
+    scaffold_listing(listing_before)
+    apogee_run(1 ${verb} create plain)
+    last_stderr_line(last)
+    scaffold_listing(listing_after)
+    if(NOT last MATCHES "^apogee ${verb}: .*config init" OR NOT listing_after STREQUAL listing_before
+       OR EXISTS "${CONFIG_FILE}")
+        message(FATAL_ERROR "${verb} create in a config-less home wrote, or did not name "
+            "config init:\n${APOGEE_ERR}${listing_after}")
+    endif()
+endforeach()
+file(RENAME "${CONFIG_FILE}.away" "${CONFIG_FILE}")
+file(WRITE "${CONFIG_FILE}" "backends: [not, a, mapping]\n")
+foreach(verb agents mcp)
+    scaffold_listing(listing_before)
+    apogee_run(1 ${verb} create plain)
+    last_stderr_line(last)
+    scaffold_listing(listing_after)
+    if(NOT last MATCHES "^apogee ${verb}: " OR last MATCHES "written"
+       OR NOT listing_after STREQUAL listing_before)
+        message(FATAL_ERROR "${verb} create over a broken config wrote:\n${APOGEE_ERR}${listing_after}")
+    endif()
+endforeach()
+file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
+
+# Guards: a plain name still creates both files and the entry, and a
+# register-only duplicate keeps its words.
+apogee_run(0 agents create plain)
+if(NOT EXISTS "${APOGEE_WORK_DIR}/prompts/plain.txt"
+   OR NOT EXISTS "${APOGEE_WORK_DIR}/schemas/plain-output.json")
+    message(FATAL_ERROR "agents create plain did not write its files")
+endif()
+apogee_run(0 mcp create echoer --command /bin/echo)
+apogee_run(1 mcp create echoer --command /bin/echo)
+last_stderr_line(last)
+if(NOT last STREQUAL "apogee mcp: updating config: MCP server 'echoer' already exists; pass --force to replace it")
+    message(FATAL_ERROR "a register-only duplicate changed its words:\n${APOGEE_ERR}")
+endif()
+file(REMOVE "${APOGEE_WORK_DIR}/prompts/plain.txt" "${APOGEE_WORK_DIR}/schemas/plain-output.json")
+file(WRITE "${CONFIG_FILE}" "${M46_BASE}")
+
 # --- vector and hybrid retrieval through the real binary ------------------
 # A mock embedder from config (a mock entry with an embedding_model) stands in
 # for a real one: free, deterministic, and -- the point -- a second one with a

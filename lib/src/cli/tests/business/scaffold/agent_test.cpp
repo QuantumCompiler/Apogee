@@ -2,14 +2,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <vector>
 
 #include "contracts/config.h"
+#include "contracts/config_edit.h"
 #include "contracts/layout.h"
 #include "support/env_guard.h"
 #include "support/text_edits.h"
@@ -44,6 +49,33 @@ std::string read(const std::filesystem::path& path) {
     std::ostringstream out;
     out << in.rdbuf();
     return out.str();
+}
+
+/// Every file under the home but the config itself, sorted: what a refused
+/// create must leave as it found it (CLI-M52).
+std::vector<std::filesystem::path> files_besides_config(const Tree& tree) {
+    std::vector<std::filesystem::path> files;
+    std::error_code code;
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator{tree.home.path(), code}) {
+        if (entry.is_regular_file() && entry.path() != tree.config) {
+            files.push_back(entry.path());
+        }
+    }
+    std::ranges::sort(files);
+    return files;
+}
+
+/// The words `create_agent` refuses `spec` with; fails the case when it
+/// creates instead.
+std::string refusal(const Tree& tree, const AgentSpec& spec) {
+    try {
+        (void)create_agent(tree.config, spec);
+    } catch (const std::runtime_error& e) {
+        return e.what();
+    }
+    FAIL("'" + spec.name + "' was created, not refused");
+    return {};
 }
 
 }  // namespace
@@ -174,19 +206,28 @@ TEST_CASE("a collection named by a path is refused before any file is written",
     CHECK(made.name == "reader");
 }
 
-TEST_CASE("a config failure leaves the files on disk and says so", "[scaffold][agent]") {
+TEST_CASE("a missing or broken config is refused before any file is written",
+          "[scaffold][agent][M52]") {
+    // Revised 2026-11-27 (CLI-M52): this case pinned "a config failure leaves
+    // the files on disk and says so". A config the edit is certain to refuse
+    // is now refused by the dry run, before the first file, as `models
+    // pull`'s check_registrations refuses it; only trouble after the dry run
+    // keeps files, and names them (the held-lock case below).
     const Tree tree;
     std::ofstream{tree.config, std::ios::binary} << "backends: [not, a, mapping]\n";
+    const std::vector<std::filesystem::path> before = files_besides_config(tree);
     AgentSpec spec;
     spec.name = "orphan";
-    try {
-        (void)create_agent(tree.config, spec);
-        FAIL("a broken config must refuse the entry");
-    } catch (const std::runtime_error& e) {
-        CHECK(std::string{e.what()}.starts_with("updating config:"));
-        CHECK(std::string{e.what()}.find("the prompt was written to") != std::string::npos);
-    }
-    CHECK(std::filesystem::exists(tree.home.path() / "prompts" / "orphan.txt"));
+    const std::string broken = refusal(tree, spec);
+    CHECK_FALSE(broken.starts_with("updating config:"));
+    CHECK(broken.find("written") == std::string::npos);
+    CHECK(files_besides_config(tree) == before);
+    CHECK_FALSE(std::filesystem::exists(tree.home.path() / "prompts" / "orphan.txt"));
+
+    std::filesystem::remove(tree.config);
+    const std::string missing = refusal(tree, spec);
+    CHECK(missing.find("config init") != std::string::npos);
+    CHECK(files_besides_config(tree).empty());
 }
 
 TEST_CASE("prompts/, schemas/ and analyses/ are declared once, in the layout",
@@ -231,4 +272,183 @@ TEST_CASE("an existing prompt file with no entry is never clobbered without forc
     spec.force = true;
     CHECK_NOTHROW(create_agent(tree.config, spec));
     CHECK(read(prompt) != "MY EDITED PROMPT\n");
+}
+
+TEST_CASE("a name the config cannot hold is refused before any file, run after run",
+          "[scaffold][agent][M52]") {
+    // CLI-M52: `agents create -- -x` wrote prompts/-x.txt and
+    // schemas/-x-output.json, then the config refused the name; a rerun
+    // looped on "prompt file already exists", and `--force` wrote again.
+    // The add runs on the config's text first, so nothing is written, and
+    // every rerun gives the same refusal.
+    const Tree tree;
+    const std::string bytes = tree.bytes();
+    const std::vector<std::filesystem::path> before = files_besides_config(tree);
+    for (const auto& [typed, said] : std::vector<std::pair<std::string, std::string>>{
+             {"-x", "agent name '-x' is not one"},
+             {".x", "agent name '.x' (as '-x') is not one"},
+             {":y", "agent name ':y' (as '-y') is not one"},
+             {"null", "agent name 'null' is not one"}}) {
+        for (const bool force : {false, false, true}) {
+            INFO(typed << (force ? " --force" : ""));
+            AgentSpec spec;
+            spec.name = typed;
+            spec.force = force;
+            const std::string words = refusal(tree, spec);
+            CHECK(words.starts_with(said));
+            CHECK(words.find("both config formats can edit") != std::string::npos);
+            CHECK(words.find("file already exists") == std::string::npos);
+            CHECK(words.find('\n') == std::string::npos);
+            CHECK(files_besides_config(tree) == before);
+            CHECK(tree.bytes() == bytes);
+        }
+    }
+}
+
+TEST_CASE("a case variant collides before any file, its neighbour's files there or not",
+          "[scaffold][agent][M52]") {
+    // On APFS the file check spoke first, and its `--force` remedy replaced
+    // the other agent. The dry run says the collision on every disk.
+    const Tree tree;
+    AgentSpec original;
+    original.name = "foo";
+    original.description = "the original";
+    (void)create_agent(tree.config, original);
+    const std::string bytes = tree.bytes();
+    const std::filesystem::path prompt = tree.home.path() / "prompts" / "foo.txt";
+    const std::string prompt_text = read(prompt);
+    const std::vector<std::filesystem::path> before = files_besides_config(tree);
+
+    AgentSpec variant;
+    variant.name = "FOO";
+    const std::string present = refusal(tree, variant);
+    CHECK(present.find("collides with existing 'foo'") != std::string::npos);
+    CHECK(files_besides_config(tree) == before);
+    CHECK(read(prompt) == prompt_text);
+    CHECK(tree.bytes() == bytes);
+
+    for (const std::filesystem::path& file : before) {
+        std::filesystem::remove(file);
+    }
+    const std::string absent = refusal(tree, variant);
+    CHECK(absent.find("collides with existing 'foo'") != std::string::npos);
+    CHECK(files_besides_config(tree).empty());
+    CHECK(tree.bytes() == bytes);
+}
+
+TEST_CASE("an entry whose files are gone is refused as existing, and nothing is written",
+          "[scaffold][agent][M52]") {
+    const Tree tree;
+    AgentSpec spec;
+    spec.name = "foo";
+    (void)create_agent(tree.config, spec);
+    for (const std::filesystem::path& file : files_besides_config(tree)) {
+        std::filesystem::remove(file);
+    }
+    const std::string bytes = tree.bytes();
+    CHECK(refusal(tree, spec).find("agent 'foo' already exists; pass --force to replace it") !=
+          std::string::npos);
+    CHECK(files_besides_config(tree).empty());
+    CHECK(tree.bytes() == bytes);
+    // --force still replaces it in place, and writes the files again.
+    spec.force = true;
+    CHECK_NOTHROW(create_agent(tree.config, spec));
+    CHECK(std::filesystem::exists(tree.home.path() / "prompts" / "foo.txt"));
+}
+
+TEST_CASE("a new name past 200 bytes is refused before any file; 200 is created",
+          "[scaffold][agent][M52]") {
+    // `<name>-output.json.tmp.<10 digits>` must fit NAME_MAX's 255: a
+    // 232-byte name once left its prompt behind when the schema's temporary
+    // file could not be made.
+    const Tree tree;
+    const std::string bytes = tree.bytes();
+    AgentSpec spec;
+    spec.name = std::string(201, 'n');
+    const std::string words = refusal(tree, spec);
+    CHECK(words.find("is 201 bytes -- a new name is at most 200") != std::string::npos);
+    CHECK(files_besides_config(tree).empty());
+    CHECK(tree.bytes() == bytes);
+    spec.name = std::string(200, 'n');
+    CHECK(create_agent(tree.config, spec).name == spec.name);
+}
+
+TEST_CASE("a lock held past the wait keeps the files, and the words name every one",
+          "[scaffold][agent][M52]") {
+    // Trouble after the dry run -- here a config.json.lock another edit holds
+    // -- is the one case that leaves files, and says each one.
+    const Tree tree;
+    const std::string bytes = tree.bytes();
+    const apogee::platform::FileLock held = apogee::harness::lock_config_file(tree.config);
+    AgentSpec spec;
+    spec.name = "late";
+    try {
+        (void)create_agent(tree.config, spec, std::chrono::milliseconds{150});
+        FAIL("the edit went through a held lock");
+    } catch (const std::runtime_error& e) {
+        const std::string words = e.what();
+        CHECK(words.starts_with("updating config: another edit of "));
+        CHECK(words.find((tree.home.path() / "prompts" / "late.txt").string()) !=
+              std::string::npos);
+        CHECK(words.find((tree.home.path() / "schemas" / "late-output.json").string()) !=
+              std::string::npos);
+        CHECK(words.ends_with("; run it again with --force to replace them)"));
+    }
+    CHECK(std::filesystem::exists(tree.home.path() / "prompts" / "late.txt"));
+    CHECK(std::filesystem::exists(tree.home.path() / "schemas" / "late-output.json"));
+    CHECK(tree.bytes() == bytes);
+}
+
+TEST_CASE("a config link that leads nowhere is refused before any file", "[scaffold][agent][M52]") {
+    // The dry run reads the config as the edit will: through the link, so a
+    // dangling one is refused with both ends named, and nothing is written.
+    const Tree tree;
+    std::filesystem::remove(tree.config);
+    std::error_code code;
+    std::filesystem::create_symlink(tree.home.path() / "nowhere" / "config.json", tree.config,
+                                    code);
+    if (code) {
+        SKIP("no symbolic links here: " + code.message());
+    }
+    AgentSpec spec;
+    spec.name = "linked";
+    CHECK(refusal(tree, spec).find(" is a link to ") != std::string::npos);
+    CHECK(files_besides_config(tree).empty());
+}
+
+TEST_CASE("a hand-written entry past 200 bytes is not new: it lists, and force replaces it",
+          "[scaffold][agent][M52]") {
+    // The cap is for new names only (ADR 0006): an existing entry with a
+    // longer name keeps loading, and `--force` (or a PUT) still edits it.
+    const Tree tree;
+    const std::string name(210, 'h');
+    apogee::harness::AgentConfig hand;
+    hand.prompts = {"prompts/" + name + ".txt"};
+    std::ofstream{tree.config, std::ios::binary}
+        << apogee::harness::append_agent(tree.bytes(), name, hand, false);
+    REQUIRE(apogee::harness::load_config(tree.config).find_agent(name) != nullptr);
+    AgentSpec spec;
+    spec.name = name;
+    spec.no_schema = true;
+    CHECK(refusal(tree, spec).find("already exists; pass --force") != std::string::npos);
+    spec.force = true;
+    CHECK(create_agent(tree.config, spec).name == name);
+    CHECK(std::filesystem::exists(tree.home.path() / "prompts" / (name + ".txt")));
+    CHECK(apogee::harness::load_config(tree.config).find_agent(name) != nullptr);
+}
+
+TEST_CASE("a layout the YAML editor refuses is said before any file", "[scaffold][agent][M52]") {
+    // CLI-M44's refusals come out of `append_agent`, so the dry run says
+    // them: a 4-space file is refused naming the indent and `config migrate`.
+    const Tree tree;
+    std::ofstream{tree.config, std::ios::binary}
+        << "backends:\n    mock:\n        type: mock\nagents:\n    existing:\n"
+           "        tools: none\n";
+    const std::string bytes = tree.bytes();
+    AgentSpec spec;
+    spec.name = "fresh";
+    const std::string words = refusal(tree, spec);
+    CHECK(words.find("config migrate") != std::string::npos);
+    CHECK(files_besides_config(tree).empty());
+    CHECK(tree.bytes() == bytes);
 }

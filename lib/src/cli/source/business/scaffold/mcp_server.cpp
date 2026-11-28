@@ -1,7 +1,10 @@
 #include "scaffold/mcp_server.h"
 
+#include <algorithm>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -195,6 +198,27 @@ std::string render(std::string_view tmpl, std::string_view name) {
     return out;
 }
 
+/// A refusal's words about `mapped`, its first mention naming the typed form
+/// beside it when the sanitizer changed the name (CLI-M52), as the agent
+/// scaffold says it.
+std::string naming_both(std::string words, std::string_view typed, std::string_view mapped) {
+    const std::string quoted = "'" + std::string{mapped} + "'";
+    if (const std::size_t at = words.find(quoted); typed != mapped && at != std::string::npos) {
+        words.replace(at, quoted.size(), "'" + std::string{typed} + "' (as " + quoted + ")");
+    }
+    return words;
+}
+
+/// The config's text as the locked edit will read it, parsed as the edit
+/// parses it first, for the dry run of its add (CLI-M52; the agent
+/// scaffold's twin): a missing or broken config is refused before the
+/// folder exists. Only `edit_config_file` writes.
+std::string config_text_as_edited(const std::filesystem::path& config_path) {
+    std::string text = harness::read_config_file(harness::config_edit_target(config_path));
+    (void)harness::parse_config(text, config_path.string());
+    return text;
+}
+
 void write_file(const std::filesystem::path& path, std::string_view content, bool executable) {
     harness::write_file_atomically(path, content);
     if (executable && harness::supports_private_modes()) {
@@ -247,7 +271,7 @@ std::string readme_template(std::string_view name) {
 }
 
 McpServerResult create_mcp_server(const std::filesystem::path& config_path,
-                                  const McpServerSpec& spec) {
+                                  const McpServerSpec& spec, std::chrono::milliseconds lock_wait) {
     McpServerResult result;
     result.name = sanitize_server_name(spec.name);
     result.config_path = config_path;
@@ -258,39 +282,87 @@ McpServerResult create_mcp_server(const std::filesystem::path& config_path,
         // Register-only: the executable exists already, in any language.
         entry.command = spec.command;
         entry.args = spec.args;
-    } else {
-        // The scaffold lives beside the config's data directory: the layout's
-        // `mcp/` row, derived from the config path so a temp tree stays
-        // hermetic.
-        const std::filesystem::path home = config_path.parent_path().parent_path();
-        result.directory = home / "mcp" / result.name;
-        std::error_code code;
-        if (std::filesystem::exists(result.directory, code) && !spec.force) {
-            throw std::runtime_error("MCP server directory already exists: " +
-                                     result.directory.string() + " (use --force to overwrite)");
+        result.command = entry.command;
+        try {
+            harness::edit_config_file(
+                config_path,
+                [&](std::string_view content) {
+                    return harness::append_mcp_server(content, result.name, entry, spec.force);
+                },
+                lock_wait);
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::string{"updating config: "} + e.what());
         }
-        std::filesystem::create_directories(result.directory, code);
-        if (code) {
-            throw std::runtime_error("could not create " + result.directory.string() + ": " +
-                                     code.message());
-        }
-        write_file(result.directory / "server.py", python_server_template(result.name), true);
-        write_file(result.directory / "test_server.py", python_test_template(result.name), false);
-        write_file(result.directory / "README.md", readme_template(result.name), false);
-        entry.command = (result.directory / "server.py").string();
+        return result;
     }
+
+    // The scaffold lives beside the config's data directory: the layout's
+    // `mcp/` row, derived from the config path so a temp tree stays hermetic.
+    const std::filesystem::path home = config_path.parent_path().parent_path();
+    result.directory = home / "mcp" / result.name;
+    entry.command = (result.directory / "server.py").string();
     result.command = entry.command;
 
+    // A refusal the config is certain to give writes nothing (CLI-M52): the
+    // config read as the edit reads it, the cap on a name the add would not
+    // replace, then the one add run on the text and kept nowhere, all before
+    // the folder.
+    const std::string text = config_text_as_edited(config_path);
     try {
-        harness::edit_config_file(config_path, [&](std::string_view content) {
-            return harness::append_mcp_server(content, result.name, entry, spec.force);
-        });
+        const std::vector<std::string> entries = harness::section_entry_names(text, "mcp_servers");
+        const bool replacing = std::ranges::find(entries, result.name) != entries.end() ||
+                               harness::fold_collision(entries, result.name).has_value();
+        if (!replacing && result.name.size() > kNewServerNameMax) {
+            throw std::runtime_error(
+                "MCP server name '" + result.name + "' is " + std::to_string(result.name.size()) +
+                " bytes -- a new name is at most " + std::to_string(kNewServerNameMax));
+        }
+        (void)harness::parse_edited_config(
+            harness::append_mcp_server(text, result.name, entry, spec.force));
     } catch (const std::exception& e) {
-        // The files were written; say so rather than hiding it.
-        throw std::runtime_error(std::string{"updating config: "} + e.what() +
-                                 (result.directory.empty() ? ""
-                                                           : " (the scaffold was written to " +
-                                                                 result.directory.string() + ")"));
+        throw std::runtime_error(naming_both(e.what(), spec.name, result.name));
+    }
+
+    std::error_code code;
+    if (std::filesystem::exists(result.directory, code) && !spec.force) {
+        throw std::runtime_error("MCP server directory already exists: " +
+                                 result.directory.string() + " (use --force to overwrite)");
+    }
+    std::filesystem::create_directories(result.directory, code);
+    if (code) {
+        throw std::runtime_error("could not create " + result.directory.string() + ": " +
+                                 code.message());
+    }
+    // From here a failure -- a write, a lock held past the wait, an edit
+    // raced in between -- leaves the folder, and says every file in it.
+    std::vector<std::string> written;
+    bool editing = false;
+    try {
+        write_file(result.directory / "server.py", python_server_template(result.name), true);
+        written.emplace_back("server.py");
+        write_file(result.directory / "test_server.py", python_test_template(result.name), false);
+        written.emplace_back("test_server.py");
+        write_file(result.directory / "README.md", readme_template(result.name), false);
+        written.emplace_back("README.md");
+        editing = true;
+        harness::edit_config_file(
+            config_path,
+            [&](std::string_view content) {
+                return harness::append_mcp_server(content, result.name, entry, spec.force);
+            },
+            lock_wait);
+    } catch (const std::exception& e) {
+        std::string files;
+        for (std::size_t i = 0; i < written.size(); ++i) {
+            files += i == 0 ? "" : (i + 1 == written.size() ? " and " : ", ");
+            files += written[i];
+        }
+        throw std::runtime_error(
+            (editing ? std::string{"updating config: "} : std::string{}) + e.what() +
+            (files.empty()
+                 ? " (nothing was written into the scaffold's folder, " + result.directory.string()
+                 : " (the scaffold was written to " + result.directory.string() + ": " + files) +
+            "; run it again with --force to replace it)");
     }
     return result;
 }
