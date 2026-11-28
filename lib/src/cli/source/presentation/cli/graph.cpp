@@ -23,6 +23,7 @@
 #include "cli/graph_artifacts.h"
 #include "cli/graph_navigate.h"
 #include "cli/helpers.h"
+#include "cli/notes.h"
 #include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -40,6 +41,7 @@
 #include "machine/json_reporter.h"
 #include "operations/collections.h"
 #include "operations/graph_dedupe_pass.h"
+#include "operations/graph_notes.h"
 #include "operations/graph_sources.h"
 #include "operations/knowledge_core.h"
 #include "platform/file_lock.h"
@@ -266,6 +268,15 @@ struct Generation {
     return out;
 }
 
+/// `sentence` with its first letter capitalised: a shared note's words said
+/// as a line of their own.
+[[nodiscard]] std::string sentence_case(std::string sentence) {
+    if (!sentence.empty() && sentence.front() >= 'a' && sentence.front() <= 'z') {
+        sentence.front() = static_cast<char>(sentence.front() - 'a' + 'A');
+    }
+    return sentence;
+}
+
 [[nodiscard]] std::string join(const std::vector<std::string>& items) {
     std::string out;
     for (const std::string& item : items) {
@@ -317,16 +328,17 @@ void print_reconcile(const embedstore::ReconcileResult& reconcile) {
               << reconcile.states_pruned << " source state(s).\n";
 }
 
-/// The embed phase's line and its warning. True since 57t: the next build
-/// with an embedder embeds every entity still without a vector, whatever
-/// left it so.
+/// The embed phase's line, and its warning said as a note (CLI-M58). True
+/// since 57t: the next build with an embedder embeds every entity still
+/// without a vector, whatever left it so.
 void print_embed_summary(const graph::BuildResult& result) {
     if (result.nodes_embedded > 0) {
         std::cout << "  Entities embedded: " << result.nodes_embedded << "\n";
     }
     if (!result.embed_error.empty()) {
-        std::cout << "Warning: entity embedding stopped early (" << result.embed_error
-                  << ") -- affected entities stay full-text searchable; re-run to embed them.\n";
+        say_note("graph", "warning: entity embedding stopped early (" + result.embed_error +
+                              ") -- affected entities stay full-text searchable; re-run to "
+                              "embed them.");
     }
 }
 
@@ -724,16 +736,20 @@ struct DedupeFlags {
             busy.above([&] { print_dry_run_extraction(chunk, result); });
         };
     }
-    // Failed chunks print as they happen -- a count alone cannot tell a
+    // Failed chunks are said as they happen -- a count alone cannot tell a
     // flaky backend from a model that cannot produce the JSON. A dry run
-    // prints the whole error; a real build keeps it to one line.
+    // prints the whole error on stdout, part of its extraction preview; a
+    // real build says it as a note, cut to one line (CLI-M58).
     options.on_chunk_failed = [&busy, dry_run = request.dry_run](const embedstore::Chunk& chunk,
                                                                  std::string_view error) {
         busy.above([&] {
-            std::cout << "\n"
-                      << chunk.source << " [chunk " << chunk.ordinal
-                      << "] FAILED: " << (dry_run ? std::string{error} : preview_text(error, 200))
-                      << "\n";
+            const std::string failed =
+                chunk.source + " [chunk " + std::to_string(chunk.ordinal) + "] FAILED: ";
+            if (dry_run) {
+                std::cout << "\n" << failed << error << "\n";
+            } else {
+                say_note("graph", failed + preview_text(error, 200));
+            }
         });
     };
     return options;
@@ -769,15 +785,16 @@ void print_skipped(const graph::SourceBuildResult& result, bool all) {
 
 void print_code_summary(const std::string& name, const GraphSourceBuild& build, bool show_skipped) {
     const graph::SourceBuildResult& result = build.result;
+    // Notes, not the summary (CLI-M58): one stderr line each.
     for (const std::string& missing : build.missing) {
-        std::cout << "[graph] source tree " << missing
-                  << " is not a directory -- it contributes nothing, and what it contributed "
-                     "is forgotten.\n";
+        say_note("graph", "source tree " + missing +
+                              " is not a directory -- it contributes nothing, and what it "
+                              "contributed is forgotten.");
     }
     for (const std::string& empty : build.empty) {
-        std::cout << "[graph] source tree " << empty
-                  << " offers no file to read -- inside a git repository, only what git tracks "
-                     "or does not ignore is read.\n";
+        say_note("graph", "source tree " + empty +
+                              " offers no file to read -- inside a git repository, only what git "
+                              "tracks or does not ignore is read.");
     }
     if (result.cancelled) {
         std::cout << "Code graph for \"" << name << "\" interrupted after " << result.files_parsed
@@ -939,12 +956,12 @@ void build_code(embedstore::Store& store, const Target& target,
                   "' has no source trees -- --lang applies to them; add one "
                   "with --source <dir>");
     }
+    // The warnings are not said here (CLI-M58): the build that always follows
+    // says each fact once -- a tree that is not a directory in the code
+    // summary, a member with no database in the member loop.
     const NamedGraphValidation validation = validate_named_graph(config, name, entry);
     if (!validation.error.empty()) {
         fail_user(validation.error);
-    }
-    for (const std::string& warning : validation.warnings) {
-        std::cerr << "apogee graph: warning: " << warning << "\n";
     }
     if (changed && !request.dry_run) {
         try {
@@ -990,7 +1007,7 @@ void build_collection(const harness::Config& config, const std::filesystem::path
         fail_user(plan.words);
     }
     if (!plan.words.empty() && !request.registration_said) {
-        std::cerr << "apogee graph: " << plan.words << "\n";
+        say_note("graph", plan.words);
     }
     const Providers providers{config, config_path};
     const Generation generation =
@@ -998,8 +1015,7 @@ void build_collection(const harness::Config& config, const std::filesystem::path
     const graph::EntityEmbedder entity_embedder =
         resolve_embedder(providers.harness, config, target);
     if (!entity_embedder.embed && !request.dry_run) {
-        std::cout << "[graph] entity vectors skipped for \"" << target.name << "\" -- "
-                  << entity_embedder.note << "; entity search will be full-text only.\n";
+        say_note("graph", entity_vectors_skipped(target.name, entity_embedder.note));
     }
     std::cout << "Building the knowledge graph for \"" << target.name << "\" with "
               << generation.key << "...\n";
@@ -1033,7 +1049,7 @@ void build_collection(const harness::Config& config, const std::filesystem::path
                   << "' -- retrieval expands through it from now on\n";
     }
     if (!done.ok()) {
-        std::cerr << "apogee graph: " << done.error << "\n";
+        say_note("graph", done.error);
     }
 }
 
@@ -1080,16 +1096,14 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     }
 
     const GraphMembers members = open_graph_members(named);
-    for (const auto& [collection, member_store] : members.stores) {
-        if (member_store == nullptr) {
-            std::cout << "[graph] member collection \"" << collection
-                      << "\" has no database -- it contributes nothing this build.\n";
-        }
+    for (const std::string& note : members_without_database(members)) {
+        say_note("graph", note);
     }
     if (!members.any_data()) {
         if (!named.sources.empty()) {
-            std::cout << "[graph] no member collection of \"" << target.name
-                      << "\" has any data yet -- only its code was built.\n";
+            // The outcome, so on stdout: the sentence the admin job carries,
+            // its first word capitalised as a line of its own.
+            std::cout << sentence_case(only_code_built(target.name)) << "\n";
             return;
         }
         fail_user("no member collection of graph '" + target.name +
@@ -1102,8 +1116,7 @@ void build_named(const harness::Config& config, const std::filesystem::path& con
     const graph::EntityEmbedder entity_embedder =
         resolve_embedder(providers.harness, config, target);
     if (!entity_embedder.embed && !request.dry_run) {
-        std::cout << "[graph] entity vectors skipped for \"" << target.name << "\" -- "
-                  << entity_embedder.note << "; entity search will be full-text only.\n";
+        say_note("graph", entity_vectors_skipped(target.name, entity_embedder.note));
     }
     std::cout << "Building knowledge graph \"" << target.name << "\" over ["
               << join(named.collections) << "] with " << generation.key << "...\n";
@@ -1694,8 +1707,7 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                 "--no-summaries to cluster with no model, the summaries reported absent");
             embedder = resolve_embedder(providers->harness, config, target);
             if (!embedder.embed) {
-                std::cout << "[graph] summary vectors skipped for \"" << target.name << "\" -- "
-                          << embedder.note << "; summaries will be full-text searchable only.\n";
+                say_note("graph", summary_vectors_skipped(target.name, embedder.note));
             }
         }
         graph::CommunitiesOptions options;
@@ -1761,8 +1773,9 @@ void GraphCommand::bind(CLI::App& root, const RootContext& context) {
                       << "` summarises them.\n";
         }
         if (!result.embed_error.empty()) {
-            std::cout << "Warning: summary embedding stopped early (" << result.embed_error
-                      << ") -- summaries stay full-text searchable; re-run to embed them.\n";
+            say_note("graph", "warning: summary embedding stopped early (" + result.embed_error +
+                                  ") -- summaries stay full-text searchable; re-run to embed "
+                                  "them.");
         }
         std::cout << "\n";
         print_communities(store, target.name, kCommunitiesAfterRun);

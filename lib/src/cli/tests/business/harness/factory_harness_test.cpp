@@ -9,6 +9,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "backends/claude_cli.h"
@@ -145,6 +146,43 @@ TEST_CASE("embedding is a per-entry capability the harness discovers, and Anthro
     CHECK(harness.generation_is_metered("gpt"));
     CHECK(harness.generation_is_metered("gemini"));
     CHECK_FALSE(harness.generation_is_metered("mock"));
+}
+
+TEST_CASE("a mock embedder is metered only when its script says so",
+          "[backends][factory][embed][capability][M58]") {
+    // CLI-M58: the factory built every mock embedder free and ignored its
+    // model_path, so no CLI test could drive the paid-embedder spend note.
+    // The seam mirrors the generator mock's `"metered": true` key; the fact
+    // is the provider's, asked through the Harness.
+    const apogee::testing::TempDir home{"m58-metered-embed-" +
+                                        std::to_string(std::random_device{}())};
+    std::ofstream{home.path() / "paid.json", std::ios::binary} << R"({"metered": true})";
+    std::ofstream{home.path() / "free.json", std::ios::binary} << R"({"turns": []})";
+    Config config;
+    const auto embedder = [&home](std::string_view model, std::string_view script) {
+        BackendConfig entry;
+        entry.type = BackendType::Mock;
+        entry.embedding_model = std::string{model};
+        if (!script.empty()) {
+            entry.model_path = (home.path() / script).string();
+        }
+        return entry;
+    };
+    config.backends.emplace("paid", embedder("mock-paid", "paid.json"));
+    config.backends.emplace("free", embedder("mock-free", "free.json"));
+    config.backends.emplace("absent", embedder("mock-absent", "absent.json"));
+    config.backends.emplace("bare", embedder("mock-bare", ""));
+    Harness harness{config};
+    const auto built = build_providers(harness, {});
+    INFO(built.skipped_summary());
+    REQUIRE(built.constructed_count() == 4);
+    for (const std::string name : {"paid", "free", "absent", "bare"}) {
+        INFO(name);
+        REQUIRE(harness.embedder_for(name) != nullptr);
+        CHECK(harness.embedder_for(name)->embedding_is_metered() == (name == "paid"));
+    }
+    CHECK(harness.embedder_for("paid")->embedding_model_name() == "mock-paid");
+    CHECK_FALSE(harness.generation_is_metered("paid"));
 }
 
 TEST_CASE(

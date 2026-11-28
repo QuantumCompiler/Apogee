@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cli/helpers.h"
+#include "cli/notes.h"
 #include "contracts/assets.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -334,8 +335,8 @@ void bind_delete(CLI::App& parent, const RootContext& context) {
             if (std::filesystem::remove(file, code) || !code) {
                 std::cout << "  removed " << file.string() << "\n";
             } else {
-                std::cout << "  (could not remove " << file.string() << ": " << code.message()
-                          << ")\n";
+                // A note, never fatal: the entry is gone (CLI-M58).
+                say_note("agents", "could not remove " + file.string() + ": " + code.message());
             }
         }
     });

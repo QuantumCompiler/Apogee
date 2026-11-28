@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Models › `models pull`, `convert`, `quantize` and `migrate`, the register chain's summary (`cli/model_chain`), and the note writer's job-stream branch (`cli/notes`) |
 | **Labels** | `models` `house-voice` `job-stream` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M58](a-runs-notes-are-said-once-on-stderr.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The investigation of the APP-M21 and APP-M22 probes' CLI asides (2026-11-26): found by its sandboxed investigator, then two skeptics and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -62,7 +62,7 @@ The models family put its notes on stdout through two recorded choices:
 
 The standalone verbs followed the same habit. Each site writes `note:` or `warning:` on `std::cout`, next to its result lines.
 
-The investigation behind APP-M22 found that a successful run's stderr notes never reach the Mac app. Its follow-up chose the CLI side: [CLI-M58](a-runs-notes-are-said-once-on-stderr.md) writes the text-mode rule down and adds one writer, `say_note(verb, text)`, which writes one stderr line `apogee <verb>: <text>`. No verb M58 moves opens a job stream, so M58's writer has no stream branch. This item brings the models family onto the writer and adds that branch. APP-M22's Open questions row "Should this also cover warnings printed on stdout?" names this item for the models verbs.
+The investigation behind APP-M22 found that a successful run's stderr notes never reach the Mac app. Its follow-up chose the CLI side: [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27) writes the text-mode rule down and adds one writer, `say_note(verb, text)`, which writes one stderr line `apogee <verb>: <text>`. No verb M58 moves opens a job stream, so M58's writer has no stream branch. This item brings the models family onto the writer and adds that branch. APP-M22's Open questions row "Should this also cover warnings printed on stdout?" names this item for the models verbs.
 
 **The design.**
 - **One writer, two faces.** With no stream open, a note is one stderr line in the house voice. With one open (`JobStream::current()`), it goes straight to the stream as a `notice`, with the words alone and nothing on stderr. This is the rule machine-mode sessions already follow for a suite's warnings (Evidence 6).
@@ -198,7 +198,7 @@ Paths under `lib/src/cli/`.
 | `source/presentation/cli/models_pull.cpp` | The eight print sites go onto `say_note("models", …)`: `:742-744`, `:1797-1800`, `:2294-2296`, `:2461-2467`, `:2779-2782`, `:3788-3795`, `:3831-3835` and `:3865-3867`. The two-line notes are joined (below), `base_model_note` (`:253-258`) among them. The hints and `models delete`'s preview (`:4065-4078`) stay on stdout. |
 | `source/presentation/cli/model_chain.cpp`, `.h` | `run_chain` says each collected note as `say_note("models", said_as_note(note))` where `:95-97` wrote it on `out`, still after `ready:` and before `next`. `said_as_note` stays. `ChainLog::notes`' comment (`model_chain.h:33-38`) and `run_chain`'s (`:50-60`, "narrating on `out`") say where the notes go. |
 | `source/presentation/cli/models_migrate.cpp` | `:353-356` becomes `say_note("models", "note: could not open " + path + ": " + e.what())`. |
-| `tests/scripts/cmake/no_stdout_notes.cmake` (CLI-M58's `cli.no_stdout_notes`) | `models_pull.cpp`, `model_chain.cpp` and `models_migrate.cpp` leave the allow-list. The warnings these files still build as strings (`out.warnings.push_back("warning: …")`) are no `std::cout` write. `models info`'s `note:` rows (`models.cpp:1310`, `:1312`), a read's fields written to its own stream, are not what the check matches either. |
+| `tests/scripts/cmake/no_stdout_notes.cmake` (CLI-M58's `cli.no_stdout_notes`) | `models_pull.cpp` leaves the allow-list, which names it whole (CLI-M58 listed it alone: the check flags no line in `model_chain.cpp` or `models_migrate.cpp`, and fails on an entry that flags nothing, so the entry must go once its two `warning:` lines move). The warnings these files still build as strings (`out.warnings.push_back("warning: …")`) are no `std::cout` write. `models info`'s `note:` rows (`models.cpp:1310`, `:1312`), a read's fields written to its own stream, are not what the check matches either. |
 | `tests/presentation/cli/models_migrate_test.cpp`, `model_chain_test.cpp`, `job_stream_test.cpp`, `models_convert_test.cpp`, `models_mlx_test.cpp` | The fixtures under Testing. |
 
 **The stream branch.** The pull's producers already work this way: each asks `JobStream::current()` and frames what it has instead of painting it.
@@ -279,7 +279,7 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 | Do the chain summary's notes (55d) leave the summary for stderr? | `[default]` | Yes, as house-voice notes, said once each where the summary said them: after `ready:` and its entries, before the next step. On an open stream they are notices, as today. This covers every note the chain collects: the convert and quantize warnings, the base-model note and the embedding-role note. The next-step line, which already names the embedding role's command, stays on stdout. |
 | Does a note on an open stream need its own event type, so a driver can tell a warning from narration? | `[default]` | No. It stays a `notice`, with no protocol change. An additive event type waits for a driver that needs it. |
 | A two-line note on an open stream: one notice, or today's two? | `[default]` | One. It carries the joined line, the same words the terminal prints on stderr after `apogee models: `. A one-line note's notice is byte-identical to today's. For the five two-line notes, the only change is that the indented continuation joins its first line, with no event type, field or order changed. |
-| The writer: its name, its prefix, how a two-line note is joined, and which lines move and which stay | `(consumed decision)` | [CLI-M58](a-runs-notes-are-said-once-on-stderr.md): `say_note(verb, text)` and `house_voice(verb)`. A two-line note is joined with ` -- `. A run's note moves; a read's qualifier, a listing, a prediction and next-step advice stay. |
+| The writer: its name, its prefix, how a two-line note is joined, and which lines move and which stay | `(consumed decision)` | [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27): `say_note(verb, text)` and `house_voice(verb)`. A two-line note is joined with ` -- `. A run's note moves; a read's qualifier, a listing, a prediction and next-step advice stay. |
 | How does a text job's note reach a paired device? | `(consumed decision)` | CLI-M58's recorded default, written into [CLI-59d](../v0.2.3/reads-and-commands-over-the-network.md): the door relays `apogee <verb>: ` stderr lines as notices as they arrive. `models pull`'s stream is relayed verbatim. |
 | Where does the Downloads card show a finished job's notes? | `(consumed decision)` | [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person)'s follow-up, "every done path shows its notes". Until then the card's log shows them in its stderr part. |
 
@@ -295,12 +295,13 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 | 2026-11-26 | **Recorded placements change, each with a dated revision** (ADR 0006): M3's "says them once in its summary", 52b's "a text pull's lines equal to the same pull's stream notices", and 55d's one prefix, now after `apogee models: `. | the spec |
 | 2026-11-26 | **Every two-line note is joined into one line**, and so into one notice on a stream. The investigation named only the quantize and convert continuations, and said the stream would be byte-identical. That holds for every one-line note. The five two-line notes are two notices today (Evidence 5), and APP-M22's shape rule needs one line. Each is joined by CLI-M58's recorded join (` -- `, as its reindex note is joined), so the house voice reads the same in both items. | the spec |
 | 2026-11-26 | **Ten print sites, not eleven.** The investigation counted 11. Re-read at HEAD, there are eight in `models_pull.cpp` and one each in `model_chain.cpp` and `models_migrate.cpp`, fed by the warning pushes and the two note builders. | the spec |
+| 2026-11-27 | **Released: CLI-M58 shipped** ([MILESTONES](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice)), with `say_note` and `house_voice` in `presentation/cli/notes.h/.cpp` as this item assumes, and `cli.no_stdout_notes`'s allow-list holding `models_pull.cpp` whole and no other models file -- the check flags nothing in `model_chain.cpp` or `models_migrate.cpp` (the migrate note starts `note:`, not one of its voices), so only the one entry leaves, and the check's stale-entry rule fails the build until it does. | CLI-M58's build |
 
 ## Out of scope
 
 - **The other verbs that open a job stream**: `video generate`, `video compose`, `voice say`, `datasets pull`, and the training verbs under stream-json (55h, `train.cpp:87-95`). Sweep them with the same writer only if a note is found on their stdout; none is listed today.
 - **`models delete`'s stranded preview** (`models_pull.cpp:4065-4078`), a prediction before the confirmation, and **`models info`'s `note:` rows**, a read's fields. Both are kept.
-- **The other families' notes** (graph, embed, knowledge, agents), and the writer itself: [CLI-M58](a-runs-notes-are-said-once-on-stderr.md).
+- **The other families' notes** (graph, embed, knowledge, agents), and the writer itself: [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27).
 - **The HTTP graph jobs' missing notes**: [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md).
 - **A card for a Downloads job's notes in the Mac app**: APP-M22's follow-up.
 - **An event type for warnings** (Open questions).
@@ -310,8 +311,8 @@ Hermetic: a temporary `APOGEE_HOME`, mock backends, and the in-process fakes the
 
 ## Links
 
-- **Blocked by:** [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), the writer this item extends · **Blocks:** —
-- **Sibling** (the same investigation's seams): [CLI-M58](a-runs-notes-are-said-once-on-stderr.md), the CLI's other notes on stderr; [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), the HTTP graph jobs' notes.
+- **Blocked by:** — (CLI-M58 [shipped 2026-11-27](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice), the writer this item extends) · **Blocks:** —
+- **Sibling** (the same investigation's seams): [CLI-M58](../../../assistant/cli/MILESTONES.md#2026-11-27--a-runs-notes-are-said-once-on-stderr-maintenance-item-m58-a-runs-notes-are-said-once-on-stderr-in-the-house-voice) (shipped 2026-11-27), the CLI's other notes on stderr; [CLI-M59](the-http-graph-jobs-say-what-the-cli-says.md), the HTTP graph jobs' notes.
 - **Relates to:**
   - [APP-M22](../../../assistant/darwin/MILESTONES.md#2026-11-26--jobs-notes-reach-the-person-maintenance-item-m22-a-jobs-notes-reach-the-person), whose stdout-warnings question this answers for the models verbs, and [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose probes ran beside it;
   - [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27), whose constraint keeps its own notes in the house voice on stderr;

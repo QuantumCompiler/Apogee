@@ -1044,6 +1044,19 @@ localhost control plane for local front-ends. Because the GUI performs its own
 mutations, it already knows when it changed something and can re-read; there is
 no push channel in v1.
 
+A command run in text mode says its **result on stdout** -- its outcome, a
+listing, a count, a read's qualifier, a dry run's prediction -- and each
+**note** about the finished run -- a skip, a degraded mode, a non-fatal
+failure -- as one stderr line in the house voice, `apogee <verb>: <words>`. A
+note never changes the exit code, and a refusal is the last stderr line of a
+run that fails. *Since CLI-M58 (2026-11-27)* this holds for `graph build`,
+`graph update`, `graph communities`, `embed ingest`, `knowledge capture`,
+`knowledge reindex` and `agents delete` too, whose notes were stdout lines
+before (`[graph] …`, `warning: …`, `Note: …`, `(could not remove …)`); the
+models verbs follow with CLI-M60. A host keeps the outcome line and shows the
+`apogee <verb>: ` lines as the run's notes. The verb is the producer's --
+`embed ingest --graph`'s build says `apogee graph: …`.
+
 A read a host renders takes `--output-format json` and prints **one JSON
 document** of the same facts as the human view — never a stream, and stdout
 carries nothing else (diagnostics to stderr, exit codes as ever). Today that is

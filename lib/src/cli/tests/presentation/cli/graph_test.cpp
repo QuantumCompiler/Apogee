@@ -163,7 +163,9 @@ TEST_CASE(
     CHECK(out.find("Files extracted:   2 of 2 planned") != std::string::npos);
     CHECK(out.find("Chunks extracted:  2") != std::string::npos);
     CHECK(out.find("Nodes upserted:    2") != std::string::npos);
-    CHECK(out.find("entity vectors skipped") != std::string::npos);  // no embedder: FTS-only
+    // No embedder: FTS-only, said once on stderr in the house voice (CLI-M58).
+    CHECK(out.find("entity vectors skipped") == std::string::npos);
+    CHECK(err.find("apogee graph: entity vectors skipped for \"notes\" -- ") != std::string::npos);
     CHECK(out.find("graph.enabled set on 'notes'") != std::string::npos);
     CHECK(err.find("[graph] extracting") != std::string::npos);
     const Store store = fixture.store();
@@ -290,9 +292,21 @@ TEST_CASE(
     fixture.ingest();
     std::string out;
     std::string err;
+    // A dry run's failures are part of its prediction: on stdout, whole, as
+    // before (CLI-M58 moves a real build's only).
+    REQUIRE(fixture.run({"graph", "build", "notes", "-m", "prose", "--dry-run"}, &out, &err) == 0);
+    CHECK(out.find("\na.md [chunk 0] FAILED: the extractor did not return") != std::string::npos);
+    CHECK(err.find("FAILED") == std::string::npos);
     REQUIRE(fixture.run({"graph", "build", "notes", "-m", "prose"}, &out, &err) == 0);
-    INFO(out);
-    CHECK(out.find("FAILED: the extractor did not return") != std::string::npos);
+    INFO(out << err);
+    // Each failed chunk is a note on stderr (CLI-M58), never a stdout line
+    // or the blank line before it; the summary still counts them.
+    CHECK(out.find("FAILED") == std::string::npos);
+    CHECK(out.find("\n\n") == std::string::npos);
+    CHECK(err.find("apogee graph: a.md [chunk 0] FAILED: the extractor did not return") !=
+          std::string::npos);
+    CHECK(err.find("apogee graph: b.md [chunk 0] FAILED: the extractor did not return") !=
+          std::string::npos);
     CHECK(out.find("Chunks extracted:  0 (2 failed after retry -- re-run to retry them)") !=
           std::string::npos);
     CHECK(fixture.store().source_states().empty());
@@ -388,7 +402,17 @@ TEST_CASE(
     INFO(out);
     CHECK(out.find("Building knowledge graph \"work\" over [notes, meetings, absent] with "
                    "extractor...") != std::string::npos);
-    CHECK(out.find("member collection \"absent\" has no database") != std::string::npos);
+    // The member and the entity-vector skip, each one stderr line, in that
+    // order (CLI-M58).
+    CHECK(out.find("has no database") == std::string::npos);
+    CHECK(out.find("entity vectors skipped") == std::string::npos);
+    const std::size_t member_note = err.find(
+        "apogee graph: member collection \"absent\" has no database -- it contributes nothing "
+        "this build.\n");
+    const std::size_t skip_note = err.find("apogee graph: entity vectors skipped for \"work\" -- ");
+    CHECK(member_note != std::string::npos);
+    CHECK(skip_note != std::string::npos);
+    CHECK(member_note < skip_note);
     CHECK(out.find("Graph build complete for \"work\":") != std::string::npos);
     CHECK(out.find("Files extracted:   3 of 3 planned") != std::string::npos);
     CHECK(out.find("Nodes upserted:    2") != std::string::npos);
@@ -511,7 +535,10 @@ TEST_CASE(
     CHECK(out.find("Detecting and summarising communities for \"notes\" with summarizer...") !=
           std::string::npos);
     CHECK(out.find("1 detected -- 1 summarised, 0 unchanged, 0 pruned.") != std::string::npos);
-    CHECK(out.find("summary vectors skipped") != std::string::npos);  // no embedder
+    // No embedder: said once on stderr in the house voice (CLI-M58).
+    CHECK(out.find("summary vectors skipped") == std::string::npos);
+    CHECK(err.find("apogee graph: summary vectors skipped for \"notes\" -- ") != std::string::npos);
+    CHECK(err.find("; summaries will be full-text searchable only.\n") != std::string::npos);
     CHECK(out.find("Community #1 -- 2 entities (top: Atlas, Vault)") != std::string::npos);
     CHECK(out.find("  The main themes here are Atlas") != std::string::npos);
     CHECK(err.find("[graph] summarising community 1/1") != std::string::npos);
@@ -788,4 +815,153 @@ TEST_CASE("graph delete of a named graph is refused while a build holds its lock
     CHECK_FALSE(std::filesystem::exists(db));
     REQUIRE(fixture.run({"graph", "stats", "work"}, &out, &err) == 0);
     CHECK(out.find("No graph built for \"work\"") != std::string::npos);
+}
+
+namespace {
+
+/// How many times `needle` appears in `text`.
+[[nodiscard]] std::size_t count_of(const std::string& text, std::string_view needle) {
+    std::size_t count = 0;
+    for (std::size_t at = text.find(needle); at != std::string::npos;
+         at = text.find(needle, at + needle.size())) {
+        ++count;
+    }
+    return count;
+}
+
+/// The last line of `text` that is not empty.
+[[nodiscard]] std::string last_line(const std::string& text) {
+    std::string last;
+    std::istringstream in{text};
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty()) {
+            last = line;
+        }
+    }
+    return last;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "the entity-vector skip is one stderr line in the house voice for a collection, a named "
+    "graph and an ingest's --graph, under -q too",
+    "[commands][graph][notes][M58]") {
+    // CLI-M58: the skip was stdout's first line (c-g5, c-f1), after the
+    // member line (g6) and after the ingest's lines (e3), with stderr empty.
+    const Fixture fixture;
+    fixture.ingest();
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "build", "notes", "-q"}, &out, &err) == 0);
+    INFO(out << err);
+    // -q silences progress, never a note: the one stderr line is the note.
+    CHECK(err ==
+          "apogee graph: entity vectors skipped for \"notes\" -- backend 'extractor' cannot "
+          "embed; entity search will be full-text only.\n");
+    CHECK(out.find("entity vectors skipped") == std::string::npos);
+    CHECK(out.starts_with("Building the knowledge graph for \"notes\" with extractor...\n"));
+
+    // A named graph: the member without a database, then the skip.
+    REQUIRE(fixture.run({"config", "add-graph", "mix", "--collections", "notes,ghost"}, &out,
+                        &err) == 0);
+    REQUIRE(fixture.run({"graph", "build", "mix", "-q"}, &out, &err) == 0);
+    CHECK(err ==
+          "apogee graph: member collection \"ghost\" has no database -- it contributes nothing "
+          "this build.\n"
+          "apogee graph: entity vectors skipped for \"mix\" -- backend 'extractor' cannot embed; "
+          "entity search will be full-text only.\n");
+    CHECK(out.find("has no database") == std::string::npos);
+    CHECK(out.find("entity vectors skipped") == std::string::npos);
+
+    // An ingest's --graph says it as the producer, `graph`, after its own
+    // lines.
+    REQUIRE(fixture.run({"embed", "ingest", "fresh", (fixture.home.path() / "docs").string(),
+                         "--graph", "-q"},
+                        &out, &err) == 0);
+    CHECK(count_of(err, "apogee graph: entity vectors skipped for \"fresh\" -- ") == 1);
+    CHECK(out.find("entity vectors skipped") == std::string::npos);
+    CHECK(out.find("Graph build complete for \"fresh\":") != std::string::npos);
+}
+
+TEST_CASE(
+    "a gone or empty source tree and a member without a database are said once on stderr, and "
+    "the code-only outcome stays on stdout",
+    "[commands][graph][code][notes][M58]") {
+    // CLI-M58: a gone tree was a stdout `[graph]` line (c-g1, c-g2), said
+    // twice in two voices under --source (c-g3); a member without a database
+    // was a stderr warning and a stdout line (c-n1); an empty tree a stdout
+    // line (g4).
+    const Fixture fixture;
+    const std::filesystem::path src = fixture.home.path() / "src";
+    const std::filesystem::path src2 = fixture.home.path() / "src2";
+    const std::filesystem::path src3 = fixture.home.path() / "src3";
+    write(src / "app.py", "def run():\n    return 1\n");
+    write(src2 / "lib.py", "def helper():\n    return 2\n");
+    write(src3 / "tool.py", "def tool():\n    return 3\n");
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"graph", "build", "--source", src.string(), "--source", src2.string(),
+                         "--graph", "code", "-q"},
+                        &out, &err) == 0);
+    std::string gone;
+    {
+        const apogee::harness::Config config = apogee::harness::load_config(fixture.config_path);
+        REQUIRE(config.find_graph("code") != nullptr);
+        REQUIRE(config.find_graph("code")->sources.size() == 2);
+        gone = config.find_graph("code")->sources.at(1);
+    }
+    std::filesystem::rename(src2, fixture.home.path() / "src2-gone");
+    const std::string gone_note = "apogee graph: source tree " + gone +
+                                  " is not a directory -- it contributes nothing, and what it "
+                                  "contributed is forgotten.\n";
+
+    // `graph update` and a plain build: one stderr line, stdout without it.
+    REQUIRE(fixture.run({"graph", "update", "code", "-q"}, &out, &err) == 0);
+    INFO(out << err);
+    CHECK(err == gone_note);
+    CHECK(out.find("source tree") == std::string::npos);
+    REQUIRE(fixture.run({"graph", "build", "code", "-q"}, &out, &err) == 0);
+    CHECK(err == gone_note);
+    CHECK(out.find("source tree") == std::string::npos);
+
+    // --source with the tree still gone: said once, never again as the
+    // validation's `warning: source tree '...' is not a directory`.
+    REQUIRE(fixture.run({"graph", "build", "--source", src3.string(), "--graph", "code", "-q"},
+                        &out, &err) == 0);
+    CHECK(err == gone_note);
+    CHECK(out.find("is not a directory") == std::string::npos);
+
+    // A member with no database and no entry, built with --source: one line
+    // about it, and stdout's last line the outcome with its tag dropped.
+    REQUIRE(fixture.run({"config", "add-graph", "ghosty", "--collections", "ghost"}, &out, &err) ==
+            0);
+    // config add-graph keeps its warning: nothing after it says the fact.
+    CHECK(err.find("apogee config: warning: member collection 'ghost' is not configured yet") !=
+          std::string::npos);
+    REQUIRE(fixture.run({"graph", "build", "ghosty", "--source", src3.string(), "-q"}, &out,
+                        &err) == 0);
+    CHECK(err ==
+          "apogee graph: member collection \"ghost\" has no database -- it contributes nothing "
+          "this build.\n");
+    CHECK(last_line(out) ==
+          "No member collection of \"ghosty\" has any data yet -- only its code was built.");
+    CHECK(out.find("[graph]") == std::string::npos);
+
+    // An empty tree: on stderr, not stdout.
+    std::filesystem::create_directories(fixture.home.path() / "empty");
+    REQUIRE(fixture.run({"graph", "build", "--source", (fixture.home.path() / "empty").string(),
+                         "--graph", "eg"},
+                        &out, &err) == 0);
+    std::string empty;
+    {
+        const apogee::harness::Config config = apogee::harness::load_config(fixture.config_path);
+        REQUIRE(config.find_graph("eg") != nullptr);
+        empty = config.find_graph("eg")->sources.at(0);
+    }
+    CHECK(out.find("offers no file to read") == std::string::npos);
+    CHECK(count_of(err, "apogee graph: source tree ") == 1);
+    CHECK(err.find("apogee graph: source tree " + empty +
+                   " offers no file to read -- inside a git repository, only what git tracks or "
+                   "does not ignore is read.\n") != std::string::npos);
 }

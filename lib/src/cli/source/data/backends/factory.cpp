@@ -116,6 +116,18 @@ std::shared_ptr<harness::LLMProvider> make_provider(const std::string& name,
                 // exactly as two real models would.
                 auto provider = std::make_shared<MockEmbeddingProvider>(name);
                 provider->set_model_name(config.embedding_model);
+                // A test seam (CLI-M58), the generator mock's below: a script
+                // whose top level says `"metered": true` makes it a paid
+                // embedder, so the spend rule's note can be driven with nothing
+                // installed. A missing file reads as free.
+                if (!config.model_path.empty()) {
+                    try {
+                        provider->set_metered(load_mock_script_metered(config.model_path));
+                    } catch (const std::exception& e) {
+                        reason = e.what();
+                        return nullptr;
+                    }
+                }
                 return provider;
             }
             MockProvider::Options mock_options;

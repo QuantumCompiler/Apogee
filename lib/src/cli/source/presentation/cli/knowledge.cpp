@@ -19,6 +19,7 @@
 #include "backends/factory.h"
 #include "cli/embed.h"
 #include "cli/helpers.h"
+#include "cli/notes.h"
 #include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -535,7 +536,7 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         if (flags->json) {
             std::cout << envelope(result, false).dump(2) << "\n";
             for (const std::string& note : result.notes) {
-                std::cerr << "apogee knowledge: " << note << "\n";
+                say_note("knowledge", note);
             }
             return;
         }
@@ -548,15 +549,17 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << " -- searchable by text; no vector written";
         }
         std::cout << "\n";
+        // A capture kept off a paid embedder says so as a note (CLI-M58); the
+        // dry run predicts it on stdout, and --json carries it as `note`.
         if (!result.decision.note.empty()) {
-            std::cout << result.decision.note << "\n";
+            say_note("knowledge", result.decision.note);
         }
         if (result.registered) {
             std::cout << "registered '" << result.decision.db << "' in " << config_path.string()
                       << "\n";
         }
         for (const std::string& note : result.notes) {
-            std::cerr << "apogee knowledge: " << note << "\n";
+            say_note("knowledge", note);
         }
     });
 
@@ -898,11 +901,13 @@ void KnowledgeCommand::bind(CLI::App& root, const RootContext& context) {
         if (rx->id.empty()) {
             // A mixed collection: reindexing embeds every record, including
             // the ones deliberately captured lexically. Said before it is done.
+            // One note, the two sentences joined (CLI-M58).
             if (const std::size_t lexical = store.vectorless_count(); lexical > 0) {
-                std::cout << "Note: " << lexical << " of " << records.size() << " record(s) in \""
-                          << db << "\" have no vectors (captured lexically).\n"
-                          << "Reindexing embeds every record, including those -- pass an id to "
-                             "reindex just one.\n";
+                say_note("knowledge", "note: " + std::to_string(lexical) + " of " +
+                                          std::to_string(records.size()) + " record(s) in \"" + db +
+                                          "\" have no vectors (captured lexically) -- reindexing "
+                                          "embeds every record, including those; pass an id to "
+                                          "reindex just one.");
             }
         }
 

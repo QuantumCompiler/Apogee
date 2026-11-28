@@ -87,6 +87,8 @@ apogee_add_module(operations
     operations/graph_dedupe_pass.cpp
     operations/graph_members.h
     operations/graph_members.cpp
+    operations/graph_notes.h
+    operations/graph_notes.cpp
     operations/graph_sources.h
     operations/graph_sources.cpp
     operations/knowledge_core.h
@@ -214,6 +216,8 @@ apogee_add_module(cli
     cli/model_chain.cpp
     cli/job_stream.h
     cli/job_stream.cpp
+    cli/notes.h
+    cli/notes.cpp
     cli/models_pull.h
     cli/models_pull.cpp
     cli/models_migrate.h

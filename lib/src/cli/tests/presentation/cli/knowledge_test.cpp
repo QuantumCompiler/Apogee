@@ -784,20 +784,68 @@ TEST_CASE(
 
     REQUIRE(fixture.run({"knowledge", "reindex"}, &out, &err) == 0);
     INFO(err);
-    CHECK(out.find("Note: 2 of 3 record(s) in \"knowledge\" have no vectors") != std::string::npos);
-    CHECK(out.find("Reindexed 3 record(s) in \"knowledge\" [mock-space]") != std::string::npos);
+    // The mixed collection's note is one stderr line, the two joined, and
+    // stdout is the outcome alone (CLI-M58).
+    CHECK(out == "Reindexed 3 record(s) in \"knowledge\" [mock-space]\n");
+    CHECK(err ==
+          "apogee knowledge: note: 2 of 3 record(s) in \"knowledge\" have no vectors (captured "
+          "lexically) -- reindexing embeds every record, including those; pass an id to reindex "
+          "just one.\n");
     const Store store = fixture.store();
     CHECK(store.vectorless_count() == 0);
     CHECK(store.chunks().embedding_model().model == "mock-space");
     CHECK(store.chunks().stats().lexical_only == 0);
     CHECK(bytes(store.get(first)->raw_ref) == archive);
     // One record, no note; an unknown one refused; a bad -m refused.
-    REQUIRE(fixture.run({"knowledge", "reindex", first}, &out) == 0);
+    REQUIRE(fixture.run({"knowledge", "reindex", first}, &out, &err) == 0);
     CHECK(out.find("Reindexed 1 record(s)") != std::string::npos);
     CHECK(out.find("Note:") == std::string::npos);
+    CHECK(err.find("note:") == std::string::npos);
     CHECK(fixture.run({"knowledge", "reindex", "kr-nope"}, &out, &err) == 1);
     CHECK(err.find("no record 'kr-nope'") != std::string::npos);
     CHECK(fixture.run({"knowledge", "reindex", "-m", "nope"}, &out, &err) == 1);
+}
+
+TEST_CASE(
+    "under a paid embedder an auto capture says it indexed for text search only on stderr, while "
+    "--json carries the note and --dry-run predicts it",
+    "[commands][knowledge][notes][M58]") {
+    // CLI-M58: the real capture wrote the paid-embedder note on stdout,
+    // beside its notes on stderr. A mock embedder is metered when its script
+    // says so -- the seam the factory honours for a generator mock.
+    const Fixture fixture;
+    write(fixture.home.path() / "paid-embed.json", R"({"metered": true})");
+    {
+        std::string config = bytes(fixture.config_path);
+        const std::string models = "models:\n  default: clerk\n";
+        REQUIRE(config.starts_with(models));
+        config = models + "  default_embedding: paidembed\n" + config.substr(models.size()) +
+                 "  paidembed:\n    type: mock\n    embedding_model: mock-paid\n    model_path: " +
+                 (fixture.home.path() / "paid-embed.json").string() + "\n";
+        write(fixture.config_path, config);
+    }
+    const std::string note =
+        "indexed for text search only: 'mock-paid' is a paid embedder, and vectorising a whole "
+        "collection through it takes --retriever vector (or a retriever: vector pin)";
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"knowledge", "capture", "one"}, &out, &err) == 0);
+    INFO(out << err);
+    CHECK(out.find("indexed for text search only") == std::string::npos);
+    CHECK(out.find("(retriever: lexical) -- searchable by text; no vector written") !=
+          std::string::npos);
+    CHECK(err.find("apogee knowledge: " + note + "\n") != std::string::npos);
+
+    // The JSON face carries it as a field, one document as before.
+    REQUIRE(fixture.run({"knowledge", "capture", "--json", "two"}, &out, &err) == 0);
+    const nlohmann::json json = nlohmann::json::parse(out);
+    CHECK(json.at("note") == note);
+    CHECK(err.find("indexed for text search only") == std::string::npos);
+
+    // A dry run's prediction keeps it on stdout.
+    REQUIRE(fixture.run({"knowledge", "capture", "--dry-run", "three"}, &out, &err) == 0);
+    CHECK(out.find("(retriever: lexical)\n" + note + "\n") != std::string::npos);
+    CHECK(err.find("indexed for text search only") == std::string::npos);
 }
 
 TEST_CASE("a capture into a new collection the config cannot hold is refused before the clerk",

@@ -342,6 +342,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/bootstrap_cmd_test.cpp
     presentation/cli/model_chain_test.cpp
     presentation/cli/job_stream_test.cpp
+    presentation/cli/notes_test.cpp
     presentation/cli/complete_sources_test.cpp
     presentation/cli/models_test.cpp
     presentation/cli/suite_residency_test.cpp
@@ -380,6 +381,7 @@ add_library(apogee_tests_presentation OBJECT
     presentation/cli/attachment_graph_test.cpp
     presentation/operations/graph_sources_test.cpp
     presentation/operations/graph_members_test.cpp
+    presentation/operations/graph_notes_test.cpp
     presentation/operations/collections_test.cpp
     presentation/operations/renames_test.cpp
     presentation/operations/store_references_test.cpp
@@ -725,6 +727,24 @@ add_test(NAME cli.no_provider_probes
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_provider_probes.cmake"
 )
+
+# A finished run's notes are said on stderr in the house voice, never written
+# on stdout (CLI-M58). See the file. The planted twin runs it over a fixture
+# folder holding two violations and passes only when the failure names both,
+# file and line -- the proof that it fails, and fails naming the site.
+add_test(NAME cli.no_stdout_notes
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../source
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_stdout_notes.cmake"
+)
+add_test(NAME cli.no_stdout_notes_planted
+    COMMAND "${CMAKE_COMMAND}"
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/no_stdout_notes
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cmake/no_stdout_notes.cmake"
+)
+set_tests_properties(cli.no_stdout_notes_planted PROPERTIES
+    PASS_REGULAR_EXPRESSION
+    "written on stdout, on 2 line[(]s[)]:[^@]*presentation/cli/planted[.]h:7: std::cout << \"[[]graph[]] x[^@]*presentation/cli/planted[.]h:8: std::cout << \"warning: x")
 
 add_test(NAME cli.test_names
     COMMAND "${CMAKE_COMMAND}"

@@ -586,8 +586,17 @@ function(expect_config_is expected what)
     endif()
 endfunction()
 # Exactly one line on stderr, in the verb's voice, and none of it on stdout.
+# stderr less the entity-vector skip, which a graph build with no embedder
+# says as a note of its own (CLI-M58) -- set aside where a registration's
+# note is counted.
+function(without_vector_skip out text)
+    string(REGEX REPLACE "apogee graph: entity vectors skipped for [^\n]*\n" "" text "${text}")
+    set(${out} "${text}" PARENT_SCOPE)
+endfunction()
+
 function(expect_one_note prefix what)
-    string(STRIP "${APOGEE_ERR}" stripped)
+    without_vector_skip(notes "${APOGEE_ERR}")
+    string(STRIP "${notes}" stripped)
     if(stripped MATCHES "\n" OR NOT stripped MATCHES "^${prefix}")
         message(FATAL_ERROR "${what}: expected one '${prefix}' line on stderr, got:\n${APOGEE_ERR}")
     endif()
@@ -689,8 +698,14 @@ if(NOT CMAKE_MATCH_1 STREQUAL CHUNKS_64 OR NOT APOGEE_ERR STREQUAL "")
 endif()
 apogee_run(0 graph build "my notes" -m extractor -q)
 expect_config_is("${HAND_WRITTEN}" "a rebuild of an enabled hand-written entry")
-if(NOT APOGEE_ERR STREQUAL "")
-    message(FATAL_ERROR "a rebuild of an enabled hand-written entry complained:\n${APOGEE_ERR}")
+# Its one note is the entity-vector skip (no embedder here), on stderr in the
+# house voice and not on stdout (CLI-M58); nothing about its registration.
+without_vector_skip(notes "${APOGEE_ERR}")
+if(NOT notes STREQUAL "" OR NOT APOGEE_ERR MATCHES
+        "^apogee graph: entity vectors skipped for \"my notes\" -- [^\n]*; entity search will be full-text only[.]\n$"
+   OR APOGEE_OUT MATCHES "entity vectors skipped")
+    message(FATAL_ERROR "a rebuild of an enabled hand-written entry complained, or did not say "
+                        "its vector skip once on stderr:\n${APOGEE_OUT}${APOGEE_ERR}")
 endif()
 file(COPY_FILE "${EMBEDDINGS}/notes.db" "${EMBEDDINGS}/a@b.db")
 apogee_run(0 graph build a@b -m extractor -q)
@@ -957,13 +972,31 @@ endif()
 set(EXTRA_DIR "${APOGEE_WORK_DIR}/extra")
 file(MAKE_DIRECTORY "${EXTRA_DIR}")
 file(WRITE "${EXTRA_DIR}/added.md" "the zarquon widgets are also logged weekly.\n")
-apogee_run(0 embed ingest vecs "${EXTRA_DIR}/added.md" --retriever vector)
+apogee_run(0 embed ingest vecs "${EXTRA_DIR}/added.md" --retriever vector -q)
 if(NOT APOGEE_OUT MATCHES "1 vector\\(s\\) \\[mock-embed-b\\]")
     message(FATAL_ERROR "the partial re-ingest did not embed under mock-embed-b: ${APOGEE_OUT}")
 endif()
-if(NOT APOGEE_OUT MATCHES
-        "warning: 1 source\\(s\\) keep vectors from 'mock-embed-a' -- [^\n]* with 'mock-embed-b'")
-    message(FATAL_ERROR "the partial re-ingest did not warn naming both models: ${APOGEE_OUT}")
+# CLI-M58 (revising 57s's placement): the warning is a note, said once on
+# stderr in the house voice, and stdout is the outcome line alone.
+expect_equal("${APOGEE_OUT}" "1 file(s), 1 chunk(s), 1 vector(s) [mock-embed-b]"
+             "the partial re-ingest's stdout")
+if(NOT APOGEE_ERR MATCHES
+        "^apogee embed: warning: 1 source\\(s\\) keep vectors from 'mock-embed-a' -- [^\n]* with 'mock-embed-b'\n$")
+    message(FATAL_ERROR "the partial re-ingest did not warn naming both models, once, on stderr: "
+                        "${APOGEE_ERR}")
+endif()
+# On one pipe the note follows the outcome it is about: stderr is tied to
+# stdout, so the outcome is flushed before the note is written.
+execute_process(
+    COMMAND "${APOGEE_BIN}" embed ingest vecs "${EXTRA_DIR}/added.md" --retriever vector -q
+    RESULT_VARIABLE merged_code
+    OUTPUT_VARIABLE merged
+    ERROR_VARIABLE merged
+)
+if(NOT merged_code EQUAL 0 OR NOT merged MATCHES
+        "^1 file\\(s\\), 1 chunk\\(s\\), 1 vector\\(s\\) \\[mock-embed-b\\][^\n]*\napogee embed: warning: 1 source\\(s\\) keep vectors from 'mock-embed-a' -- ")
+    message(FATAL_ERROR "on one pipe the note did not follow the outcome (exit ${merged_code}):\n"
+                        "${merged}")
 endif()
 apogee_run(0 embed info vecs)
 if(APOGEE_OUT MATCHES "\\[mock-embed-b\\]" OR APOGEE_OUT MATCHES "\\[mock-embed-a\\]")
@@ -985,8 +1018,8 @@ endif()
 # Every source under mock-embed-b -- the rest in a second run -- and the
 # store is one space again, queried as a vector.
 apogee_run(0 embed ingest vecs "${CORPUS_DIR}" --retriever vector)
-if(APOGEE_OUT MATCHES "warning:")
-    message(FATAL_ERROR "re-ingesting the last sources still warned: ${APOGEE_OUT}")
+if(APOGEE_ERR MATCHES "warning:" OR APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting the last sources still warned: ${APOGEE_OUT}${APOGEE_ERR}")
 endif()
 apogee_run(0 embed info vecs)
 if(NOT APOGEE_OUT MATCHES "\\[mock-embed-b\\]")
@@ -1001,9 +1034,32 @@ endif()
 apogee_run(0 embed delete vecs --source added.md)
 apogee_run(0 config set-default-embedding embedder)
 apogee_run(0 embed ingest vecs "${CORPUS_DIR}")
-if(NOT APOGEE_OUT MATCHES "vector\\(s\\) \\[mock-embed-a\\]" OR APOGEE_OUT MATCHES "warning:")
-    message(FATAL_ERROR "re-ingesting under mock-embed-a did not bind it again: ${APOGEE_OUT}")
+if(NOT APOGEE_OUT MATCHES "vector\\(s\\) \\[mock-embed-a\\]" OR APOGEE_ERR MATCHES "warning:"
+   OR APOGEE_OUT MATCHES "warning:")
+    message(FATAL_ERROR "re-ingesting under mock-embed-a did not bind it again: "
+                        "${APOGEE_OUT}${APOGEE_ERR}")
 endif()
+
+# CLI-M58: under a paid embedder an auto ingest indexes for text search only
+# and says so -- one stderr note in the house voice, stdout the result. A mock
+# embedder is metered when its script says so (the generator mock's seam).
+file(WRITE "${APOGEE_WORK_DIR}/paid-embed.json" "{\"metered\": true}\n")
+apogee_run(0 config add-backend paidembed --type mock --embedding-model mock-embed-p
+           --model-path "${APOGEE_WORK_DIR}/paid-embed.json")
+apogee_run(0 config set-default-embedding paidembed)
+apogee_run(0 embed ingest paid "${CORPUS_DIR}" -q)
+if(NOT APOGEE_OUT MATCHES "^[0-9]+ file\\(s\\), [0-9]+ chunk\\(s\\)\n"
+   OR APOGEE_OUT MATCHES "vector\\(s\\)" OR APOGEE_OUT MATCHES "text search only")
+    message(FATAL_ERROR "a paid embedder's auto ingest did not keep stdout the result: ${APOGEE_OUT}")
+endif()
+if(NOT APOGEE_ERR MATCHES
+        "^apogee embed: indexed for text search only: 'mock-embed-p' is a paid embedder, and vectorising a whole collection through it takes --retriever vector \\(or a retriever: vector pin\\)\n$")
+    message(FATAL_ERROR "a paid embedder's auto ingest did not say its note once on stderr: "
+                        "${APOGEE_ERR}")
+endif()
+apogee_run(0 embed delete --yes -- paid)
+apogee_run(0 config set-default-embedding embedder)
+apogee_run(0 config delete-backend paidembed)
 
 # The same decision on a conversational surface, and the status line names it.
 apogee_run(0 complete -m mock -v --rag vecs --retriever vector "what does zarquon require?")

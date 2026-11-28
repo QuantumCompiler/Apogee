@@ -6,6 +6,8 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cli/agents_cmd.h"
@@ -148,4 +150,76 @@ TEST_CASE("a refused name writes nothing, and every rerun gives the same refusal
         CHECK_FALSE(std::filesystem::exists(home.root.path() / "schemas" / "-x-output.json"));
         CHECK(home.bytes() == before);
     }
+}
+
+TEST_CASE("a purged file that cannot be removed is a note on stderr, and the delete still succeeds",
+          "[commands][agents][notes][M58]") {
+    // CLI-M58: `  (could not remove <file>: <reason>)` was a stdout line
+    // between the two `removed` lines (c-ag2), with stderr empty.
+#if defined(_WIN32)
+    SKIP("no POSIX directory modes on this platform");
+#else
+    const Home home;
+    REQUIRE(home.run({"agents", "create", "probe"}) == 0);
+    const std::filesystem::path prompts = home.root.path() / "prompts";
+    const std::filesystem::path prompt = prompts / "probe.txt";
+    const std::filesystem::path schema = home.root.path() / "schemas" / "probe-output.json";
+    REQUIRE(std::filesystem::exists(prompt));
+    REQUIRE(std::filesystem::exists(schema));
+    std::filesystem::permissions(
+        prompts,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec |
+            std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+            std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace);
+
+    // Restored on every path out, so the temp directory can be cleaned up.
+    class Unlock {
+    public:
+        explicit Unlock(std::filesystem::path path) : path_{std::move(path)} {}
+
+        Unlock(const Unlock&) = delete;
+        Unlock& operator=(const Unlock&) = delete;
+        Unlock(Unlock&&) = delete;
+        Unlock& operator=(Unlock&&) = delete;
+
+        ~Unlock() {
+            std::error_code code;
+            std::filesystem::permissions(path_, std::filesystem::perms::owner_all,
+                                         std::filesystem::perm_options::replace, code);
+        }
+
+    private:
+        std::filesystem::path path_;
+    };
+
+    const Unlock unlock{prompts};
+    {
+        // A user the mode does not bind (root) cannot fail this way.
+        const std::filesystem::path probe = prompts / "probe-write";
+        if (std::ofstream{probe}.good()) {
+            std::error_code code;
+            std::filesystem::remove(probe, code);
+            SKIP("this user can write a read-only directory");
+        }
+    }
+    std::string out;
+    std::string err;
+    int code = -1;
+    {
+        const Captured captured;
+        code = home.run({"agents", "delete", "probe", "--purge"});
+        out = captured.out.str();
+        err = captured.err.str();
+    }
+    INFO(out << err);
+    CHECK(code == 0);
+    CHECK(out == "removed agent 'probe' from " + home.config.string() + "\n  removed " +
+                     schema.string() + "\n");
+    CHECK(err.starts_with("apogee agents: could not remove " + prompt.string() + ": "));
+    CHECK(err.find('\n') == err.size() - 1);
+    CHECK(err.find('(') == std::string::npos);
+    CHECK(std::filesystem::exists(prompt));
+    CHECK_FALSE(std::filesystem::exists(schema));
+#endif
 }

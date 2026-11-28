@@ -19,6 +19,7 @@
 #include "backends/factory.h"
 #include "cli/graph.h"
 #include "cli/helpers.h"
+#include "cli/notes.h"
 #include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -435,11 +436,14 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             std::cout << (index == 0 ? " (" : ", ") << brief[index];
         }
         std::cout << (brief.empty() ? "" : ")") << "\n";
+        // What the outcome alone does not show -- a whole collection kept off
+        // a paid embedder, sources left in another model's space -- is a note
+        // (CLI-M58): after the outcome, one stderr line each.
         if (!decision.note.empty()) {
-            std::cout << decision.note << "\n";
+            say_note("embed", decision.note);
         }
         if (!binding.warning.empty()) {
-            std::cout << binding.warning << "\n";
+            say_note("embed", binding.warning);
         }
         print_ingest_details(std::cout, *in_collection, report, *in_verbose);
         if (!report.unvectorised.empty()) {
@@ -475,9 +479,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         // a registration that failed.
         bool registration_failed = false;
         if (!config_trouble.empty()) {
-            std::cerr << "apogee embed: not registered in config -- " << config_trouble << "\n";
+            say_note("embed", "not registered in config -- " + config_trouble);
         } else if (!plan.words.empty()) {
-            std::cerr << "apogee embed: " << plan.words << "\n";
+            say_note("embed", plan.words);
         } else if (plan.register_entry) {
             const CollectionRegistration done = register_collection(write, plan);
             if (done.registered) {
@@ -486,8 +490,7 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
             }
             if (!done.ok()) {
                 registration_failed = true;
-                std::cerr << "apogee embed: " << done.error
-                          << (*in_graph ? "; --graph was not run" : "") << "\n";
+                say_note("embed", done.error + (*in_graph ? "; --graph was not run" : ""));
             }
         }
 
@@ -497,8 +500,9 @@ void EmbedCommand::bind(CLI::App& root, const RootContext& context) {
         // entry listing it by config membership alone, since the first
         // chained build is what creates that graph's database -- else the
         // collection's own, and loads a fresh config so it sees the entry
-        // the registration just wrote. Ingest's -m stays the embedding
-        // override; the extractor resolves as `graph build` resolves it.
+        // the registration just wrote. The extractor resolves as `graph build`
+        // resolves it -- ingest takes no -m -- and the build's notes are said
+        // by the build, as `graph`.
         if (*in_graph && !registration_failed) {
             GraphBuildRequest request;
             request.name = *in_collection;
