@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <string>
@@ -14,11 +15,14 @@
 #include <vector>
 
 #include "agentloop/recall.h"
+#include "cli/acp_cmd.h"
+#include "cli/chat_attachments.h"
 #include "cli/chat_recall.h"
 #include "cli/complete_protocol.h"
 #include "cli/complete_sources.h"
 #include "cli/registry.h"
 #include "cli/root.h"
+#include "cli/tui_workbench.h"
 #include "contracts/config.h"
 #include "logger/session.h"
 #include "support/cli_home.h"
@@ -707,4 +711,338 @@ TEST_CASE("chats list and chats info draw no control character from a saved titl
     // The document keeps the title as saved.
     const nlohmann::json listed = document(run(home, {"chats", "list", "--output-format", "json"}));
     CHECK(listed["data"][0]["name"] == kForgedTitle);
+}
+
+// ---------------------------------------------------------------------------
+// A saved chat names only its own files (CLI-M57)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+namespace fs = std::filesystem;
+
+/// The probes' sandbox (CLI-M57): a home three folders down the test's own
+/// temp directory, with `sessions/`, `attachments/` and `memory/pending/`,
+/// so every victim a planted id can reach is inside it.
+constexpr const char* kDeep = "one/two/three";
+
+/// A session file as the probes planted it: schema 1, backend `foo`, no
+/// turns, holding `chat_id` -- written by hand, so the id inside need not be
+/// the file's name.
+void plant(const fs::path& file, const std::string& chat_id,
+           const std::string& updated = "2026-11-26T00:00:00Z") {
+    fs::create_directories(file.parent_path());
+    std::ofstream{file, std::ios::binary}
+        << nlohmann::json{{"schema_version", 1},   {"chat_id", chat_id},
+                          {"backend", "foo"},      {"started_at", updated},
+                          {"updated_at", updated}, {"turns", 0},
+                          {"compactions", 0},      {"messages", nlohmann::json::array()}}
+               .dump();
+}
+
+void write(const fs::path& file, const std::string& text) {
+    fs::create_directories(file.parent_path());
+    std::ofstream{file, std::ios::binary} << text;
+}
+
+[[nodiscard]] std::string slurp(const fs::path& file) {
+    std::ifstream in{file, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+/// The store's folders, as the probes made them.
+void make_store(const CliHome& home) {
+    for (const char* folder : {"sessions", "attachments", "memory/pending"}) {
+        fs::create_directories(home.home() / folder);
+    }
+}
+
+/// The refusal of a file whose id names another file, as stderr says it.
+[[nodiscard]] std::string not_ours(const fs::path& file) {
+    return "apogee chats: " + file.string() +
+           " is not a chat this home saved: its id names another file\n";
+}
+
+}  // namespace
+
+TEST_CASE("chats title and delete refuse a session whose id names another file, touching none",
+          "[chats][history][CLI-M57]") {
+    const CliHome home{kConfig, "config.yaml", kDeep};
+    make_store(home);
+    const fs::path& h = home.home();
+    const fs::path sessions = h / "sessions";
+
+    // 1. An id that climbs out of sessions/, beside the file it names.
+    plant(sessions / "A.json", "../victim2");
+    write(h / "victim2.json", R"({"victim": 2})");
+    const Run titled = run(home, {"chats", "title", "A", "x"});
+    CHECK(titled.code == 1);
+    CHECK(titled.out.empty());
+    CHECK(titled.err == not_ours(sessions / "A.json"));
+    CHECK(slurp(h / "victim2.json") == R"({"victim": 2})");
+
+    // 2. An id the recall marker climbs out through: the marker can name a
+    // file of any kind.
+    plant(sessions / "B.json", "../../victim.txt");
+    write(h / "victim.txt", "keep me");
+    const Run deleted = run(home, {"chats", "delete", "B"});
+    CHECK(deleted.code == 1);
+    CHECK(deleted.out.empty());
+    CHECK(deleted.err == not_ours(sessions / "B.json"));
+    CHECK(slurp(h / "victim.txt") == "keep me");
+    CHECK(fs::exists(sessions / "B.json"));
+
+    // An id the session path and the attachments climb out through.
+    plant(sessions / "V.json", "../victim");
+    write(h / "victim.json", R"({"victim": 1})");
+    write(h / "victim.media" / "inside.txt", "inside");
+    CHECK(run(home, {"chats", "delete", "V"}).err == not_ours(sessions / "V.json"));
+    CHECK(slurp(h / "victim.json") == R"({"victim": 1})");
+    CHECK(slurp(h / "victim.media" / "inside.txt") == "inside");
+
+    // 3. A plain id that is not its file's stem, beside the chat it names.
+    apogee::logger::Session real;
+    real.chat_id = "D";
+    real.backend = "local";
+    real.turns = 1;
+    real.messages = {ChatMessage::user("hi"), ChatMessage::assistant("hello")};
+    apogee::logger::save(real);
+    const std::string real_bytes = slurp(sessions / "D.json");
+    plant(sessions / "C.json", "D");
+    const Run mismatched = run(home, {"chats", "title", "C", "x"});
+    CHECK(mismatched.code == 1);
+    CHECK(mismatched.err == not_ours(sessions / "C.json"));
+    CHECK(slurp(sessions / "D.json") == real_bytes);
+
+    // 4. A typed path is no chat's name: never a false success, and nothing
+    // changes -- memory/pending/ included, which an empty id once removed.
+    write(h / "victim3.json", R"({"victim": 3})");
+    const Run by_path = run(home, {"chats", "title", "../victim2", "x"});
+    CHECK(by_path.code == 1);
+    CHECK(by_path.out.empty());
+    CHECK(by_path.err == "apogee chats: no chat named '../victim2'\n");
+    const Run delete_path = run(home, {"chats", "delete", "../victim3"});
+    CHECK(delete_path.code == 1);
+    CHECK(delete_path.out.empty());
+    CHECK(delete_path.err == "apogee chats: no chat named '../victim3'\n");
+    CHECK(slurp(h / "victim2.json") == R"({"victim": 2})");
+    CHECK(slurp(h / "victim3.json") == R"({"victim": 3})");
+    CHECK(fs::is_directory(h / "memory" / "pending"));
+    // The empty name is no chat's, though every chat with no custom name has
+    // an empty one: `chats delete "$unset"` deletes nothing.
+    for (const std::vector<std::string>& args :
+         {std::vector<std::string>{"chats", "delete", ""},
+          std::vector<std::string>{"chats", "title", "", "x"},
+          std::vector<std::string>{"chats", "show", ""}}) {
+        INFO(args.at(1));
+        const Run empty = run(home, args);
+        CHECK(empty.code == 1);
+        CHECK(empty.out.empty());
+        CHECK(empty.err == "apogee chats: no chat named ''\n");
+    }
+    CHECK(slurp(sessions / "D.json") == real_bytes);
+    // A resume refuses the plant in its own voice, and writes nothing.
+    const Run resumed = run(home, {"chat", "--resume", "A"});
+    CHECK(resumed.code == 1);
+    CHECK(resumed.out.empty());
+    CHECK(resumed.err.ends_with("apogee chat: " + (sessions / "A.json").string() +
+                                " is not a chat this home saved: its id names another file\n"));
+    CHECK(slurp(h / "victim2.json") == R"({"victim": 2})");
+    // Every plant is still there, as it was: refused, never repaired.
+    for (const char* stem : {"A", "B", "C", "V"}) {
+        INFO(stem);
+        CHECK(fs::exists(sessions / (std::string{stem} + ".json")));
+    }
+}
+
+TEST_CASE("a session-shaped file outside sessions/ is never read, written or deleted by its path",
+          "[chats][history][CLI-M57]") {
+    // A JSONC home, so the probes' `config.json` is the config itself.
+    const CliHome home{
+        R"({"backends": {"local": {"type": "mock", "model": "mock-1"}}, "models": {"default": "local"}})",
+        "config.json", kDeep};
+    make_store(home);
+    const fs::path& h = home.home();
+    std::string status_before;
+    std::string unused;
+    REQUIRE(home.run({"models", "status"}, &status_before, &unused) == 0);
+    const std::string config_before = slurp(home.config_path());
+
+    // Typed as the loader would join it: the path without its `.json`.
+    const fs::path pwn = h / "elsewhere" / "pwn";
+    plant(pwn.string() + ".json", "../config/config");
+    const Run titled = run(home, {"chats", "title", "--", pwn.string(), "pwned"});
+    CHECK(titled.code == 1);
+    CHECK(titled.err == "apogee chats: no chat named '" + pwn.string() + "'\n");
+    CHECK(slurp(home.config_path()) == config_before);
+    std::string status_after;
+    REQUIRE(home.run({"models", "status"}, &status_after, &unused) == 0);
+    CHECK(status_after == status_before);
+
+    const fs::path copy = h / "elsewhere" / "target-chat";
+    plant(copy.string() + ".json", "../target");
+    write(h / "target.json", R"({"target": true})");
+    write(h / "target.media" / "inside.txt", "inside");
+    for (const char* verb : {"show", "delete"}) {
+        INFO(verb);
+        const Run refused = run(home, {"chats", verb, "--", copy.string()});
+        CHECK(refused.code == 1);
+        CHECK(refused.out.empty());
+        CHECK(refused.err == "apogee chats: no chat named '" + copy.string() + "'\n");
+    }
+    CHECK(slurp(h / "target.json") == R"({"target": true})");
+    CHECK(slurp(h / "target.media" / "inside.txt") == "inside");
+    CHECK(fs::exists(copy.string() + ".json"));
+}
+
+TEST_CASE("every reader of the store names only the chats whose files are their own",
+          "[chats][history][CLI-M57][completion]") {
+    const CliHome home{kConfig, "config.yaml", kDeep};
+    make_store(home);
+    save_fixture();
+    apogee::logger::Session named;
+    named.chat_id = "20261022-130000-ef01";
+    named.custom_name = "standup";
+    named.backend = "local";
+    named.turns = 1;
+    named.messages = {ChatMessage::user("hi"), ChatMessage::assistant("hello")};
+    apogee::logger::save(named);
+    apogee::logger::Session real = named;
+    real.chat_id = "D";
+    real.custom_name.clear();
+    real.filed_name.reset();  // a new file, never one this process read
+    apogee::logger::save(real);
+    // The plants, each newer than every chat, so `--continue` would pick one
+    // -- `A` first, which names no file here.
+    const fs::path sessions = home.home() / "sessions";
+    plant(sessions / "A.json", "../victim2", "2999-01-01T00:00:02Z");
+    plant(sessions / "B.json", "../../victim.txt", "2999-01-01T00:00:01Z");
+    plant(sessions / "C.json", "D", "2999-01-01T00:00:00Z");
+    const std::vector<std::string> ours{kChatId, "20261022-130000-ef01", "D"};  // sorted
+
+    // chats list, in text and JSON.
+    const Run text = run(home, {"chats", "list"});
+    REQUIRE(text.code == 0);
+    CHECK(std::ranges::count(text.out, '\n') == 3);
+    for (const char* planted : {"../victim2", "../../victim.txt", "2999-"}) {
+        INFO(planted);
+        CHECK(text.out.find(planted) == std::string::npos);
+    }
+    const nlohmann::json listed = document(run(home, {"chats", "list", "--output-format", "json"}));
+    std::vector<std::string> ids;
+    for (const nlohmann::json& row : listed.at("data")) {
+        ids.push_back(row.at("id").get<std::string>());
+    }
+    std::ranges::sort(ids);
+    CHECK(ids == ours);
+
+    // Completion offers what the verbs take (ADR 0007).
+    const apogee::commands::RootCommand root{apogee::commands::default_registry()};
+    const apogee::commands::Completion offered = apogee::commands::complete_words(
+        {.words = {"chats", "show"}, .current = ""}, apogee::harness::parse_config(kConfig, "test"),
+        apogee::commands::specs_from_app(root.app()),
+        apogee::commands::default_completion_sources());
+    for (const std::string& id : ours) {
+        CHECK(std::ranges::find(offered.candidates, id) != offered.candidates.end());
+    }
+    for (const std::string& candidate : offered.candidates) {
+        INFO(candidate);
+        CHECK(candidate.find("victim") == std::string::npos);
+        CHECK(run(home, {"chats", "show", candidate}).code == 0);
+    }
+
+    // ACP's session/list and the shell's Chats view read the same listing.
+    std::vector<std::string> acp;
+    for (const apogee::acp::ListedChat& chat : apogee::commands::acp_saved_chats().list()) {
+        acp.push_back(chat.id);
+    }
+    std::ranges::sort(acp);
+    CHECK(acp == ours);
+    apogee::commands::RootContext context;
+    context.config_path = home.config_path().string();
+    std::vector<std::string> rows;
+    for (const apogee::tui::ListRow& row :
+         apogee::commands::chats_view_options(context, {}).load().second) {
+        rows.push_back(row.key);
+    }
+    std::ranges::sort(rows);
+    CHECK(rows == ours);
+
+    // `--continue` resumes the newest chat of this home's, never a plant.
+    const std::string newest = apogee::logger::list_sessions().front().chat_id;
+    CHECK(std::ranges::find(ours, newest) != ours.end());
+    const Run continued = run(home, {"chat", "--continue", "--input-format", "stream-json",
+                                     "--output-format", "stream-json"});
+    INFO(continued.err);
+    REQUIRE(continued.code == 0);
+    const nlohmann::json first =
+        nlohmann::json::parse(continued.out.substr(0, continued.out.find('\n')), nullptr, false);
+    REQUIRE_FALSE(first.is_discarded());
+    CHECK(first.at("type") == "session");
+    CHECK(first.at("chat_id") == newest);
+}
+
+TEST_CASE("an ordinary chat is read, renamed, compacted and deleted with its files as before",
+          "[chats][history][CLI-M57]") {
+    const CliHome home{kConfig, "config.yaml", kDeep};
+    make_store(home);
+    save_fixture();
+    CHECK(run(home, {"chats", "info", kChatId}).code == 0);
+    CHECK(run(home, {"chats", "show", kChatId}).code == 0);
+
+    // A custom name holds any characters, and is found by it.
+    const Run titled = run(home, {"chats", "title", kChatId, "a/b"});
+    CHECK(titled.code == 0);
+    CHECK(titled.out == std::string{kChatId} + " renamed to 'a/b'\n");
+    const Run shown = run(home, {"chats", "show", "a/b"});
+    CHECK(shown.code == 0);
+    CHECK(shown.out.find("Which port?") != std::string::npos);
+
+    const Run compacted = run(home, {"chats", "compact", kChatId, "--yes"});
+    INFO(compacted.err);
+    CHECK(compacted.code == 0);
+
+    // Delete takes the chat's own index, media and recall marker.
+    const fs::path index = apogee::commands::ChatAttachments::index_for(kChatId);
+    for (const char* suffix : {"", "-wal", "-shm", "-journal"}) {
+        write(index.string() + suffix, "index");
+    }
+    const fs::path media = home.home() / "attachments" / (std::string{kChatId} + ".media");
+    write(media / "frame.png", "png");
+    const fs::path marker = apogee::commands::recall_marker(kChatId);
+    write(marker, "due");
+    const Run deleted = run(home, {"chats", "delete", kChatId});
+    CHECK(deleted.code == 0);
+    CHECK(deleted.out == "deleted " + std::string{kChatId} + "\n");
+    CHECK_FALSE(fs::exists(apogee::logger::session_path(kChatId)));
+    for (const char* suffix : {"", "-wal", "-shm", "-journal"}) {
+        INFO(suffix);
+        CHECK_FALSE(fs::exists(index.string() + suffix));
+    }
+    CHECK_FALSE(fs::exists(media));
+    CHECK_FALSE(fs::exists(marker));
+    CHECK(fs::is_directory(home.home() / "memory" / "pending"));
+}
+
+TEST_CASE("an id typed in another case reaches its chat where the filesystem folds case",
+          "[chats][history][CLI-M57]") {
+    // The check compares files, never spellings: where the filesystem folds
+    // case, as APFS and NTFS do by default, the direct join still reaches
+    // the chat; where it does not, the id names no file, as before.
+    const CliHome home{kConfig, "config.yaml", kDeep};
+    save_fixture();
+    write(home.home() / "case-probe", "");
+    const bool folds = fs::exists(home.home() / "CASE-PROBE");
+    std::string upper{kChatId};
+    std::ranges::transform(upper, upper.begin(), [](char c) {
+        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    });
+    const Run shown = run(home, {"chats", "show", upper});
+    if (folds) {
+        CHECK(shown.code == 0);
+        CHECK(shown.out.find("Which port?") != std::string::npos);
+    } else {
+        CHECK(shown.code == 1);
+        CHECK(shown.err == "apogee chats: no chat named '" + upper + "'\n");
+    }
 }

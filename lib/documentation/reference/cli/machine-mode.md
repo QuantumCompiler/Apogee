@@ -257,8 +257,9 @@ launch is refused for, among others:
 - a suite that does not fit this machine: `suite vast needs 247056 MiB of this
   machine's 110100 MiB: … -- it does not fit; --force runs it anyway`, and a
   suite that does not exist, `--suite: no suite named 'nope' (configured: …)`;
-- a chat that cannot be resumed (`no chat named '…'`), flags that cannot go
-  together, and no backend that started at all.
+- a chat that cannot be resumed (`no chat named '…'`, or since CLI-M57 `<file>
+  is not a chat this home saved: its id names another file`), flags that
+  cannot go together, and no backend that started at all.
 
 Once `session` is out, what the session says for the user is on the stream;
 stderr keeps its diagnostics.
@@ -1642,7 +1643,12 @@ command's stdout ([tools.md](tools.md#apogee-as-an-mcp-server-apogee-mcp-serve))
   only when they are set. `backend` is `""` where the text
   says `(default)`. A name no chat answers is refused as the text refuses it:
   `apogee chats: no chat named '<name>'` on stderr, exit `1`, nothing on
-  stdout.
+  stdout -- and so, since CLI-M57, is a session file whose `chat_id` does not
+  name that very file (a hand edit, a copy, a synced folder), in its own
+  words: `apogee chats: <file> is not a chat this home saved: its id names
+  another file`. A name is joined to `sessions/` only when it is a plain id,
+  never a path; any other is looked up as a custom name or title. `chats
+  list` leaves such a file out, as it leaves out one that does not parse.
 - **`chats recall`** (since M31): the summaries recall holds of earlier
   chats, newest first by `updated` (undated last) -- each `chat` (the id
   `chats show` and `--resume` take), the `name` and `updated` time the index
@@ -1948,7 +1954,8 @@ context -- retrieved excerpts, an inlined attachment's text, recall. The
 system prompt is a setting, not a turn. A private chat (`chat --private`) is
 never written, so there is nothing to show. A name no chat answers is refused
 as `chats info` refuses it: `apogee chats: no chat named '<name>'` on stderr,
-exit `1`, nothing on stdout.
+exit `1`, nothing on stdout, and a file whose id names another file in
+`chats info`'s words for it (CLI-M57).
 
 No document carries a key or a token. A command that has no JSON face refuses
 `--output-format json` and names the commands that have one.

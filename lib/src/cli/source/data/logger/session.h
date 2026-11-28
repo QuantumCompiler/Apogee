@@ -275,6 +275,16 @@ struct LoadedSession {
 /// The file for `chat_id`.
 [[nodiscard]] std::filesystem::path session_path(const std::string& chat_id);
 
+/// Why `id` cannot name a saved chat's file, or empty when it can
+/// (CLI-M57): not empty, no '/', '\\' or NUL, not "." or "..", no root
+/// name -- CLI-M45's escape check (`harness::name_leaves_folder`) and `.`.
+/// A chat is named, never pathed: its id is joined to `sessions/`,
+/// `attachments/` and `memory/pending/`, so an id that could leave those
+/// folders, or name one, would turn a rename into a write and a delete into
+/// a removal of any file. Never a character set: a hand-named `my chat`
+/// keeps reading.
+[[nodiscard]] std::string chat_id_error(std::string_view id);
+
 /// A fresh, unique chat id.
 [[nodiscard]] std::string new_chat_id();
 
@@ -342,6 +352,18 @@ bool learn_deleted(Session& session);
 /// all -- every recoverable problem is a warning. The session's `turns` is
 /// `counted_turns`, and its `filed_name` the file's name, so a later `save`
 /// keeps an outside edit (55b).
+///
+/// **A chat this home saved, or none** (CLI-M57): `name` is joined to
+/// `sessions/` only when `chat_id_error` passes it -- any other name is a
+/// custom name or a title, which hold any characters (the empty name is
+/// none, though every chat never renamed has an empty custom name). And the
+/// file found is
+/// refused by name -- `<file> is not a chat this home saved: its id names
+/// another file` -- unless the `chat_id` inside it passes the rule and
+/// `session_path` of it is that very file (the same file, so an id typed in
+/// another case on a case-insensitive filesystem still reaches its chat).
+/// So every id a loaded session carries names its own file, and each write
+/// and delete keyed on it stays on that chat's own files.
 [[nodiscard]] LoadedSession load(const std::string& name, const KnownDependencies& known);
 
 /// What renaming a backend did to the saved chats (46a).
@@ -363,7 +385,10 @@ struct SessionSweep {
                                                   std::string_view new_name);
 
 /// Every saved session, newest first; a tie in `updated_at` by `chat_id`,
-/// descending.
+/// descending. A file that does not parse is skipped, and so is one whose
+/// `chat_id` does not name that file (CLI-M57, `load`'s check): what is
+/// listed -- and offered, resumed by `--continue`, shown by the apps -- is
+/// what `load` opens.
 [[nodiscard]] std::vector<Session> list_sessions();
 
 /// The most recently updated session, or nullopt when there are none.

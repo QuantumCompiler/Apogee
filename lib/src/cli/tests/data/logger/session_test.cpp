@@ -1214,3 +1214,161 @@ TEST_CASE("a backend rename sweeps every chat naming it, in any case, and no oth
     CHECK(apogee::logger::rename_session_backend("On", "helper").renamed == 0);
     CHECK(read("20260826-120000-0009").rerank == "on");
 }
+
+// ---------------------------------------------------------------------------
+// A chat is named, never pathed (CLI-M57)
+// ---------------------------------------------------------------------------
+
+using apogee::logger::chat_id_error;
+
+namespace {
+
+/// A session file as the probes planted it (CLI-M57): schema 1, backend
+/// `foo`, no turns, holding `chat_id` -- written by hand under `file`, so
+/// the id inside need not be the file's name.
+void plant(const std::filesystem::path& file, const std::string& chat_id) {
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream{file, std::ios::binary} << nlohmann::json{
+        {"schema_version", 1},
+        {"chat_id", chat_id},
+        {"backend", "foo"},
+        {"started_at", "2026-11-26T00:00:00Z"},
+        {"updated_at", "2026-11-26T00:00:00Z"},
+        {"turns", 0},
+        {"compactions", 0},
+        {"messages", nlohmann::json::array()}}.dump();
+}
+
+[[nodiscard]] std::string slurp(const std::filesystem::path& file) {
+    std::ifstream in{file, std::ios::binary};
+    return {std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+}  // namespace
+
+TEST_CASE("a chat id that could name another file is refused, in the rule's words",
+          "[chat][session][CLI-M57]") {
+    CHECK(chat_id_error("") == "a chat needs an id");
+    for (const std::string id : {".", "..", "a/b", "a\\b", "../x", "/abs", "x/", "\\x"}) {
+        INFO(id);
+        CHECK(chat_id_error(id) == "'" + id + "' is not a plain chat id");
+    }
+    // A NUL would cut the path where a C API reads it.
+    CHECK_FALSE(chat_id_error(std::string{"a\0b", 3}).empty());
+#ifdef _WIN32
+    // Joined to the folder, a drive-relative name rebases the path.
+    for (const std::string id : {"C:x", "C:"}) {
+        INFO(id);
+        CHECK_FALSE(chat_id_error(id).empty());
+    }
+#endif
+}
+
+TEST_CASE("every id a chat can have in its folder passes the rule", "[chat][session][CLI-M57]") {
+    // Wider than the prompt cache's character set: a hand-named chat keeps
+    // reading for its characters.
+    for (const std::string id :
+         {"20261126-000001-abce", "my chat", "a..b", "café", "-x", ".hidden", "older"}) {
+        INFO(id);
+        CHECK(chat_id_error(id).empty());
+    }
+    // The id every chat Apogee makes has.
+    CHECK(chat_id_error(apogee::logger::new_chat_id()).empty());
+}
+
+TEST_CASE("a session file whose id names another file is refused by name, and never listed",
+          "[chat][session][CLI-M57]") {
+    const TempDir dir{"session-m57"};
+    const std::filesystem::path home = dir.path() / "one" / "two" / "three";
+    const EnvGuard guard{"APOGEE_HOME", home.string()};
+    const std::filesystem::path sessions = apogee::logger::sessions_dir();
+
+    // Two ordinary chats, each named by its id.
+    Session first = sample();
+    first.chat_id = "20261126-000003-0001";
+    apogee::logger::save(first);
+    Session second = sample();
+    second.chat_id = "D";
+    apogee::logger::save(second);
+    const std::string second_bytes = slurp(sessions / "D.json");
+
+    // The plants: an id that climbs out, a plain id that is not its stem, an
+    // empty id (a JSON file that is no session), and an id `.`.
+    plant(sessions / "A.json", "../victim2");
+    plant(sessions / "C.json", "D");
+    std::ofstream{sessions / "E.json", std::ios::binary} << R"({"victim": 2})";
+    plant(sessions / "F.json", ".");
+    std::ofstream{home / "victim2.json", std::ios::binary} << R"({"victim": 2})";
+
+    for (const char* stem : {"A", "C", "E", "F"}) {
+        INFO(stem);
+        const std::string file = (sessions / (std::string{stem} + ".json")).string();
+        try {
+            (void)apogee::logger::load(stem, {});
+            FAIL("loaded " << stem);
+        } catch (const std::runtime_error& e) {
+            CHECK(std::string{e.what()} ==
+                  file + " is not a chat this home saved: its id names another file");
+        }
+    }
+
+    // The listing keeps every chat that names its own file, and only those.
+    std::vector<std::string> listed;
+    for (const Session& session : apogee::logger::list_sessions()) {
+        listed.push_back(session.chat_id);
+    }
+    std::ranges::sort(listed);
+    CHECK(listed == std::vector<std::string>{"20261126-000003-0001", "D"});
+    CHECK(slurp(sessions / "D.json") == second_bytes);
+    CHECK(slurp(home / "victim2.json") == R"({"victim": 2})");
+}
+
+TEST_CASE("a typed name joins the folder only when it is a plain id, and else is a name",
+          "[chat][session][CLI-M57]") {
+    const TempDir dir{"session-m57-typed"};
+    const std::filesystem::path home = dir.path() / "one" / "two" / "three";
+    const EnvGuard guard{"APOGEE_HOME", home.string()};
+    std::filesystem::create_directories(apogee::logger::sessions_dir());
+    // A session-shaped file one folder up, which the join would have read.
+    plant(home / "victim2.json", "victim2");
+    for (const std::string& name : {std::string{"../victim2"}, (home / "victim2").string()}) {
+        INFO(name);
+        try {
+            (void)apogee::logger::load(name, {});
+            FAIL("loaded " << name);
+        } catch (const std::runtime_error& e) {
+            CHECK(std::string{e.what()} == "no chat named '" + name + "'");
+        }
+    }
+    // A custom name holds any characters, and is found by the search.
+    Session named = sample();
+    named.custom_name = "a/b";
+    apogee::logger::save(named);
+    CHECK(apogee::logger::load("a/b", {}).session.chat_id == named.chat_id);
+    // And a name longer than any file's is searched as a name, never failed
+    // at the join.
+    Session long_named = sample();
+    long_named.chat_id = "20261126-000004-0001";
+    long_named.custom_name = std::string(300, 'n');
+    apogee::logger::save(long_named);
+    CHECK(apogee::logger::load(long_named.custom_name, {}).session.chat_id == long_named.chat_id);
+}
+
+TEST_CASE("a hand-written file named by its id loads as before, a legacy one with its warning",
+          "[chat][session][CLI-M57]") {
+    const TempDir dir{"session-m57-legacy"};
+    const EnvGuard guard{"APOGEE_HOME", dir.path().string()};
+    std::filesystem::create_directories(apogee::logger::sessions_dir());
+    std::ofstream{apogee::logger::session_path("legacy-chat"), std::ios::binary} << R"({
+        "chat_id": "legacy-chat",
+        "backend": "claude",
+        "messages": [{"role":"user","content":"from before"}]
+    })";
+    plant(apogee::logger::session_path("my chat"), "my chat");
+    const auto loaded = apogee::logger::load("legacy-chat", {});
+    CHECK(loaded.session.chat_id == "legacy-chat");
+    REQUIRE(loaded.warnings.size() == 1);
+    CHECK(loaded.warnings[0].kind == WarningKind::SchemaLegacy);
+    CHECK(apogee::logger::load("my chat", {}).session.chat_id == "my chat");
+    CHECK(apogee::logger::list_sessions().size() == 2);
+}

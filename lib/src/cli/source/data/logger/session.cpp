@@ -11,7 +11,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <utility>
 
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
 #include "contracts/layout.h"
@@ -49,6 +51,23 @@ std::string string_field(const nlohmann::json& object, std::string_view key,
         return {};
     }
     return it->get<std::string>();
+}
+
+/// Whether `id`, read from the file at `read`, names that very file
+/// (CLI-M57): it passes `chat_id_error`, and `session_path(id)` is the same
+/// file -- compared as files, never as spellings, so a case-insensitive
+/// filesystem's other spelling of the stem is still the chat's own.
+[[nodiscard]] bool names_its_file(const std::string& id, const std::filesystem::path& read) {
+    if (!chat_id_error(id).empty()) {
+        return false;
+    }
+    const std::filesystem::path own = session_path(id);
+    if (own == read) {
+        return true;  // the same path, as every file Apogee wrote is read
+    }
+    // The error_code form: a missing file is no match, never a throw.
+    std::error_code ec;
+    return std::filesystem::equivalent(own, read, ec) && !ec;
 }
 
 /// The most of a call's arguments its summary repeats.
@@ -258,6 +277,16 @@ std::filesystem::path sessions_dir() {
 
 std::filesystem::path session_path(const std::string& chat_id) {
     return sessions_dir() / (chat_id + ".json");
+}
+
+std::string chat_id_error(std::string_view id) {
+    if (id.empty()) {
+        return "a chat needs an id";
+    }
+    if (id == "." || harness::name_leaves_folder(id)) {
+        return "'" + std::string{id} + "' is not a plain chat id";
+    }
+    return {};
 }
 
 std::string new_chat_id() {
@@ -654,16 +683,22 @@ int counted_turns(const Session& session) {
 }
 
 LoadedSession load(const std::string& name, const KnownDependencies& known) {
-    const std::filesystem::path direct = session_path(name);
     std::filesystem::path found;
 
-    if (std::filesystem::exists(direct)) {
-        found = direct;
+    // A chat is named, never pathed (CLI-M57): only a name the rule passes
+    // is joined to the folder. Any other is a custom name or a title -- and
+    // so is one the filesystem cannot answer for (longer than a file name
+    // may be): names are free text.
+    std::error_code unanswered;
+    if (chat_id_error(name).empty() && std::filesystem::exists(session_path(name), unanswered)) {
+        found = session_path(name);
     } else {
         // Not an id: try a custom name or title. A user who renamed a chat
-        // should be able to resume it by the name they gave it.
+        // should be able to resume it by the name they gave it. The empty
+        // name is none (CLI-M57): every chat never renamed has an empty
+        // custom name, and `chats delete ""` once deleted the newest.
         for (const Session& candidate : list_sessions()) {
-            if (candidate.custom_name == name || candidate.title == name) {
+            if (!name.empty() && (candidate.custom_name == name || candidate.title == name)) {
                 found = session_path(candidate.chat_id);
                 break;
             }
@@ -674,13 +709,24 @@ LoadedSession load(const std::string& name, const KnownDependencies& known) {
         throw std::runtime_error("no chat named '" + name + "'");
     }
 
-    std::ifstream in(found, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error(found.string() + ": cannot open");
+    std::string text;
+    {
+        // Closed before the file is compared below, which opens it again.
+        std::ifstream in(found, std::ios::binary);
+        if (!in) {
+            throw std::runtime_error(found.string() + ": cannot open");
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        text = buffer.str();
     }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    LoadedSession loaded = deserialize(buffer.str(), known);
+    LoadedSession loaded = deserialize(text, known);
+    // Every write and delete keys on the id (CLI-M57): a file whose id names
+    // another file is not a chat this home saved, and is refused by name.
+    if (!names_its_file(loaded.session.chat_id, found)) {
+        throw std::runtime_error(found.string() +
+                                 " is not a chat this home saved: its id names another file");
+    }
     // The file as this process found it (55b): what its next save compares.
     loaded.session.filed_name = loaded.session.custom_name;
     return loaded;
@@ -750,16 +796,27 @@ std::vector<Session> list_sessions() {
         if (ec || !entry.is_regular_file() || entry.path().extension() != ".json") {
             continue;
         }
-        std::ifstream in(entry.path(), std::ios::binary);
-        if (!in) {
-            continue;
+        std::string text;
+        {
+            // Closed before the file is compared below, which opens it again.
+            std::ifstream in(entry.path(), std::ios::binary);
+            if (!in) {
+                continue;
+            }
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            text = buffer.str();
         }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
         try {
             // A corrupt file is skipped rather than fatal: one bad session must
             // not make `apogee chat list` unusable.
-            sessions.push_back(deserialize(buffer.str(), {}).session);
+            Session session = deserialize(text, {}).session;
+            // So is one whose id names another file (CLI-M57): `load` refuses
+            // it, so nothing that lists offers it.
+            if (!names_its_file(session.chat_id, entry.path())) {
+                continue;
+            }
+            sessions.push_back(std::move(session));
         } catch (const std::exception&) {
             continue;
         }
