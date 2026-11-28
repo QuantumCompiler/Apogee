@@ -251,7 +251,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
 | Land before CLI-59d? | `[default]` | Yes, as a priority, with a Relates-to link. It does not make 59d's door safe for paths: `datasets prepare --out <any path>`, `embed ingest <path>`, `train run --dataset <path>` and `--kit <path>` still take paths through it, so 59d needs its own rule for path arguments. |
 | Should `datasets info` and `delete` stop offering the shell's file names at Tab? | `[default]` | Yes. They get a names-only kind listing the same names, because a file name offered to a verb that refuses paths is a completion bug (ADR 0007). `train run --dataset` keeps `DATASET` and its file fallback. |
 | Should a new dataset name refuse a leading `-`, a Windows device name, a `.eval` suffix or a second `.jsonl`? | `(consumed decision)` | [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) owns the create rule, after this item. |
-| Should the full-screen shell pass `--` before a listed dataset's name? | `(consumed decision)` | [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md) owns it. Until it ships, the shell's delete of `-h` prints the verb's help, as today. |
+| Should the full-screen shell pass `--` before a listed dataset's name? | `(consumed decision)` | [CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash) (shipped 2026-11-27) owns it: the shell's delete runs `datasets delete --yes -- <name>`, so `-h` is deleted from the view. |
 
 ## Decision log
 
@@ -271,7 +271,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
 
 - **The create rule for new names**: a leading `-`, Windows device names, the `.eval` suffix and `x.jsonl.jsonl` landing on `x`. [CLI-M56](a-new-dataset-name-is-one-every-verb-reads.md) owns it.
 - **`datasets prepare --out <any path>`**, by design and documented (training.md:226).
-- **The full-screen shell passing a listed name without `--`** (`tui_training.cpp:278-279`): [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md).
+- **The full-screen shell passing a listed name without `--`** (`tui_training.cpp:278-279`): [CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash) (shipped 2026-11-27).
 - **The Mac app passing `--` before a dataset's name**: [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed).
 - **synth's printed next step**, `Train on it with:  apogee train run <snapshot> --dataset <name>` (`presentation/cli/datasets.cpp:520`), which prints a dash-led name bare: [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27).
 - **A rule for path arguments on CLI-59d's door** ([reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)): 59d's own.
@@ -288,7 +288,7 @@ Every fixture is hermetic: homes, victims and hand-placed files inside the test'
   - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), the same read rule for collections: whichever lands second shares the escape check;
   - CLI-59d (v0.2.3, [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md)), whose door would run these verbs: best landed first, though this item does not make that door safe for paths;
   - [CLI-M57](a-saved-chat-names-only-its-own-files.md), the same before-59d priority for a saved chat's id;
-  - [CLI-M51](the-tuis-row-actions-reach-a-dash-led-row.md), the full-screen shell's delete of a dash-led dataset;
+  - [CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash) (shipped 2026-11-27), the full-screen shell's delete of a dash-led dataset;
   - [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), synth's printed `train run … --dataset <name>` line;
   - [APP-M21](../../../assistant/darwin/MILESTONES.md#2026-11-26--listed-name-reaches-the-verb-maintenance-item-m21-a-listed-name-reaches-the-verb-as-listed), whose aside this item answers and whose `datasets delete --yes -- -h` keeps working;
   - [ADR 0002](../../../adrs/cli/mode-parity.md), [ADR 0006](../../../adrs/cli/backwards-compatibility.md), [ADR 0007](../../../adrs/cli/tab-completion.md).

@@ -9286,6 +9286,55 @@ Decisions taken while building, for veto:
 
 **Verified.** The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed all 3,296 tests, one skipped for want of `pdftotext`, `cli.tui_shell`'s menu case and the leak test's menu rows among them. `make format-check` is clean for every file touched, `runner_view.h` included, which it flagged before this change.
 
+### 2026-11-27 — `the-tuis-row-actions-reach-a-dash-led-row` (maintenance item M51): the TUI's row actions reach a row whose name starts with a dash
+
+**Why.** A follow-on to 37f and 37g, whose views run every act as the command itself, a child of the shell's own binary. Each act built its argv by hand with the row's name as a bare word ahead of any `--`, so CLI11 read a dash-led name as an option before the verb ran. The Datasets view's delete of a dataset named `-x`, which `datasets create --from empty -- -x` makes today, exited 106 with `name is required`. Its delete of `-h` printed `datasets delete`'s help with exit 0, drawn as the delete's answer, and the dataset stayed (the investigation of the APP-M21 and APP-M22 probes' CLI asides, 2026-11-26). The Agents, MCP and Train views' acts had the same shape for a hand-written `-x`. 37g's record, "the config each writes is the command's by construction", held only for names that don't start with `-`.
+
+**What was built**
+
+- [x] **Options, then `--`, then the name, in every argv the views build** (`cli/tui_training.cpp`, `cli/tui_agents.cpp`):
+  - the Datasets view's `x` runs `datasets delete --yes -- <name>`, and the Train view's `R` runs `train rollback -- <backend>`;
+  - the Agents view's `x` runs `agents delete -- <name>`, and the MCP view's `e`/`d` run `mcp enable|disable -- <name>`.
+
+  The `--` goes in for every name, plain ones included, and no option follows it. None of the five verbs has an option that collects several values, which would eat a `--` placed after it. Each act stays one literal list, and `child_answer`, `self_command` and `ListAsk::prefill` keep their signatures.
+- [x] **The MCP view's `t` opens on `-- <server> ` for a server whose name starts with `-`** (`test: -- -x ▏`), so the typed line runs `mcp test -- -x <tool> <arguments>`. A plain name opens as before (`test: tools ▏`). The key goes in raw: its `shell_word` spelling is CLI-M61's.
+- [x] **A plain name sees nothing new**: the asks, the answers and the prefill are byte for byte as before, and every existing case in both test files passes unedited.
+- [x] **Tests** (`[M51]`, seven cases). Each failed on the old argv for the bug's own reason before the fix (`name is required` and `exit 106`, the help page, `backend is required`, the prefill `-x `):
+  - `tui_training_test`:
+    - a `-x.jsonl` written directly, so it holds once CLI-M56 refuses new dash-led names, deleted from the view: `will remove:` and `removed.` drawn, no `name is required` or `exit 106`, the file gone and the row gone on the read after;
+    - the same for `-h`, with no `Usage: apogee datasets delete` line;
+    - `R` on a hand-written JSONC backend `-x` with a two-version ledger: the view draws the first line of a twin's `train rollback -- -x`, run as the same built binary, and leaves the twin's config and ledger, each home's path written alike (plain and JSON-escaped).
+  - `tui_agents_test`, on a JSONC home's hand-written agent `-x` and MCP server `-x`:
+    - `x`, `e` on a disabled `-x` and `d` on an enabled one, each drawing a twin's first answer line for `agents delete -- -x`, `mcp enable -- -x` or `mcp disable -- -x`, leaving the twin's config, and drawing no `name is required`;
+    - `t` on a `-x` that runs Apogee's own `__mcp-tools`: `test: -- -x ▏` shown, the typed tool answering `hello from the note`, and the ask equal to what `mcp test -- -x read_file …` writes, its stderr then its stdout;
+    - the prefill pinned with no binary: `-x` opens on `-- -x `, `--` on `-- -- `, `tools` on `tools `.
+  - The test homes gained a JSONC form (`Home(config, "config.json")` in the training test, `DashedHome` in the agents test), and the ledger seeding moved out of `seed_versions` into `seed_ledger`. The YAML homes are byte for byte what they were.
+- [x] **Docs.** DEVELOPER.md's `tui_training` and `tui_agents` rows and their test rows, and "Adding a TUI view"'s step 2: a row's name handed to a child goes after the act's options and a `--`. No file was added or moved, so the codebase map is unchanged; SPEC is unchanged.
+
+**What a hand-written row meets now.** The name reaches the verb, and the verb answers in its own words. On a JSONC config each of the four config verbs refuses a `-x` key by 57e's rule, the file unchanged: `apogee agents: agent '-x' is not one both config formats can edit -- …`, and `train rollback`'s refusal names `config rename-backend` (CLI-M50's door). A dataset has no config entry, so it is removed.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - every argv carries the `--`, not only a dash-led one's;
+  - `t`'s prefill spells every key with `shell_word` once it is wired;
+  - until then the key goes in raw, with `-- ` before a dash-led one and no private quoter.
+- **Build-time rulings** (the most conservative reading; for the user's veto):
+  - **The `shell_word` wiring of the prefill is left to CLI-M61.** CLI-M48 shipped first, so this item landed second of the pair its document named. But CLI-M61's document takes that wiring when this item lands before it, and the run assigned it there. This item writes no quoting at all.
+  - **`d` is tested on its own enabled `-x`.** On JSONC, `mcp enable -- -x` refuses, so the server stays disabled and the view offers no `d` after `e`.
+  - **The rollback's twin runs the built binary** (`run_child_text(self_command(…))`, from the review). Its refusal names the program (`'apogee config rename-backend'`): the in-process command tree always prints the release `apogee` there, while the child prints its own build's channel, so the case would have failed in a dev- or test-channel tree.
+
+**Verified.**
+- **The gate**, `lib/scripts/cicd.sh --test` on the final code, with nothing else running: exit 0. **4,729 ctest cases**, 100% passed: the run's 4,722 before this item plus its seven new cases. Four were skipped, as before: the two `[powershell]` cases (no pwsh here), the `pdftotext` case and the extended-attribute write guard. The suite ran in 730 s, with no compiler warning in the log. The macOS app built and passed its 1,400 cases (the result bundle's `totalTestCount`), none failed or skipped.
+- **On the real binary.** The build tree's `apogee tui` on a 200×50 pseudo-terminal, over a scratch `APOGEE_HOME` with the mock backend: the Go-to menu to Datasets, `x` on `-h`, the ask `Delete dataset -h ('apogee datasets delete -- -h')? [y/N]`, then `y`. The view drew `will remove:`, `…/-h.jsonl` and `removed.`, `-h.jsonl` was gone with `keep` kept, and `q` exited 0. Probes of the five verbs on a JSONC home: the old argv exits 106 (`name is required`, `backend is required`), and the new one gets each verb's own refusal, exit 1, nothing changed.
+- **Scans.** Homebrew clang 22 and `x86_64-w64-mingw32-g++` (GCC 16.2), each with the compile database's own flags, over the four changed `.cpp` files: no warning. `clang-format --dry-run -Werror` is clean on all four.
+- **Review.** A code review over the working tree found no critical issue. Taken from it: the rollback's twin run as the built binary, and the prefill pinned in a case that runs with no binary.
+
+**Found, not fixed.** In the real shell, an open `[y/N]` ask is answered no by the next redraw. `TerminalPump::post` raises `ftxui::Event::Custom` for every task it posts, the 2-second monitor tick's among them. The shell hands that event to the view, and `ListView` takes any event but `y` as a no (`list_view.cpp`, `confirming` and `confirming_ask`). On the pseudo-terminal, `x` on a plain `keep` left 3 s without a key drew `not done` and kept the file, while the same ask answered within half a second deleted it. By reading, the same code takes every ask in the list views: the deletes, the rollback, the cycle and the launch asks' confirms. The in-process tests' `ManualPump` raises no such event, so none sees it. No item owns it.
+
+**Left to CI.** The Windows rows run the child cases against the Windows binary: the JSON-escaped homes, and an enabled `-x` whose `/bin/false` can't start there.
+
+**Left for CLI-M61.** It wires `t`'s prefill (`mcp_view_options` in `tui_agents.cpp`) to `shell_word` for the key, keeping `-- ` before a dash-led key. The spelling is `CommandShell::Posix` on every platform, since `line_tokens` reads POSIX quoting. It also renders the Train and Agents views' confirms, which still print a dash-led name raw (`'apogee agents delete -x'`).
+
 ## Milestone AI — Effort and permission modes
 
 **Goal.** Claude Code gives a session two controls the person reaches for constantly: how hard the model thinks (five effort levels) and how much it may do without asking (a permission mode, cycled with Shift+Tab). Apogee had the pieces of both -- `/think on|off|auto` with a raw token budget, and per-tool answers over one permission gate -- but not the controls. Track 39 (the user's call, 2026-10-11) gives `apogee chat`, `apogee execute` and the full-screen shell Claude Code's two, set mid-session in either front end and Tab-completed in both.

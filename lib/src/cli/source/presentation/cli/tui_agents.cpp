@@ -141,7 +141,9 @@ tui::ListOptions agents_view_options(const RootContext& context, std::filesystem
             },
         .run =
             [&context, binary](const tui::ListRow& row) {
-                return child_answer(context, binary, {"agents", "delete", row.key});
+                // The name after `--`, so a dash-led one is the verb's
+                // operand (CLI-M51).
+                return child_answer(context, binary, {"agents", "delete", "--", row.key});
             }}};
     return options;
 }
@@ -210,7 +212,12 @@ tui::ListOptions mcp_view_options(const RootContext& context, std::filesystem::p
                              words.insert(words.end(), split.words.begin(), split.words.end());
                              return child_answer(context, binary, words);
                          },
-                     .prefill = [](const tui::ListRow& row) { return row.key + " "; },
+                     // `--` first for a dash-led name, which the line then
+                     // hands `mcp test` as its server (CLI-M51).
+                     .prefill =
+                         [](const tui::ListRow& row) {
+                             return (row.key.starts_with('-') ? "-- " : "") + row.key + " ";
+                         },
                      .needs_row = true}};
     const auto in_state = [last](bool enabled) {
         return [last, enabled](const tui::ListRow& row) {
@@ -225,13 +232,14 @@ tui::ListOptions mcp_view_options(const RootContext& context, std::filesystem::p
                         .applies = in_state(true),
                         .run =
                             [&context, binary](const tui::ListRow& row) {
-                                return child_answer(context, binary, {"mcp", "enable", row.key});
+                                return child_answer(context, binary,
+                                                    {"mcp", "enable", "--", row.key});
                             }},
         tui::ListAction{.key = "d",
                         .label = "disable",
                         .applies = in_state(false),
                         .run = [&context, binary](const tui::ListRow& row) {
-                            return child_answer(context, binary, {"mcp", "disable", row.key});
+                            return child_answer(context, binary, {"mcp", "disable", "--", row.key});
                         }}};
     return options;
 }

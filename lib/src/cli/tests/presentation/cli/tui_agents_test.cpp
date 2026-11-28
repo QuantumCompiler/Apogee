@@ -22,7 +22,9 @@
 /// As children of the built binary (skipped where the build made none): `e`
 /// and `d` leaving the config `mcp enable|disable` leaves, `t` answering as
 /// `mcp test` answers over a real stdio server, `x` deleting an agent's
-/// entry as `agents delete` does with nobody to ask about its files.
+/// entry as `agents delete` does with nobody to ask about its files. A row's
+/// name goes after the act's options and a `--`, and `t` opens on `-- ` before
+/// a dash-led server (CLI-M51).
 namespace {
 
 namespace fs = std::filesystem;
@@ -97,6 +99,44 @@ struct Stage {
         out += line + "\n";
     }
     return out;
+}
+
+/// A JSONC home with hand-written entries named `-x` (CLI-M51): an agent, and
+/// an MCP server whose entry is the JSON object `server`, then `extra` more
+/// of the config's members.
+struct DashedHome {
+    explicit DashedHome(const std::string& server, const std::string& extra = {})
+        : home{
+              "{\n  \"backends\": {\"local\": {\"type\": \"mock\"}},\n"
+              "  \"models\": {\"default\": \"local\"},\n"
+              "  \"agents\": {\"-x\": {\"prompts\": [\"prompts/-x.txt\"], "
+              "\"tools\": \"read-only\"}},\n"
+              "  \"mcp_servers\": {\"-x\": " +
+                  server + "}" + extra + "\n}\n",
+              "config.json"} {
+        context.config_path = home.config_path().string();
+    }
+
+    apogee::testing::CliHome home;
+    apogee::commands::RootContext context;
+};
+
+constexpr const char* kQuietDashed = R"({"command": "/bin/false", "enabled": false})";
+
+/// The first line of what a command wrote, its stderr then its stdout, as the
+/// view draws a child's answer.
+[[nodiscard]] std::string first_line(const std::string& err, const std::string& out) {
+    const std::string said = err + out;
+    return said.substr(0, said.find('\n'));
+}
+
+/// Moves the view's selection to the row drawn `› <name>`.
+void select(Stage& stage, const std::string& name) {
+    (void)stage.frame();
+    for (int step = 0; step < 50 && !has(stage.frame(), "› " + name); ++step) {
+        stage.press(Key::named(Key::Name::Down));
+    }
+    REQUIRE(has(stage.frame(), "› " + name));
 }
 
 }  // namespace
@@ -273,4 +313,126 @@ TEST_CASE("deleting an agent from its view is agents delete's, its files kept",
     CHECK(has(stage.frame(), "removed agent 'reviewer'"));
     CHECK(slurp(home.home.config_path()) == twin_config);
     CHECK(fs::exists(prompt));
+}
+
+TEST_CASE("x from the Agents view reaches a hand-written dash-led agent as agents delete does",
+          "[cli][tui][tooling][child][M51]") {
+    // CLI-M51: `agents delete -- -x` on a twin home is the oracle -- its
+    // answer, success or its own refusal, and the config it leaves.
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const DashedHome twin{kQuietDashed};
+    std::string out;
+    std::string err;
+    (void)twin.home.run({"agents", "delete", "--", "-x"}, &out, &err);
+    const std::string said = first_line(err, out);
+    REQUIRE_FALSE(said.empty());
+
+    const DashedHome home{kQuietDashed};
+    Stage stage{apogee::commands::agents_view_options(home.context, binary)};
+    select(stage, "-x");
+    stage.press(Key::character("x"));
+    stage.press(Key::character("y"));
+    const std::string frame = stage.shell.render_text(400, 50);
+    INFO(frame);
+    CHECK(has(frame, said));
+    CHECK_FALSE(has(frame, "name is required"));
+    CHECK_FALSE(has(frame, "exit 106"));
+    CHECK(slurp(home.home.config_path()) == slurp(twin.home.config_path()));
+}
+
+TEST_CASE("e and d from the MCP view reach a hand-written dash-led server as the commands do",
+          "[cli][tui][tooling][child][M51]") {
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    // `e` on the disabled `-x`, against `mcp enable -- -x` on a twin.
+    {
+        const DashedHome twin{kQuietDashed};
+        std::string out;
+        std::string err;
+        (void)twin.home.run({"mcp", "enable", "--", "-x"}, &out, &err);
+        const std::string said = first_line(err, out);
+        REQUIRE_FALSE(said.empty());
+
+        const DashedHome home{kQuietDashed};
+        Stage stage{apogee::commands::mcp_view_options(home.context, binary)};
+        select(stage, "-x");
+        REQUIRE(has(stage.frame(), "e enable"));
+        stage.press(Key::character("e"));
+        const std::string frame = stage.shell.render_text(400, 50);
+        INFO(frame);
+        CHECK(has(frame, said));
+        CHECK_FALSE(has(frame, "name is required"));
+        CHECK_FALSE(has(frame, "exit 106"));
+        CHECK(slurp(home.home.config_path()) == slurp(twin.home.config_path()));
+    }
+    // `d` on an enabled `-x`, against `mcp disable -- -x` on a twin.
+    {
+        constexpr const char* kEnabled = R"({"command": "/bin/false", "enabled": true})";
+        const DashedHome twin{kEnabled};
+        std::string out;
+        std::string err;
+        (void)twin.home.run({"mcp", "disable", "--", "-x"}, &out, &err);
+        const std::string said = first_line(err, out);
+        REQUIRE_FALSE(said.empty());
+
+        const DashedHome home{kEnabled};
+        Stage stage{apogee::commands::mcp_view_options(home.context, binary)};
+        select(stage, "-x");
+        REQUIRE(has(stage.frame(), "d disable"));
+        stage.press(Key::character("d"));
+        const std::string frame = stage.shell.render_text(400, 50);
+        INFO(frame);
+        CHECK(has(frame, said));
+        CHECK_FALSE(has(frame, "name is required"));
+        CHECK_FALSE(has(frame, "exit 106"));
+        CHECK(slurp(home.home.config_path()) == slurp(twin.home.config_path()));
+    }
+}
+
+TEST_CASE("t opens on -- before a dash-led server, and on a plain one as itself",
+          "[cli][tui][tooling][M51]") {
+    const Home home;
+    const apogee::tui::ListOptions options = apogee::commands::mcp_view_options(home.context, {});
+    REQUIRE(options.asks.front().key == "t");
+    CHECK(options.asks.front().prefill({.key = "-x"}) == "-- -x ");
+    CHECK(options.asks.front().prefill({.key = "--"}) == "-- -- ");
+    CHECK(options.asks.front().prefill({.key = "tools"}) == "tools ");
+}
+
+TEST_CASE("t on a dash-led server opens after -- and answers as mcp test does",
+          "[cli][tui][tooling][child][M51]") {
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    // Apogee's own read-only tools as the server `-x`, reading the home's work.
+    const apogee::testing::TempDir work{"tui-mcp-dashed-work"};
+    std::ofstream{work.path() / "note.txt"} << "hello from the note\n";
+    const DashedHome home{
+        R"({"command": )" + nlohmann::json(binary.string()).dump() +
+            R"(, "args": ["__mcp-tools"]})",
+        ",\n  \"tools\": {\"fs_root\": " + nlohmann::json(work.path().string()).dump() + "}"};
+    std::string out;
+    std::string err;
+    REQUIRE(home.home.run({"mcp", "test", "--", "-x", "read_file", R"({"path": "note.txt"})"}, &out,
+                          &err) == 0);
+    REQUIRE(has(out, "hello from the note"));
+
+    Stage stage{apogee::commands::mcp_view_options(home.context, binary)};
+    select(stage, "-x");
+    stage.press(Key::character("t"));
+    CHECK(has(stage.frame(), "test: -- -x ▏"));
+    stage.type(R"(read_file '{"path": "note.txt"}')");
+    stage.press(Key::named(Key::Name::Return));
+    CHECK(has(stage.frame(), "hello from the note"));
+    const apogee::tui::ListOptions options =
+        apogee::commands::mcp_view_options(home.context, binary);
+    CHECK(options.asks.front().prefill({.key = "-x"}) == "-- -x ");
+    CHECK(options.asks.front().ask({.key = "-x"}, R"(-- -x read_file '{"path": "note.txt"}')") ==
+          err + out);
 }

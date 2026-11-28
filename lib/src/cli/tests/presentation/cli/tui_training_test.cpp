@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cli/command.h"
+#include "cli/tui_child.h"
 #include "contracts/layout.h"
 #include "support/cli_home.h"
 #include "training/cycle.h"
@@ -32,6 +33,8 @@
 /// a rollback the config and ledger `train rollback` leaves, a cycle refused
 /// on its held lock in the command's words, a dataset deleted as `datasets
 /// delete --yes` deletes it -- each skipped where this build made no binary.
+/// A row's name goes after the act's options and a `--` (CLI-M51), so a
+/// dash-led dataset or backend reaches the verb as its operand.
 namespace {
 
 namespace fs = std::filesystem;
@@ -68,11 +71,18 @@ constexpr const char* kCycle =
 /// A home as `train_test` seeds one: the layout, a snapshot named `tiny`, a
 /// dataset named `starter`, a suite, and `extra` in the config.
 struct Home {
-    explicit Home(const std::string& extra = {}) : home{"backends:\n  local:\n    type: mock\n"} {
-        std::string config = "backends:\n  local:\n    type: mock\n" + extra;
+    explicit Home(const std::string& extra = {})
+        : Home{"backends:\n  local:\n    type: mock\n" + extra, "config.yaml"} {}
+
+    /// The same with the whole config's text in `file` (CLI-M51: a JSONC
+    /// `config.json`), `{home}` the home's path as a JSON string's text.
+    Home(std::string config, const std::string& file) : home{"{}", file} {
+        const std::string spelled = nlohmann::json(home.home().string()).dump();
+        const std::string home_text =
+            file.ends_with(".json") ? spelled.substr(1, spelled.size() - 2) : home.home().string();
         for (std::size_t at = config.find("{home}"); at != std::string::npos;
              at = config.find("{home}")) {
-            config.replace(at, 6, home.home().string());
+            config.replace(at, 6, home_text);
         }
         write(home.config_path(), config);
         REQUIRE(apogee::harness::seed_data_directory(home.home()).ok());
@@ -153,13 +163,14 @@ struct Stage {
     apogee::tui::ListView view;
 };
 
-/// Two promoted versions of `tuned`, the second active, and its config entry.
-void seed_versions(const Home& home) {
+/// Two promoted versions of `backend`, the second active: their weights and
+/// its ledger.
+void seed_ledger(const Home& home, const std::string& backend) {
     const fs::path weights = home.home.home() / "models" / "tiny" / "gguf";
     write(weights / "v1" / "tiny-v1.gguf", "v1");
     write(weights / "v2" / "tiny-v2.gguf", "v2");
     apogee::training::VersionLedger ledger;
-    ledger.backend = "tuned";
+    ledger.backend = backend;
     ledger.active_version = 2;
     ledger.versions = {{.version = 1,
                         .run_id = "run-20261010-120000",
@@ -172,9 +183,44 @@ void seed_versions(const Home& home) {
                         .gguf_path = (weights / "v2" / "tiny-v2.gguf").string(),
                         .promoted_at = "2026-10-10T13:00:00Z"}};
     REQUIRE(apogee::training::save_ledger(home.training() / "versions", ledger).empty());
+}
+
+/// Two promoted versions of `tuned`, the second active, and its config entry.
+void seed_versions(const Home& home) {
+    seed_ledger(home, "tuned");
+    const fs::path weights = home.home.home() / "models" / "tiny" / "gguf";
     write(home.home.config_path(), slurp(home.home.config_path()) +
                                        "  tuned:\n    type: llamacpp\n    model_path: " +
                                        (weights / "v2" / "tiny-v2.gguf").string() + "\n");
+}
+
+/// `text` with `home`'s path written `HOME`, as written plain and as a JSON
+/// string writes it, so two homes' files compare.
+[[nodiscard]] std::string written_alike(std::string text, const fs::path& home) {
+    const std::string spelled = nlohmann::json(home.string()).dump();
+    for (const std::string& path : {home.string(), spelled.substr(1, spelled.size() - 2)}) {
+        for (std::size_t at = text.find(path); at != std::string::npos; at = text.find(path)) {
+            text.replace(at, path.size(), "HOME");
+        }
+    }
+    return text;
+}
+
+/// A JSONC home whose `-x` is a hand-written llamacpp backend with two
+/// promoted versions, the second active -- laid out as `seed_versions` lays
+/// out `tuned` (CLI-M51).
+constexpr const char* kDashedBackend =
+    "{\n  \"backends\": {\n    \"local\": {\"type\": \"mock\"},\n"
+    "    \"-x\": {\"type\": \"llamacpp\", \"model_path\": "
+    "\"{home}/models/tiny/gguf/v2/tiny-v2.gguf\"}\n  }\n}\n";
+
+/// Moves the view's selection to the row drawn `› <name>`.
+void select(Stage& stage, const std::string& name) {
+    (void)stage.frame();
+    for (int step = 0; step < 20 && !has(stage.frame(), "› " + name); ++step) {
+        stage.press(Key::named(Key::Name::Down));
+    }
+    REQUIRE(has(stage.frame(), "› " + name));
 }
 
 /// A run's manifest with what differs between two runs -- its id, its clock,
@@ -442,4 +488,97 @@ TEST_CASE("a dataset named with a leading dash is confirmed by the command that 
     CHECK(has(stage.frame(), "Delete dataset -x ('apogee datasets delete -- -x')? [y/N]"));
     stage.press(Key::character("n"));
     CHECK(fs::exists(dashed));
+}
+
+TEST_CASE("a dataset named with a leading dash is deleted from its view by the command",
+          "[cli][tui][training][child][M51]") {
+    // CLI-M51: the act's argv is its options, then `--`, then the row's name,
+    // so a dash-led name reaches `datasets delete` as its operand. The file is
+    // written directly: an existing name stays deletable whatever a create
+    // rule later refuses.
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const Home home;
+    const fs::path dashed = home.training() / "datasets" / "-x.jsonl";
+    write(dashed,
+          "{\"messages\": [{\"role\": \"user\", \"content\": \"hi\"}, "
+          "{\"role\": \"assistant\", \"content\": \"hello\"}]}\n");
+    Stage stage{home, false, binary};
+    select(stage, "-x");
+    stage.press(Key::character("x"));
+    stage.press(Key::character("y"));
+    const std::string frame = stage.frame();
+    INFO(frame);
+    CHECK(has(frame, "will remove:"));
+    CHECK(has(frame, "removed."));
+    CHECK_FALSE(has(frame, "name is required"));
+    CHECK_FALSE(has(frame, "exit 106"));
+    CHECK_FALSE(fs::exists(dashed));
+    CHECK_FALSE(has(frame, "› -x"));  // read again, the row gone
+}
+
+TEST_CASE("a dataset named -h is deleted from its view, never answered with the verb's help",
+          "[cli][tui][training][child][M51]") {
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    const Home home;
+    const fs::path dashed = home.training() / "datasets" / "-h.jsonl";
+    write(dashed,
+          "{\"messages\": [{\"role\": \"user\", \"content\": \"hi\"}, "
+          "{\"role\": \"assistant\", \"content\": \"hello\"}]}\n");
+    Stage stage{home, false, binary};
+    select(stage, "-h");
+    stage.press(Key::character("x"));
+    stage.press(Key::character("y"));
+    const std::string frame = stage.frame();
+    INFO(frame);
+    CHECK(has(frame, "removed."));
+    CHECK_FALSE(has(frame, "Usage: apogee datasets delete"));
+    CHECK_FALSE(fs::exists(dashed));
+}
+
+TEST_CASE("a rollback from the Train view reaches a hand-written dash-led backend as the command",
+          "[cli][tui][training][child][M51]") {
+    // CLI-M51: `train rollback -- -x` on a twin home is the oracle -- its
+    // answer, success or its own refusal, and the config and ledger it
+    // leaves. The twin runs the built binary too, so a refusal naming the
+    // binary names the same one.
+    const fs::path binary = built_binary();
+    if (binary.empty()) {
+        SKIP("this build made no apogee binary to run as the shell's child");
+    }
+    std::string twin_config;
+    std::string twin_ledger;
+    std::string twin_said;
+    {
+        const Home twin{kDashedBackend, "config.json"};
+        seed_ledger(twin, "-x");
+        const apogee::commands::ChildOutput said =
+            apogee::commands::run_child_text(apogee::commands::self_command(
+                twin.context, binary, {"train", "rollback", "--", "-x"}));
+        twin_said = said.text.substr(0, said.text.find('\n'));
+        twin_config = written_alike(slurp(twin.home.config_path()), twin.home.home());
+        twin_ledger =
+            written_alike(slurp(twin.training() / "versions" / "-x.json"), twin.home.home());
+    }
+    REQUIRE_FALSE(twin_said.empty());
+    const Home home{kDashedBackend, "config.json"};
+    seed_ledger(home, "-x");
+    Stage stage{home, true, binary};
+    (void)stage.frame();
+    REQUIRE(has(stage.frame(), "R rollback"));
+    stage.press(Key::character("R"));
+    stage.press(Key::character("y"));
+    const std::string frame = stage.shell.render_text(400, 60);
+    INFO(frame);
+    CHECK(has(frame, twin_said));
+    CHECK_FALSE(has(frame, "is required"));
+    CHECK_FALSE(has(frame, "exit 106"));
+    CHECK(written_alike(slurp(home.home.config_path()), home.home.home()) == twin_config);
+    CHECK(written_alike(slurp(home.training() / "versions" / "-x.json"), home.home.home()) ==
+          twin_ledger);
 }

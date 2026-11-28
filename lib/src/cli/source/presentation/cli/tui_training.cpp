@@ -193,9 +193,11 @@ tui::ListOptions train_view_options(const RootContext& context,
                 },
             .run =
                 [&context, binary, version_of](const tui::ListRow& row) {
-                    return child_answer(
-                        context, binary,
-                        {"train", "rollback", version_of(row).value_or(VersionRow{}).backend});
+                    // The backend after `--`, so a dash-led name is the
+                    // verb's operand (CLI-M51).
+                    return child_answer(context, binary,
+                                        {"train", "rollback", "--",
+                                         version_of(row).value_or(VersionRow{}).backend});
                 }}};
     return options;
 }
@@ -278,8 +280,11 @@ tui::ListOptions datasets_view_options(const RootContext& context,
                             },
                         .run =
                             [&context, binary](const tui::ListRow& row) {
+                                // Options, then `--`, then the name: a
+                                // dash-led name is the verb's operand
+                                // (CLI-M51).
                                 return child_answer(context, binary,
-                                                    {"datasets", "delete", row.key, "--yes"});
+                                                    {"datasets", "delete", "--yes", "--", row.key});
                             }}};
     return options;
 }
