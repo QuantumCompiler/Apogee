@@ -12,9 +12,9 @@ The branch is `v0.2.2`; the last published release is [v0.2.1](https://github.co
 - **The Apple apps:** none in this release; their next is v0.2.4.
 - **The design:** none planned yet.
 
-Outside the release, 7 maintenance items can be picked up any time: the CLI's M55–M61 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53 and M54 shipped 2026-11-27); the Apple apps have none. Two wait on another maintenance item: the CLI's M56 on M55, and M60 on M58. None of the 7 waits on a decision from you.
+Outside the release, 8 maintenance items can be picked up any time: the CLI's M55–M62 (2026-11-26, M48 split into M48 and M61 on 2026-11-27, M48, M49, M50, M51, M52, M53 and M54 shipped 2026-11-27, M62 specced 2026-11-27); the Apple apps have none. Two wait on another maintenance item: the CLI's M56 on M55, and M60 on M58. None of the 8 waits on a decision from you.
 
-**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M55, M57–M59 and M61).
+**Can start today** (nothing gates them): [CLI 58b](cli/v0.2.2/mcp-serve-graphs-and-knowledge.md), [CLI 58c](cli/v0.2.2/mcp-serve-coding-host-profile.md), [CLI 58d](cli/v0.2.2/mcp-serve-opt-in-refresh.md) and [CLI 64a](cli/v0.2.2/apogee-update.md); and any maintenance item below that waits on nothing (the CLI's M55, M57–M59, M61 and M62).
 
 ### The CLI ([queue](cli/README.md#v022))
 
@@ -61,6 +61,7 @@ Maintenance items aren't tied to a release; any one can be picked up by name.
 | CLI | M59 | [The HTTP graph jobs say what the CLI says, and build a mixed graph's code as the CLI does](cli/maintenance/the-http-graph-jobs-say-what-the-cli-says.md) | — |
 | CLI | M60 | [The models verbs say their notes in the house voice on stderr, and as notices on an open stream](cli/maintenance/the-models-verbs-say-their-notes-on-stderr.md) | M58 |
 | CLI | M61 | [Every printed command goes through the renderer](cli/maintenance/every-printed-command-goes-through-the-renderer.md) | — |
+| CLI | M62 | [A [y/N] question in the shell waits for a key, never a redraw](cli/maintenance/a-shell-question-waits-for-a-key.md) | — |
 
 ## Later releases
 
