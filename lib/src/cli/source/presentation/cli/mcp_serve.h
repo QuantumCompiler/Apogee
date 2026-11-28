@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -143,9 +144,77 @@ private:
                                               std::vector<ServedBackend> backends,
                                               std::ostream& narration);
 
+/// The most the introduction may run to (58a), in bytes -- never fewer than
+/// its characters -- and how many names each of its lists shows before the
+/// cut.
+inline constexpr std::size_t kInstructionsBound = 2000;
+inline constexpr std::size_t kInventoryNames = 8;
+
+/// The config the server started with, as the introduction says it (58a):
+/// loaded, no file at all, or a file that will not load.
+enum class ServedSetup : std::uint8_t { Ready, Absent, Unreadable };
+
+/// One collection the introduction names: as `list_collections` names it,
+/// its chunk count, and the model its vectors are from as the store records
+/// it (`collection_info`'s fact) -- empty for none, `mixed` for several.
+struct IntroducedCollection {
+    std::string name{};
+    std::int64_t chunks = 0;
+    std::string embedder{};
+    bool mixed = false;
+    /// The store could not be opened.
+    bool unreadable = false;
+};
+
+/// One graph, as `graph list` names it: its kind and size, never its
+/// sources.
+struct IntroducedGraph {
+    std::string name{};
+    std::string kind{};
+    bool built = false;
+    bool unreadable = false;
+    std::int64_t nodes = 0;
+    std::int64_t edges = 0;
+};
+
+/// The facts `apogee mcp serve` introduces itself with (58a), read once at its
+/// start -- the state the reads answer from, nothing else: no key, no path.
+struct ServerInventory {
+    ServedSetup setup = ServedSetup::Ready;
+    std::vector<IntroducedCollection> collections{};
+    std::vector<IntroducedGraph> graphs{};
+    std::size_t records = 0;
+    std::size_t shipped_records = 0;
+    /// The backends the served `complete` may name (`complete_backends`).
+    std::vector<ServedBackend> backends{};
+    /// The names `tools/list` lists: a when-to-use line names only these.
+    std::vector<std::string> served{};
+};
+
+/// `context`'s setup as the server starts: with the config `setup` says
+/// loaded, each collection `list_collections` lists, `graph list`'s rows,
+/// the knowledge records' count; `backends` and the names of `tools` as
+/// given. A store that cannot be read is said so, never fatal.
+[[nodiscard]] ServerInventory read_server_inventory(const RootContext& context, ServedSetup setup,
+                                                    std::vector<ServedBackend> backends,
+                                                    const std::vector<mcp::ServedTool>& tools);
+
+/// What `initialize` tells a host (58a), MCP's `instructions`: one paragraph
+/// on what Apogee is and its two kinds of tool, then the inventory, then
+/// which tool answers what -- each line naming only tools `inventory` says
+/// are served. Facts only, said as names and counts: a source path is never
+/// said, an embedder named by an absolute path is named by its file, and a
+/// name that is not UTF-8 is mended. Each list shows at most
+/// `kInventoryNames` names, then `… and N more: <the tool that lists them
+/// whole>`, fewer while the text would pass `kInstructionsBound`, which it
+/// never does. With no config it says Apogee is not set up and names
+/// `check`; with one that will not load, that it does not load.
+[[nodiscard]] std::string server_instructions(const ServerInventory& inventory);
+
 /// What `apogee mcp serve` serves for `context`, read from `in` and answered
 /// on `out` until `in` ends: the native read-only tools, then the status
-/// reads, then the calls the config lists, narrated on `err`. Returns
+/// reads, then the calls the config lists, narrated on `err` -- introduced
+/// by `server_instructions` over the setup as it starts (58a). Returns
 /// `serve_stdio`'s status, 0 at a clean end.
 int serve_mcp(const RootContext& context, std::istream& in, std::ostream& out, std::ostream& err);
 

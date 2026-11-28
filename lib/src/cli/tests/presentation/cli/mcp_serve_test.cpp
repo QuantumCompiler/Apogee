@@ -22,10 +22,16 @@
 #include "contracts/config.h"
 #include "contracts/layout.h"
 #include "contracts/mcp_serve.h"
+#include "contracts/paths.h"
+#include "contracts/suggested_command.h"
+#include "contracts/utf8.h"
+#include "embedstore/store.h"
 #include "knowledge/record.h"
 #include "knowledge/store.h"
 #include "modelstore/sidecar.h"
 #include "modelstore/snapshot.h"
+#include "operations/collections.h"
+#include "secrets/store.h"
 #include "support/cli_home.h"
 #include "support/env_guard.h"
 #include "support/gguf_builder.h"
@@ -1132,4 +1138,338 @@ TEST_CASE("a graph or knowledge read that cannot answer says why, and the server
     CHECK_FALSE(listed.is_error);
     CHECK(nlohmann::json::parse(listed.text)["data"][0].contains("error"));
     CHECK_FALSE(answer_of(served, 13).is_error);
+}
+
+// ---- the introduction (58a) -------------------------------------------------
+
+namespace {
+
+/// What `initialize` told the host.
+[[nodiscard]] std::string instructions_of(const Served& served) {
+    const nlohmann::json& result = served.reply(1)["result"];
+    INFO(result.dump());
+    REQUIRE(result.contains("instructions"));
+    REQUIRE(result["instructions"].is_string());
+    return result["instructions"].get<std::string>();
+}
+
+/// Every served name, as a full server lists them: the when-to-use lines
+/// name tools only from here.
+[[nodiscard]] std::vector<std::string> every_served_name() {
+    return {"read_file",       "list_directory", "search_files",     "grep_files",
+            "git_status",      "git_log",        "git_diff",         "git_show",
+            "list_notes",      "read_note",      "search_documents", "list_collections",
+            "collection_info", "graph_query",    "graph_neighbors",  "graph_path",
+            "graph_explain",   "models_list",    "models_status",    "train_status",
+            "train_versions",  "check",          "list_graphs",      "graph_stats",
+            "graph_report",    "knowledge_list", "knowledge_info",   "knowledge_query"};
+}
+
+/// The paragraph every introduction opens with: what Apogee is and its two
+/// kinds of tool -- the git reads named only where they are served.
+[[nodiscard]] std::string introduction_head(bool git, bool complete) {
+    return std::string{
+               "Apogee is the person's local AI harness: their models, and the material "
+               "they have indexed with it -- document collections, knowledge graphs and "
+               "decision records -- on this machine. This server is Apogee's read-only "
+               "face, with two kinds of tool: native reads (files, "} +
+           (git ? "git, " : "") +
+           "notes, document search, graph navigation) and Apogee's own reads (models, training, "
+           "the install check, graphs, knowledge records), each answering with what its command "
+           "prints. Nothing it serves writes." +
+           (complete ? " One call runs a model: complete, on a local model the person's config "
+                       "lists."
+                     : "");
+}
+
+/// The when-to-use lines every full server ends with.
+[[nodiscard]] std::string introduction_uses(bool complete) {
+    return std::string{
+               "When to reach for them -- for the person's own material, not in place of "
+               "the host's own tools:\n"
+               "- their indexed documents and decisions: search_documents, "
+               "knowledge_query\n"
+               "- how code in an indexed project connects: graph_query, graph_path\n"
+               "- what models exist and where they stand: models_status"} +
+           (complete ? "\n- a bounded side task for a local model: complete" : "");
+}
+
+}  // namespace
+
+TEST_CASE(
+    "mcp serve introduces itself from the setup: the collections, the graph, the records "
+    "and the listed complete",
+    "[cli][mcp][serve][58a]") {
+    // 58a's W1: the spike's sandbox read `"instructions": null`. Its notes
+    // and shop, two records, and complete listed on `local` and, by a hand
+    // edit, on the billed `paid`; `short` and `spare` list nothing.
+    const CallableFiles files;
+    const CliHome home{files.config({"local", "paid"})};
+    plant_shop(home);
+    plant_records();
+    const Served served = serve(home, {"mcp", "serve"}, {initialize(), list_tools()});
+    INFO(served.err);
+    REQUIRE(served.code == 0);
+    const std::string text = instructions_of(served);
+    INFO(text);
+    const bool git = apogee::tools::ToolsetOptions{}.child_processes;
+
+    // The golden pins the shape: the paragraph, the inventory, the uses.
+    CHECK(text == introduction_head(git, true) +
+                      "\n\n"
+                      "This setup, as the server started (the reads answer live):\n"
+                      "- collections: knowledge (2 chunks, lexical only), notes (1 chunk, "
+                      "lexical only)\n"
+                      "- graphs: shop (named, 6 nodes, 6 edges)\n"
+                      "- knowledge records: 2, 1 shipped\n"
+                      "- local models for complete: local (at most 1024 tokens)\n"
+                      "\n" +
+                      introduction_uses(true));
+    CHECK(text.size() <= apogee::commands::kInstructionsBound);
+    // The listed one with its bound; neither the unlisted nor the billed one.
+    for (const char* never : {"short", "spare", "paid"}) {
+        INFO(never);
+        CHECK_THAT(text, !ContainsSubstring(never));
+    }
+    // Each tool it names is one the server lists.
+    const std::vector<std::string> names = names_in(served.reply(2)["result"]["tools"]);
+    for (const char* named : {"search_documents", "knowledge_query", "graph_query", "graph_path",
+                              "models_status", "complete"}) {
+        INFO(named);
+        CHECK(std::ranges::find(names, named) != names.end());
+    }
+    // The hidden alias introduces itself the same.
+    const Served alias = serve(home, {"__mcp-tools"}, {initialize()});
+    CHECK(instructions_of(alias) == text);
+}
+
+TEST_CASE("an empty home's introduction says it holds nothing yet, and offers no complete",
+          "[cli][mcp][serve][58a]") {
+    const CliHome home{std::string{kConfig}};
+    const Served served = serve(home, {"mcp", "serve"}, {initialize()});
+    REQUIRE(served.code == 0);
+    const bool git = apogee::tools::ToolsetOptions{}.child_processes;
+    CHECK(instructions_of(served) == introduction_head(git, false) +
+                                         "\n\n"
+                                         "This setup, as the server started (the reads answer "
+                                         "live):\n"
+                                         "- collections: none yet\n"
+                                         "- graphs: none yet\n"
+                                         "- knowledge records: none yet\n"
+                                         "\n" +
+                                         introduction_uses(false));
+}
+
+TEST_CASE(
+    "with no config the introduction says Apogee is not set up and names check; with a "
+    "broken one, that it does not load",
+    "[cli][mcp][serve][58a]") {
+    const bool git = apogee::tools::ToolsetOptions{}.child_processes;
+    const std::string check = apogee::harness::render({.verbs = {"check"}});
+    {
+        const CliHome home{std::string{kConfig}};
+        std::filesystem::remove(home.config_path());
+        const Served served =
+            serve(home, {"mcp", "serve"}, {initialize(), call(10, "models_status")});
+        REQUIRE(served.code == 0);
+        const std::string text = instructions_of(served);
+        CHECK(text == introduction_head(git, false) + "\n\nApogee is not set up here yet: `" +
+                          check +
+                          "` says what is missing, and each read answers with its own "
+                          "reason.\n\n" +
+                          introduction_uses(false));
+        // The reads still answer their own reasons.
+        CHECK(answer_of(served, 10).is_error);
+        CHECK_THAT(text, !ContainsSubstring(home.home().string()));
+    }
+    const CliHome home{"backends: [this is not\n"};
+    const Served served = serve(home, {"mcp", "serve"}, {initialize()});
+    REQUIRE(served.code == 0);
+    const std::string text = instructions_of(served);
+    CHECK(text == introduction_head(git, false) + "\n\nApogee's config does not load here: `" +
+                      check + "` says why, and each read answers with its own reason.\n\n" +
+                      introduction_uses(false));
+    // The config's reason names its path: the introduction never says it.
+    CHECK_THAT(text, !ContainsSubstring(home.home().string()));
+}
+
+TEST_CASE("no key, token or path reaches the introduction", "[cli][mcp][serve][58a][secrets]") {
+    // A config holding a literal key and absolute paths, a stored key, a
+    // graph over an absolute source tree, and a collection whose embedder a
+    // store recorded by its absolute path: names and counts reach the text,
+    // never one of those.
+    constexpr std::string_view kLiteralKey = "sk-ant-planted-58a-literal-key";
+    constexpr std::string_view kStoredKey = "sk-planted-58a-stored-key";
+    const CallableFiles files;
+    std::string config = files.config({"local"});
+    config.insert(config.find("models:\n"),
+                  "  cloud:\n    type: anthropic\n    model: claude-x\n"
+                  "    api_key: " +
+                      std::string{kLiteralKey} + "\n");
+    const CliHome home{config};
+    apogee::secrets::CredentialStore store{apogee::secrets::credentials_path(home.config_path())};
+    store.put("openai", kStoredKey);
+    plant_shop(home);
+    const std::filesystem::path embedder = home.home() / "models" / "embed-58a.Q4_K_M.gguf";
+    {
+        apogee::embedstore::Store notes{apogee::commands::collection_path("notes")};
+        notes.set_embedding_model(embedder.string(), 4);
+    }
+    const Served served = serve(home, {"mcp", "serve"}, {initialize()});
+    REQUIRE(served.code == 0);
+    const std::string text = instructions_of(served);
+    INFO(text);
+    // Named by its file, never located.
+    CHECK_THAT(text, ContainsSubstring("notes (1 chunk, embedder embed-58a.Q4_K_M.gguf)"));
+    CHECK_THAT(text, ContainsSubstring("shop (named, 6 nodes, 6 edges)"));
+    for (const std::string& never :
+         {std::string{kLiteralKey}, std::string{kStoredKey}, home.home().string(),
+          files.dir.path().string(), (home.home() / "project").string(), embedder.string(),
+          std::string{"secrets"}, std::string{"credentials"}}) {
+        INFO(never);
+        CHECK_THAT(text, !ContainsSubstring(never));
+    }
+    // No path of any shape: nothing in the text is a path.
+    CHECK(text.find('/') == std::string::npos);
+    CHECK(text.find('\\') == std::string::npos);
+}
+
+TEST_CASE(
+    "each list in the introduction shows eight names, then the count and the tool that "
+    "lists them whole",
+    "[cli][mcp][serve][58a]") {
+    apogee::commands::ServerInventory inventory;
+    inventory.served = every_served_name();
+    inventory.served.emplace_back("complete");
+    for (int i = 1; i <= 14; ++i) {
+        inventory.graphs.push_back({.name = "g" + std::to_string(i),
+                                    .kind = "named",
+                                    .built = true,
+                                    .nodes = i,
+                                    .edges = 1});
+    }
+    for (int i = 1; i <= 8; ++i) {
+        inventory.collections.push_back({.name = "c" + std::to_string(i), .chunks = 3});
+    }
+    for (int i = 1; i <= 9; ++i) {
+        inventory.backends.push_back({.name = "b" + std::to_string(i), .max_tokens = 512});
+    }
+    inventory.records = 1;
+    inventory.shipped_records = 0;
+    const std::string text = apogee::commands::server_instructions(inventory);
+    INFO(text);
+    // Eight shown, the rest counted with the tool that lists them whole.
+    CHECK_THAT(text, ContainsSubstring("- graphs: g1 (named, 1 node, 1 edge), g2 (named, 2 nodes, "
+                                       "1 edge), "));
+    CHECK_THAT(text, ContainsSubstring("g8 (named, 8 nodes, 1 edge), … and 6 more: list_graphs\n"));
+    CHECK_THAT(text, !ContainsSubstring("g9 "));
+    // Exactly eight is no cut.
+    CHECK_THAT(text, ContainsSubstring("c8 (3 chunks, lexical only)\n"));
+    CHECK_THAT(text, !ContainsSubstring("more: list_collections"));
+    CHECK_THAT(text, ContainsSubstring("b8 (at most 512 tokens), … and 1 more: complete\n"));
+    CHECK_THAT(text, ContainsSubstring("- knowledge records: 1, 0 shipped\n"));
+    CHECK(text.size() <= apogee::commands::kInstructionsBound);
+}
+
+TEST_CASE("the introduction never passes its bound: names are cut until it fits",
+          "[cli][mcp][serve][58a]") {
+    apogee::commands::ServerInventory inventory;
+    inventory.served = every_served_name();
+    inventory.served.emplace_back("complete");
+    const std::string tail(120, 'x');
+    for (int i = 0; i < 40; ++i) {
+        inventory.collections.push_back(
+            {.name = "c" + std::to_string(i) + tail, .chunks = 100000, .embedder = tail});
+        inventory.graphs.push_back({.name = "g" + std::to_string(i) + tail, .kind = "named"});
+        inventory.backends.push_back({.name = "b" + std::to_string(i) + tail, .max_tokens = 1024});
+    }
+    const std::string text = apogee::commands::server_instructions(inventory);
+    INFO(text);
+    CHECK(text.size() <= apogee::commands::kInstructionsBound);
+    // Fewer than eight a list, every list cut with its count and its tool --
+    // the same number shown in each -- and the uses whole.
+    CHECK_THAT(text, ContainsSubstring("more: list_collections\n"));
+    CHECK_THAT(text, ContainsSubstring("more: list_graphs\n"));
+    CHECK_THAT(text, ContainsSubstring("more: complete\n"));
+    CHECK_THAT(text, !ContainsSubstring("c7" + tail));
+    CHECK_THAT(text, ContainsSubstring(introduction_uses(true)));
+
+    // At its fewest every list is a count alone, and that always fits.
+    for (auto& collection : inventory.collections) {
+        collection.name = std::string(apogee::commands::kInstructionsBound, 'n');
+    }
+    const std::string fewest = apogee::commands::server_instructions(inventory);
+    INFO(fewest);
+    CHECK(fewest.size() <= apogee::commands::kInstructionsBound);
+    CHECK_THAT(fewest, ContainsSubstring("- collections: … and 40 more: list_collections\n"));
+}
+
+TEST_CASE("a when-to-use line names only the tools served, and the introduction only the kinds",
+          "[cli][mcp][serve][58a]") {
+    // `tools.disabled` can switch a toolset off: the introduction says only
+    // what this server lists.
+    apogee::commands::ServerInventory inventory;
+    for (const std::string& name : every_served_name()) {
+        if (!name.starts_with("graph_") && !name.starts_with("git_") && name != "read_file" &&
+            name != "search_documents") {
+            inventory.served.push_back(name);
+        }
+    }
+    const std::string text = apogee::commands::server_instructions(inventory);
+    INFO(text);
+    CHECK_THAT(text, ContainsSubstring("native reads (notes) and Apogee's own reads"));
+    CHECK_THAT(text,
+               ContainsSubstring("- their indexed documents and decisions: knowledge_query\n"));
+    CHECK_THAT(text, !ContainsSubstring("how code in an indexed project connects"));
+    CHECK_THAT(text, !ContainsSubstring("graph_query"));
+    CHECK_THAT(text, !ContainsSubstring("search_documents"));
+    CHECK_THAT(text, !ContainsSubstring("complete"));
+    CHECK_THAT(text, ContainsSubstring("- what models exist and where they stand: models_status"));
+}
+
+TEST_CASE("names are mended to UTF-8, and an embedder named by an absolute path by its file",
+          "[cli][mcp][serve][58a][utf8]") {
+    apogee::commands::ServerInventory inventory;
+    inventory.served = every_served_name();
+    inventory.collections.push_back(
+        {.name = "caf\xE9", .chunks = 1, .embedder = "/Users/someone/models/e5.gguf"});
+    inventory.collections.push_back(
+        {.name = "win", .chunks = 2, .embedder = "C:\\models\\bge-small.gguf + adapters ab12"});
+    inventory.collections.push_back({.name = "hf", .chunks = 2, .embedder = "nomic-ai/nomic-v1"});
+    inventory.collections.push_back({.name = "both", .chunks = 2, .mixed = true});
+    inventory.collections.push_back({.name = "gone", .unreadable = true});
+    inventory.graphs.push_back({.name = "idle", .kind = "named"});
+    inventory.graphs.push_back({.name = "broken", .kind = "named", .unreadable = true});
+    const std::string text = apogee::commands::server_instructions(inventory);
+    INFO(text);
+    CHECK(apogee::harness::is_valid_utf8(text));
+    CHECK_THAT(text,
+               ContainsSubstring("- collections: caf\xEF\xBF\xBD (1 chunk, embedder e5.gguf), "
+                                 "win (2 chunks, embedder bge-small.gguf + adapters ab12), "
+                                 "hf (2 chunks, embedder nomic-ai/nomic-v1), both (2 chunks, "
+                                 "mixed embedders), gone (unreadable)\n"));
+    CHECK_THAT(
+        text, ContainsSubstring("- graphs: idle (named, not built), broken (named, unreadable)\n"));
+}
+
+TEST_CASE("under a custom root the no-config introduction names check without the root's path",
+          "[cli][mcp][serve][58a]") {
+    // `--custom <root>/config/<file>` puts its path in every printed command;
+    // the introduction never says a path, so it names the verb in words.
+    const apogee::testing::TempDir root{"mcp-serve-custom-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path config = root.path() / "config" / "config.json";
+    const apogee::harness::RootFlagScope scope{
+        apogee::harness::RootFlag{.channel = std::nullopt, .custom_config = config}};
+    REQUIRE_THAT(apogee::harness::render({.verbs = {"check"}}),
+                 ContainsSubstring(root.path().string()));
+    apogee::commands::ServerInventory inventory;
+    inventory.setup = apogee::commands::ServedSetup::Absent;
+    inventory.served = every_served_name();
+    const std::string text = apogee::commands::server_instructions(inventory);
+    INFO(text);
+    CHECK_THAT(text, ContainsSubstring("Apogee is not set up here yet: its check command says what "
+                                       "is missing, and each read answers with its own reason."));
+    CHECK_THAT(text, !ContainsSubstring(root.path().string()));
+    CHECK(text.find('/') == std::string::npos);
 }

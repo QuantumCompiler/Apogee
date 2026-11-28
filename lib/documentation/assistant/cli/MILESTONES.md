@@ -6792,6 +6792,90 @@ Both are "serve the reads the CLI already has": one seam, `status_reads`, and on
 - **Windows**: `cli.mcp_lifecycle` is a POSIX shell check; the unit cases run on CI's Windows rows after your push.
 - **What waits on it**: 58a (the introduction names these reads and reads `graph list`) and the mod's 2b (`/apogee graphs`, `/apogee knowledge` and the pane's Knowledge section over these reads) are released.
 
+### 2026-11-28 — `mcp-serve-introduces-itself` (backlog item 58a): the server introduces itself
+
+**Why.** The MCP-awareness spike (2026-11-07, the user's idea) found `apogee mcp serve` answering with every tool and saying nothing about itself: its `initialize` result carried `protocolVersion`, `capabilities` and `serverInfo`, and the probe read `"instructions": null` (**W1**). MCP's `instructions` field is how a host learns what a server is for, and Claude Code puts a server's instructions into its model's system prompt. Without it, a host's model saw 28 tool names (since 58b) and no picture of the person's setup: which collections and graphs exist, whether a local model is offered, when Apogee's search is the one to use. This was the single change that most makes Claude "aware" of Apogee. It waited on 58b, so that it could name the graph and knowledge reads and read `graph list`.
+
+**What was built**
+
+- [x] **`serve_stdio` carries the instructions** (`mcp/serve_stdio.h/.cpp`). A new trailing argument, `instructions`, is added to the `initialize` result when it is not empty. Empty leaves the field out, so the reply is exactly the one an older server gave (ADR 0006: a new field, never a changed one). The text is mended to UTF-8 where it enters the server, as a read's answer is, so a reply cannot end the server at its dump.
+- [x] **The inventory, read once at the server's start** (`cli/mcp_serve.h/.cpp`, `read_server_inventory`). It reads the same state the reads answer from, into a plain `ServerInventory`:
+  - **The collections**, each one `list_collections` lists (a name the read rule refuses is skipped, CLI-M45): its chunk count, and the model its vectors are from as the store records it, the fact `collection_info` gives. A store that cannot be opened is marked unreadable.
+  - **The graphs**, `graph list`'s rows (58b's `graph_list_document`): name, kind, built, nodes and edges. A row's `sources` and `collections` are never read into it.
+  - **The knowledge records**: how many there are, and how many shipped (`read_knowledge_records`).
+  - **The backends `complete` may name**, `complete_backends`' served set (54b), each with its bound.
+  - **The served tool names**, from the set the server lists.
+
+  With no config, or one that will not load (`ServedSetup`), no store is read at all.
+- [x] **The text** (`server_instructions`, pure over the inventory). It has three parts:
+  1. **What Apogee is**, and the server's two kinds of tool: the native reads (naming only the kinds this server lists, so no git on the Windows build) and Apogee's own reads. When `complete` is offered, the paragraph says one call runs a local model the config lists.
+  2. **The inventory**, headed "This setup, as the server started (the reads answer live)": `collections: notes (1 chunk, lexical only)`, `graphs: shop (named, 6 nodes, 6 edges)`, `knowledge records: 2, 1 shipped`, and `local models for complete: local (at most 1024 tokens)` when any is offered. An empty list says `none yet`.
+  3. **When to reach for them**, "for the person's own material, not in place of the host's own tools": `search_documents` and `knowledge_query` for the indexed documents and decisions, `graph_query` and `graph_path` for how code connects, `models_status` for the models, `complete` for a bounded side task, only where offered. Each line names only tools the server lists, and a line with none is left out.
+  - **Bounded.** Each list shows at most 8 names (`kInventoryNames`), then `… and N more: <the tool that lists them whole>` (`list_collections`, `list_graphs`, `complete`). The text never passes 2,000 (`kInstructionsBound`): while it would, every list shows one name fewer, down to its count alone, which always fits.
+  - **No secret and no path.** Only names and counts reach the text, so no key, token or credential path can. An embedder recorded by an absolute path (an older GGUF binding) is named by its file, and every name is mended to UTF-8 before it is measured.
+  - **No config**: ``Apogee is not set up here yet: `apogee check` says what is missing, and each read answers with its own reason.`` A config that will not load: ``Apogee's config does not load here: `apogee check` says why, ...``. The command goes through the renderer, so a dev build names `apogee-dev check`. The config's reason is never said, since it names the path.
+- [x] **`serve_mcp` composes it once**, after the served set and the callable backends, and hands it to `serve_stdio`. It is fixed for the server's life, as the tool list is (54b's call: hosts list once). Something added later is reachable through the reads at once and named at the host's next start.
+- [x] **The reference.** tools.md's serve chapter gains *What the server says when a host connects*: the three parts, an example, the bound and the cut, no secret or path, fixed at start, the no-config words, the additive field, and why no `resources` or `prompts` are offered.
+- [x] **Docs.** DEVELOPER.md's `mcp/` row, `mcp_serve.h/.cpp` row, both test rows and `cli.mcp_lifecycle`'s paragraph; the codebase map's `mcp/` text and its `tools.md` entry. No file was added or moved. No invariant changed; SPEC and the ADRs are unchanged (a new field in a protocol face's existing reply, ADR 0006's law).
+
+**Mode parity** ([ADR 0002](../../adrs/cli/mode-parity.md)). The introduction is the MCP server's own handshake, with no counterpart to keep in step. Every fact it names is already a read on the command line, in machine mode and over MCP (`embed list`, `graph list`, `knowledge list`, `mcp serve`'s `complete` description), and it composes from those same functions.
+
+**Decisions made while building** (2026-11-28, each recorded for veto; the ticket's Decision log held them before it was deleted):
+- **The open calls' defaults, taken:**
+  - the bound is 2,000 characters, and each inventory list shows at most 8 names before the cut;
+  - the instructions name what exists and when to use each tool. They never tell the host's model to prefer Apogee over its own tools in general, only for the person's indexed material and graphs: the when-to-use heading says so in its own words;
+  - no MCP `resources` or `prompts`: the instructions and the reads carry the same facts;
+  - with no config, the instructions say Apogee is not set up and name `apogee check`, and the reads answer their own reasons.
+- **Build-time rulings** (the most conservative reading; for the user's veto):
+  - **The bound counts bytes**, which are never fewer than characters, so 2,000 bytes is within 2,000 characters for any text. The external client checks the same.
+  - **Over the bound, every list shrinks together**, one name at a time, down to counts alone. The paragraph and the when-to-use lines are never cut. At counts alone the text always fits, which a case holds with 2,000-byte names.
+  - **A config that will not load gets its own sentence** beside no config's ("does not load here ... says why"), naming the same command. Neither reads the inventory: the reads already say their own reasons.
+  - **Under a `--custom` root, `check` is named in words** ("its check command"). The rendered command would carry the root's absolute path, and the ticket's no-path rule wins over printing it whole. Every other run names the rendered command.
+  - **The collections line lists what `list_collections` lists**, the records' own collection (`knowledge`) among them, so the cut's count matches the tool it names. The records get their own line: the count, and how many shipped, since `knowledge_query` searches shipped records.
+  - **The embedder is the store's recorded binding**, `collection_info`'s fact: `lexical only` for none, `mixed embedders` for several. It is not the config's embedding role. An absolute path is named by its file (`C:\` and `\\` paths too). A relative name such as `nomic-ai/nomic-v1` is kept as recorded.
+  - **A graph is its name, kind and size**, `not built` or `unreadable` where so. Its `last_build`, its member collections and its `sources` are left out: the ticket listed name, kind and size, and sources are paths.
+  - **The introduction says only what this server lists**: the paragraph's native kinds, each when-to-use line, and the cut's listing tool are each named only when served (`tools.disabled`, the Windows build's missing git reads, and 58c's coming profile all follow without a change).
+  - **The reader and the composer are two functions** (`read_server_inventory`, `server_instructions`), where the ticket named one, `server_instructions(config, …)`. So the cut, the bound and the mending are tested over a plain inventory, with no fourteen stores planted for them.
+  - **`serve_stdio` mends the text too**, as the server's own door, beside the composer mending each name before it is measured. The argument is a trailing default, so every other caller is unchanged.
+  - **The start reads the stores once**, as `embed list` and `graph list` do. The probe measured no file written by it (only the directories' times moved, from SQLite's transient journal, exactly as those two reads move them).
+  - **`mcp serve --help` is unchanged**: the introduction is the protocol's, and tools.md documents it.
+  - **The heading reads "backlog item 58a"**, as 58b's does.
+
+**Verified.**
+- **Red first.** Every new case was built against code before it and watched failing for the missing feature:
+  - `serve_stdio_test`'s two cases, against a stub that took the argument and ignored it: `told["instructions"] == "Apogee serves..."` and the mended case each failed on a missing field.
+  - `mcp_serve_test`'s nine, against a reader and composer that returned nothing: the four through the real command tree failed `REQUIRE( result.contains("instructions") )`, and the five over `server_instructions` failed on each expected line.
+  - `cli.mcp_lifecycle`, run against a binary built to hand the server an empty text: `mcp_serve_client: mcp serve: initialize carried no instructions`. It passes on the real one.
+- **Planted violations, both caught.**
+  - An embedder's path kept failed the no-secret case (four assertions: the named line, the home's path and the embedder's among the strings never said, and `/`) and the mending case.
+  - The bound loop removed (eight names whatever the length) failed the bound case's four assertions.
+- **The tests**, 11 new cases (`[58a]`), 103 assertions:
+  - `mcp/serve_stdio_test`, two: the field present when given and absent when empty (the reply otherwise the old one, exactly); a Latin-1 text mended and the server going on.
+  - `cli/mcp_serve_test`, nine:
+    - the golden over a planted home (the spike's `notes` and `shop`, two records, `complete` listed through the editor on `local` and by hand on the billed `paid`), through both spellings. It names `local (at most 1024 tokens)`, and never `short`, `spare` or `paid`; every tool it names is listed.
+    - an empty home's golden;
+    - no config's and a broken config's goldens, `check` named through the renderer and the home's path never said;
+    - no key, token or path: a literal key and absolute model paths in the config, a stored key, a graph over an absolute tree, and an embedder recorded by its absolute path. The embedder is named `embed-58a.Q4_K_M.gguf`, and no planted string, `secrets`, `credentials`, `/` or `\` appears.
+    - over `server_instructions` directly: the cut at eight (14 graphs: `… and 6 more: list_graphs`; exactly 8 collections: no cut; 9 backends: `… and 1 more: complete`); the bound with 40 long names a list, and with 2,000-byte names, down to counts alone; the when-to-use lines and the native kinds naming only served tools; names mended to UTF-8, a POSIX and a Windows absolute embedder named by their files, an unreadable store and an unbuilt graph said so; and a `--custom` root's no-config text naming `check` in words with no path.
+  - **On the real binary**, `cli.mcp_lifecycle`: the external client (`mcp_serve_client.py`) now requires `instructions` under both spellings, a non-empty string within the bound, the same for each, and writes it out (`--instructions-out`). The script holds it to the sandbox: `notes (1 chunk, lexical only)`, `shop (named, … nodes, … edges)`, `knowledge records: 1, 1 shipped`, the documents line, no `complete` until one is listed, then `served (at most 1024 tokens)` and never the billed `paid`, and neither the home's path nor the source tree's.
+- **Targeted suites on the final build, all passing**, the Catch2 binary run from an empty scratch folder with stdin `/dev/null`:
+  - Catch2: `[58a]` (11 cases, 103 assertions), `[serve]` (43, 871), `[mcp]` (118, 1,828), `[commands]` (883, 19,107) and `[presets]` (31, 542). `[mcp]` skips the code-execution server's extended-attribute case and `[commands]` the PowerShell stub (no `pwsh` here), as before.
+  - ctest: `cli.mcp_lifecycle`, `cli.graph_navigation_lifecycle`, `cli.machine_mode`, `cli.mcp_server_stderr_stays_off_the_terminal`, `cli.acp_conformance`, `cli.machine_schema_conformance`, `harness.layering`, `harness.layer_context`, `cli.test_names`, `cli.one_suggested_command` and its planted twin, and `cli.no_stdout_notes` and its twin: 13 of 13.
+- **On the real binary**, the macos-arm64 build under `env -i` with only `PATH`, `HOME` and `APOGEE_HOME` (a scratch home), stdin `/dev/null`, driven over `mcp serve`'s stdio by a probe script.
+  - With no config: 878 bytes, the not-set-up sentence naming `apogee check`.
+  - After setup (a mock default, a mock listing `complete`, an anthropic entry holding a literal key, `notes` ingested, `shop` built): 29 tools and 1,127 bytes naming `notes`, `shop` and `served (at most 1024 tokens)`. The key, present in the config file, is nowhere in the text.
+  - With the config broken: the does-not-load sentence.
+  - No file in the home changed across a start. Only two directories' times moved, from SQLite's transient journal, exactly as `embed list` and `graph list` move them.
+- **Scans.** Homebrew clang-format 22 over the six changed C++ files: `--dry-run --Werror` clean. The MinGW scan (`x86_64-w64-mingw32-g++`, the windows-x64 tree's flags) over the four changed `.cpp` files: 0 with errors, 0 warnings of ours.
+- **The gate**, run on the final tree (2026-11-28, from 13:31), `lib/scripts/cicd.sh --app cli --test`, with nothing else running: exit 0. **4,850 ctest cases**, 4,846 passed and the same four skipped by platform as 58b's run -- eleven more than its 4,839 -- in 742 s.
+
+**Not done:**
+- **CI has not run this**, nor `make pr-ci` or the whole-tree `make lint`.
+- **No live pass in a real MCP host** (the acceptance's optional one), and no check on `apogee-dev`: register `apogee-dev mcp serve` (the entry `apogee-dev mcp presets` prints) in Claude Code and open its server details (`/mcp`) to see the instructions. This run drove no host; the external client, the in-process server and the probe stand in.
+- **Windows**: `cli.mcp_lifecycle` is a POSIX shell check. The unit cases run on CI's Windows rows after your push, where the goldens drop `git, ` from the paragraph as the build serves no git read.
+- **The mod's recorded replies** (`lib/src/mod/tests/support/recorded.ts`) are the 0.2.0 binary's, without `instructions`. Nothing reads them against a live binary, so they are untouched; 2a records its own.
+- **What waits on it**: the mod's 2a, still 🔒 on CLI 58c. Its skill can now leave the inventory to these instructions, as it planned. 58c's profile needs nothing more here: the introduction names only the tools a server lists.
+
 ## Milestone X — Agents as data
 
 **Goal.** A named workflow the user runs with `apogee analyze --agent <name>`: a persona from prompt files, an output schema the answer must satisfy, a tool policy that is the agent's permission model, executed by the same loop every other surface runs — so an agent behaves identically on every backend the loop drives — with structured output validated on every provider, an in-process renderer, deterministic branch review from flags, `apogee agents` and its admin twins over one scaffold core, and three review agents re-authored for the owned loop.

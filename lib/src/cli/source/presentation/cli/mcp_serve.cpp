@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -13,7 +14,10 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 #include "agent/tool.h"
 #include "agentloop/loop.h"
@@ -28,11 +32,17 @@
 #include "cli/permissions.h"
 #include "cli/suite_residency.h"
 #include "cli/train.h"
+#include "contracts/collection_name.h"
 #include "contracts/config.h"
 #include "contracts/errors.h"
 #include "contracts/mcp_serve.h"
 #include "contracts/paths.h"
+#include "contracts/suggested_command.h"
+#include "contracts/utf8.h"
+#include "embedstore/store.h"
+#include "knowledge/record.h"
 #include "machine/json_reporter.h"
+#include "operations/collections.h"
 #include "operations/training_reads.h"
 #include "tools/toolsets.h"
 #include "version/version.h"
@@ -657,18 +667,287 @@ mcp::ServedCall served_complete(const RootContext& context, ServedModels& models
     return call;
 }
 
+ServerInventory read_server_inventory(const RootContext& context, ServedSetup setup,
+                                      std::vector<ServedBackend> backends,
+                                      const std::vector<mcp::ServedTool>& tools) {
+    ServerInventory inventory;
+    inventory.setup = setup;
+    inventory.backends = std::move(backends);
+    for (const mcp::ServedTool& tool : tools) {
+        inventory.served.push_back(tool.name);
+    }
+    if (setup != ServedSetup::Ready) {
+        return inventory;  // the reads say their own reasons; nothing here guesses
+    }
+    // The collections as list_collections lists them: a store whose name the
+    // read rule refuses is no collection to the tools (CLI-M45).
+    for (const std::string& name : collection_names()) {
+        if (harness::name_leaves_folder(name)) {
+            continue;
+        }
+        IntroducedCollection collection{.name = name};
+        try {
+            const embedstore::Store store{collection_path(name)};
+            collection.chunks = store.chunk_count();
+            const embedstore::Store::EmbeddingBinding binding = store.embedding_model();
+            collection.mixed = !binding.mixed.empty();
+            collection.embedder = binding.model;
+        } catch (const std::exception&) {
+            collection.unreadable = true;
+        }
+        inventory.collections.push_back(std::move(collection));
+    }
+    // graph list's rows: a name, a kind and a size -- never a row's sources.
+    try {
+        const nlohmann::json listed = graph_list_document(context);
+        for (const nlohmann::json& row : listed.at("data")) {
+            IntroducedGraph graph{.name = row.value("name", std::string{}),
+                                  .kind = row.value("kind", std::string{})};
+            graph.unreadable = row.contains("error");
+            graph.built = row.value("built", false);
+            graph.nodes = row.value("nodes", std::int64_t{0});
+            graph.edges = row.value("edges", std::int64_t{0});
+            inventory.graphs.push_back(std::move(graph));
+        }
+    } catch (const std::exception&) {
+        // list_graphs says why when asked.
+    }
+    try {
+        const KnowledgeRecords read = read_knowledge_records(context);
+        inventory.records = read.records.size();
+        inventory.shipped_records = static_cast<std::size_t>(std::ranges::count(
+            read.records, knowledge::kStatusShipped, &knowledge::Record::status));
+    } catch (const std::exception&) {
+        // No records collection yet: none to name.
+    }
+    return inventory;
+}
+
+namespace {
+
+[[nodiscard]] bool serves(const ServerInventory& inventory, std::string_view tool) {
+    return std::ranges::find(inventory.served, tool) != inventory.served.end();
+}
+
+[[nodiscard]] std::string counted(std::int64_t count, std::string_view one, std::string_view many) {
+    return std::to_string(count) + " " + std::string{count == 1 ? one : many};
+}
+
+/// A model as the introduction says it: one a store recorded by an absolute
+/// path -- an older GGUF named by its path -- by its file, so the text never
+/// locates anything; any other name as recorded.
+[[nodiscard]] std::string spoken_model(std::string_view model) {
+    const bool drive = model.size() > 2 &&
+                       std::isalpha(static_cast<unsigned char>(model[0])) != 0 && model[1] == ':' &&
+                       (model[2] == '\\' || model[2] == '/');
+    if (drive || model.starts_with('/') || model.starts_with('\\') || model.starts_with('~')) {
+        if (const std::size_t slash = model.find_last_of("/\\"); slash != std::string_view::npos) {
+            model.remove_prefix(slash + 1);
+        }
+    }
+    return harness::valid_utf8(model);
+}
+
+[[nodiscard]] std::string collection_said(const IntroducedCollection& collection) {
+    std::string out = harness::valid_utf8(collection.name) + " (";
+    if (collection.unreadable) {
+        return out + "unreadable)";
+    }
+    out += counted(collection.chunks, "chunk", "chunks") + ", ";
+    if (collection.mixed) {
+        out += "mixed embedders";
+    } else if (collection.embedder.empty()) {
+        out += "lexical only";
+    } else {
+        out += "embedder " + spoken_model(collection.embedder);
+    }
+    return out + ")";
+}
+
+[[nodiscard]] std::string graph_said(const IntroducedGraph& graph) {
+    std::string out =
+        harness::valid_utf8(graph.name) + " (" + harness::valid_utf8(graph.kind) + ", ";
+    if (graph.unreadable) {
+        out += "unreadable";
+    } else if (!graph.built) {
+        out += "not built";
+    } else {
+        out += counted(graph.nodes, "node", "nodes") + ", " + counted(graph.edges, "edge", "edges");
+    }
+    return out + ")";
+}
+
+[[nodiscard]] std::string backend_said(const ServedBackend& backend) {
+    return harness::valid_utf8(backend.name) + " (at most " + std::to_string(backend.max_tokens) +
+           " tokens)";
+}
+
+/// `items`, at most `shown` of them, then the rest counted with the tool
+/// that lists them whole -- when it is served.
+[[nodiscard]] std::string cut_list(const ServerInventory& inventory,
+                                   const std::vector<std::string>& items, std::size_t shown,
+                                   std::string_view tool) {
+    if (items.empty()) {
+        return "none yet";
+    }
+    shown = std::min(shown, items.size());
+    std::string out;
+    for (std::size_t i = 0; i < shown; ++i) {
+        out += (i == 0 ? "" : ", ") + items[i];
+    }
+    if (items.size() > shown) {
+        out += std::string{shown == 0 ? "" : ", "} + "… and " +
+               std::to_string(items.size() - shown) + " more";
+        if (serves(inventory, tool)) {
+            out += ": " + std::string{tool};
+        }
+    }
+    return out;
+}
+
+/// The paragraph every introduction opens with: what Apogee is, and its two
+/// kinds of tool, naming only the native kinds this server lists.
+[[nodiscard]] std::string introduction_head(const ServerInventory& inventory) {
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 5> kNativeKinds{{
+        {"files", "read_file"},
+        {"git", "git_status"},
+        {"notes", "list_notes"},
+        {"document search", "search_documents"},
+        {"graph navigation", "graph_query"},
+    }};
+    std::string kinds;
+    for (const auto& [kind, tool] : kNativeKinds) {
+        if (serves(inventory, tool)) {
+            kinds += (kinds.empty() ? "" : ", ") + std::string{kind};
+        }
+    }
+    std::string out =
+        "Apogee is the person's local AI harness: their models, and the material they have "
+        "indexed with it -- document collections, knowledge graphs and decision records -- on "
+        "this machine. This server is Apogee's read-only face";
+    out += kinds.empty() ? std::string{": "}
+                         : ", with two kinds of tool: native reads (" + kinds + ") and ";
+    out +=
+        "Apogee's own reads (models, training, the install check, graphs, knowledge records), "
+        "each answering with what its command prints. Nothing it serves writes.";
+    if (!inventory.backends.empty() && serves(inventory, harness::kServedComplete)) {
+        out += " One call runs a model: complete, on a local model the person's config lists.";
+    }
+    return out;
+}
+
+/// Which tool answers what, each line naming only the tools served, a line
+/// with none of them left out.
+[[nodiscard]] std::string introduction_uses(const ServerInventory& inventory) {
+    struct Use {
+        std::string_view what{};
+        std::vector<std::string_view> tools{};
+    };
+
+    const std::array<Use, 4> uses{{
+        {"their indexed documents and decisions", {"search_documents", "knowledge_query"}},
+        {"how code in an indexed project connects", {"graph_query", "graph_path"}},
+        {"what models exist and where they stand", {"models_status"}},
+        {"a bounded side task for a local model", {harness::kServedComplete}},
+    }};
+    std::string lines;
+    for (const Use& use : uses) {
+        std::string named;
+        for (const std::string_view tool : use.tools) {
+            if (serves(inventory, tool)) {
+                named += (named.empty() ? "" : ", ") + std::string{tool};
+            }
+        }
+        if (!named.empty()) {
+            lines += "\n- " + std::string{use.what} + ": " + named;
+        }
+    }
+    if (lines.empty()) {
+        return {};
+    }
+    return "When to reach for them -- for the person's own material, not in place of the host's "
+           "own tools:" +
+           lines;
+}
+
+/// `check` as the introduction names it: through the renderer, as every
+/// printed command is -- unless the run's root is a `--custom` config, whose
+/// path the command would carry and the introduction never says.
+[[nodiscard]] std::string check_named() {
+    if (const std::optional<harness::RootFlag> flag = harness::root_flag();
+        flag.has_value() && !flag->channel.has_value()) {
+        return "its check command";
+    }
+    return "`" + harness::render({.verbs = {"check"}}) + "`";
+}
+
+}  // namespace
+
+std::string server_instructions(const ServerInventory& inventory) {
+    const std::string head = introduction_head(inventory);
+    const std::string uses = introduction_uses(inventory);
+    const std::string tail = uses.empty() ? std::string{} : "\n\n" + uses;
+    if (inventory.setup == ServedSetup::Absent) {
+        return head + "\n\nApogee is not set up here yet: " + check_named() +
+               " says what is missing, and each read answers with its own reason." + tail;
+    }
+    if (inventory.setup == ServedSetup::Unreadable) {
+        return head + "\n\nApogee's config does not load here: " + check_named() +
+               " says why, and each read answers with its own reason." + tail;
+    }
+    std::vector<std::string> collections;
+    for (const IntroducedCollection& collection : inventory.collections) {
+        collections.push_back(collection_said(collection));
+    }
+    std::vector<std::string> graphs;
+    for (const IntroducedGraph& graph : inventory.graphs) {
+        graphs.push_back(graph_said(graph));
+    }
+    std::vector<std::string> backends;
+    for (const ServedBackend& backend : inventory.backends) {
+        backends.push_back(backend_said(backend));
+    }
+    const std::string records = inventory.records == 0
+                                    ? std::string{"none yet"}
+                                    : std::to_string(inventory.records) + ", " +
+                                          std::to_string(inventory.shipped_records) + " shipped";
+    // Every list at most kInventoryNames names, fewer while the text would
+    // pass the bound: at none, each list is a count, and that always fits.
+    for (std::size_t shown = kInventoryNames;; --shown) {
+        std::string text =
+            head + "\n\nThis setup, as the server started (the reads answer live):" +
+            "\n- collections: " + cut_list(inventory, collections, shown, "list_collections") +
+            "\n- graphs: " + cut_list(inventory, graphs, shown, "list_graphs") +
+            "\n- knowledge records: " + records;
+        if (!backends.empty()) {
+            text += "\n- local models for complete: " +
+                    cut_list(inventory, backends, shown, harness::kServedComplete);
+        }
+        text += tail;
+        if (text.size() <= kInstructionsBound || shown == 0) {
+            return text;
+        }
+    }
+}
+
 int serve_mcp(const RootContext& context, std::istream& in, std::ostream& out, std::ostream& err) {
     // The native toolsets only, never the MCP registry: a config that
     // listed this very command as a server would otherwise spawn itself
     // without end.
     harness::Config config;
     std::filesystem::path config_path;
+    ServedSetup setup = ServedSetup::Ready;
     try {
         config_path = harness::resolve_config_path(context.config_path);
         config = harness::load_config(config_path);
     } catch (const std::exception&) {
         // No config is fine: the defaults sandbox to the launch folder, and
-        // each status read says the config's own reason when asked.
+        // each status read says the config's own reason when asked. The
+        // introduction says which, never the reason, which names the path.
+        std::error_code code;
+        setup = !config_path.empty() && std::filesystem::exists(config_path, code)
+                    ? ServedSetup::Unreadable
+                    : ServedSetup::Absent;
     }
     // One Harness for the server's life (54b), its providers built at the
     // first call that needs them: search_documents' embedder, complete.
@@ -715,8 +994,13 @@ int serve_mcp(const RootContext& context, std::istream& in, std::ostream& out, s
         served = mcp::with_calls(std::move(served), std::move(calls));
     }
     err.flush();
+    // The introduction (58a), composed once from the setup as the server
+    // starts -- fixed for its life, as the tool list is, since a host lists
+    // both once; the reads answer at their call.
+    const std::string instructions =
+        server_instructions(read_server_inventory(context, setup, callable.backends, served.tools));
     return mcp::serve_stdio(in, out, kServerName, std::string{version::semantic()}, served.tools,
-                            served.dispatch);
+                            served.dispatch, instructions);
 }
 
 }  // namespace apogee::commands

@@ -4,7 +4,8 @@
 # run, disabled and deleted -- and the in-binary server driven by the client
 # as one more server, so the fixture is Apogee itself with nothing installed:
 # `mcp serve` (54a) and its hidden alias `__mcp-tools`, the status reads held
-# to the CLI's own documents byte for byte by an external client.
+# to the CLI's own documents byte for byte by an external client, and its
+# introduction (58a) to the setup it names.
 #
 # POSIX only, like the other shell checks. Needs python3 for the scaffolded
 # server (the same interpreter the PTY checks already need).
@@ -120,7 +121,17 @@ cat >"$WORK_DIR/serve-calls.json" <<EOF
   {"tool": "knowledge_query", "arguments": {"question": "cancel button"}, "expect": "$WORK_DIR/doc-knowledge-query.json"}
 ]
 EOF
-python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/serve-calls.json" </dev/null >"$WORK_DIR/serve.txt" 2>&1 || fail "mcp serve's handshake: $(cat "$WORK_DIR/serve.txt")"
+python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/serve-calls.json" --instructions-out="$WORK_DIR/instructions.txt" </dev/null >"$WORK_DIR/serve.txt" 2>&1 || fail "mcp serve's handshake: $(cat "$WORK_DIR/serve.txt")"
+# 58a: initialize introduces the setup the reads answer from -- the
+# collection, the graph and the record by name and count, the tools that
+# answer what -- and never a path: neither the home nor the tree shop was
+# built from. Nothing lists complete yet, so it is not offered.
+grep -q "notes (1 chunk, lexical only)" "$WORK_DIR/instructions.txt" || fail "the instructions did not name notes: $(cat "$WORK_DIR/instructions.txt")"
+grep -q "shop (named, [0-9]* nodes, [0-9]* edges)" "$WORK_DIR/instructions.txt" || fail "the instructions did not name shop: $(cat "$WORK_DIR/instructions.txt")"
+grep -q "knowledge records: 1, 1 shipped" "$WORK_DIR/instructions.txt" || fail "the instructions did not count the record: $(cat "$WORK_DIR/instructions.txt")"
+grep -q "their indexed documents and decisions: search_documents, knowledge_query" "$WORK_DIR/instructions.txt" || fail "the instructions did not say which tool answers what: $(cat "$WORK_DIR/instructions.txt")"
+if grep -q "local models for complete" "$WORK_DIR/instructions.txt"; then fail "the instructions offered complete with nothing listed"; fi
+if grep -qF "$WORK_DIR" "$WORK_DIR/instructions.txt" || grep -qF "$SRC_ROOT" "$WORK_DIR/instructions.txt"; then fail "the instructions carry a path: $(cat "$WORK_DIR/instructions.txt")"; fi
 # The public spelling registered as one more server, through the production
 # client: the entry `mcp presets` prints for another host.
 [ "$("$APOGEE_BIN" mcp presets --output-format json </dev/null | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["data"][1]["args"]))')" = '["mcp", "serve"]' ] || fail "mcp presets' self does not name mcp serve"
@@ -154,7 +165,11 @@ cat >"$WORK_DIR/callable-calls.json" <<EOF2
 ]
 EOF2
 "$APOGEE_BIN" models status --output-format json </dev/null >"$WORK_DIR/doc-models-status-now.json" 2>/dev/null || fail "models status --output-format json"
-python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/callable-calls.json" --callables=complete </dev/null >"$WORK_DIR/callable.txt" 2>&1 || fail "mcp serve's callable set: $(cat "$WORK_DIR/callable.txt")"
+python3 "$(dirname "$0")/../py/mcp_serve_client.py" "$APOGEE_BIN" "$WORK_DIR/callable-calls.json" --callables=complete --instructions-out="$WORK_DIR/instructions-callable.txt" </dev/null >"$WORK_DIR/callable.txt" 2>&1 || fail "mcp serve's callable set: $(cat "$WORK_DIR/callable.txt")"
+# The listed backend is introduced with its bound; the billed one, refused at
+# the editor, never is.
+grep -q "local models for complete: served (at most 1024 tokens)" "$WORK_DIR/instructions-callable.txt" || fail "the instructions did not offer served: $(cat "$WORK_DIR/instructions-callable.txt")"
+if grep -q "paid" "$WORK_DIR/instructions-callable.txt"; then fail "the instructions named the billed backend: $(cat "$WORK_DIR/instructions-callable.txt")"; fi
 "$APOGEE_BIN" config set-backend served --mcp-serve "" </dev/null >/dev/null || fail "take complete back"
 
 # --- a tool-using run connects at startup, and a dead server is skipped ------

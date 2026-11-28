@@ -9,7 +9,7 @@
 | **Component** | The Claude Code plugin (`lib/src/mod/claude-code/`, the repository's marketplace) |
 | **Labels** | `claude-code` `plugin` `mcp-server` `skill` |
 | **Epic** | Track 2 · Claude aware of Apogee |
-| **Blocked by** | [CLI 58a](../../cli/v0.2.2/mcp-serve-introduces-itself.md), [CLI 58c](../../cli/v0.2.2/mcp-serve-coding-host-profile.md) |
+| **Blocked by** | [CLI 58c](../../cli/v0.2.2/mcp-serve-coding-host-profile.md) |
 | **Blocks** | — |
 | **Reporter** | The user (the idea and the "both hosts" call, 2026-11-07), shaped by that day's spike |
 | **Created** | 2026-11-07 |
@@ -103,6 +103,7 @@ All hermetic.
 | 2026-11-07 | Both hosts — this item is Claude Code's. | the user |
 | 2026-11-07 | In the mod's home: the mod is Apogee's Claude plugin, and this is its Claude Code form. Track 2, v0.2.2 (the user's call: the next release). | the user |
 | 2026-11-07 | Gated on CLI 58a and 58c: without the instructions the skill would have to carry a stale inventory, and without the profile the plugin would duplicate Claude Code's tools. | the spec |
+| 2026-11-28 | **Released from CLI 58a: it shipped** ([MILESTONES](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-introduces-itself-backlog-item-58a-the-server-introduces-itself)): `apogee mcp serve`'s `initialize` carries `instructions` composed at each server start from the person's setup -- each collection with its chunks and embedder, each graph with its kind and size, the knowledge records' count, the backends `complete` may name with their bounds, and which tool answers what, naming only tools the server lists (so the coding-host profile's set will be introduced as served) -- at most 2,000 characters, with no key, token or path. The skill names situations and tools only, as planned. Still 🔒 on CLI 58c. | 58a's build |
 
 ## Out of scope
 
@@ -112,6 +113,6 @@ All hermetic.
 
 ## Links
 
-- **Blocked by:** [CLI 58a](../../cli/v0.2.2/mcp-serve-introduces-itself.md) (the server's instructions), [CLI 58c](../../cli/v0.2.2/mcp-serve-coding-host-profile.md) (the coding-host profile) · **Blocks:** —
+- **Blocked by:** [CLI 58c](../../cli/v0.2.2/mcp-serve-coding-host-profile.md) (the coding-host profile; CLI 58a, the server's instructions, [shipped 2026-11-28](../../../assistant/cli/MILESTONES.md#2026-11-28--mcp-serve-introduces-itself-backlog-item-58a-the-server-introduces-itself)) · **Blocks:** —
 - **Relates to:** CLI 54a/54b (the server, `mcp presets`), CLI 58d (refresh calls), the mod's track 1 (the desktop half, shipped 2026-11-21; mod 1a made `lib/src/mod/`), [CLAUDE.md](../../../assistant/mod/CLAUDE.md), ADR 0001, ADR 0006
 - **Follows from:** the user's idea and "both hosts" call, and the spike, 2026-11-07

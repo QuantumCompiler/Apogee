@@ -18,7 +18,13 @@ status reads, each marked not read-only, and a call's expected text is what
 the command it serves printed -- `apogee complete -m <backend> ...` for the
 served `complete`.
 
+And (58a) `initialize` carries `instructions`: a string, not empty, within
+the 2,000-character bound, the same under both spellings. With
+`--instructions-out=<path>` it is written there, for the caller to hold to
+what the setup holds.
+
 usage: mcp_serve_client.py <apogee-binary> <calls.json> [--callables=<name,...>]
+                           [--instructions-out=<path>]
 
 `calls.json` is a list of {"tool": ..., "arguments": {...}, "expect": <path
 of the CLI's JSON output>}. Exit 0 on success; a failure names what differed.
@@ -36,6 +42,8 @@ STATUS_READS = ["models_list", "models_status", "train_status", "train_versions"
                 "knowledge_info", "knowledge_query"]
 WRITERS = ("write_file", "edit_file", "write_note", "run_command")
 SPELLINGS = (["mcp", "serve"], ["__mcp-tools"])
+# 58a: the most the introduction may run to.
+INSTRUCTIONS_BOUND = 2000
 
 
 def fail(message):
@@ -71,25 +79,38 @@ def converse(binary, spelling, calls):
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
-        fail("usage: mcp_serve_client.py <apogee-binary> <calls.json> [--callables=<name,...>]")
+    if len(sys.argv) < 3:
+        fail("usage: mcp_serve_client.py <apogee-binary> <calls.json> [--callables=<name,...>]"
+             " [--instructions-out=<path>]")
     binary, calls_path = sys.argv[1], sys.argv[2]
     callables = []
-    if len(sys.argv) == 4:
-        if not sys.argv[3].startswith("--callables="):
-            fail("unknown argument: " + sys.argv[3])
-        callables = [name for name in sys.argv[3][len("--callables="):].split(",") if name]
+    instructions_out = None
+    for argument in sys.argv[3:]:
+        if argument.startswith("--callables="):
+            callables = [name for name in argument[len("--callables="):].split(",") if name]
+        elif argument.startswith("--instructions-out="):
+            instructions_out = argument[len("--instructions-out="):]
+        else:
+            fail("unknown argument: " + argument)
     tail = STATUS_READS + callables
     with open(calls_path, encoding="utf-8") as handle:
         calls = json.load(handle)
 
     listings = []
+    introductions = []
     for spelling in SPELLINGS:
         words = " ".join(spelling)
         replies = converse(binary, spelling, calls)
         initialized = replies.get(1, {}).get("result", {})
         if "tools" not in initialized.get("capabilities", {}):
             fail("%s: initialize did not offer tools: %r" % (words, replies.get(1)))
+        instructions = initialized.get("instructions")
+        if not isinstance(instructions, str) or not instructions:
+            fail("%s: initialize carried no instructions: %r" % (words, replies.get(1)))
+        if len(instructions.encode("utf-8")) > INSTRUCTIONS_BOUND:
+            fail("%s: the instructions pass the bound: %d bytes"
+                 % (words, len(instructions.encode("utf-8"))))
+        introductions.append(instructions)
         tools = replies.get(2, {}).get("result", {}).get("tools", [])
         names = [tool["name"] for tool in tools]
         if names[-len(tail):] != tail:
@@ -128,6 +149,11 @@ def main():
 
     if listings[0] != listings[1]:
         fail("mcp serve and __mcp-tools list different tools")
+    if introductions[0] != introductions[1]:
+        fail("mcp serve and __mcp-tools introduce themselves differently")
+    if instructions_out is not None:
+        with open(instructions_out, "w", encoding="utf-8") as handle:
+            handle.write(introductions[0])
     print("mcp_serve_client: OK (%d tools under both spellings)" % len(listings[0]))
 
 

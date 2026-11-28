@@ -23,7 +23,16 @@ void write_frame(std::ostream& out, const nlohmann::json& frame) {
 
 int serve_stdio(std::istream& in, std::ostream& out, std::string_view server_name,
                 std::string_view version, const std::vector<ServedTool>& tools,
-                const Dispatch& dispatch) {
+                const Dispatch& dispatch, std::string_view instructions) {
+    nlohmann::json initialized{
+        {"protocolVersion", std::string{kProtocolVersion}},
+        {"capabilities", {{"tools", nlohmann::json::object()}}},
+        {"serverInfo", {{"name", std::string{server_name}}, {"version", std::string{version}}}}};
+    if (!instructions.empty()) {
+        // Text enters the server here, so it is mended here (58a): a reply
+        // that is not UTF-8 would end the server at its dump.
+        initialized["instructions"] = harness::valid_utf8(instructions);
+    }
     std::string line;
     while (std::getline(in, line)) {
         if (line.size() > kMaxFrameBytes) {
@@ -38,12 +47,7 @@ int serve_stdio(std::istream& in, std::ostream& out, std::string_view server_nam
         const nlohmann::json id = has_id ? frame["id"] : nlohmann::json{};
         if (method == "initialize") {
             if (has_id) {
-                write_frame(
-                    out, make_result(id, {{"protocolVersion", std::string{kProtocolVersion}},
-                                          {"capabilities", {{"tools", nlohmann::json::object()}}},
-                                          {"serverInfo",
-                                           {{"name", std::string{server_name}},
-                                            {"version", std::string{version}}}}}));
+                write_frame(out, make_result(id, initialized));
             }
         } else if (method == "notifications/initialized") {
             // A notification: no reply.

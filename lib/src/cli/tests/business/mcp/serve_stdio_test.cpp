@@ -64,6 +64,56 @@ TEST_CASE("serve_stdio answers the four methods, one reply per request", "[mcp][
     CHECK(seen_args["text"] == "hi");
 }
 
+TEST_CASE("initialize carries the instructions it is given, and no field when they are empty",
+          "[mcp][serve][58a]") {
+    // 58a: a host reads `instructions` to learn what a server is for. The
+    // field is new in an existing reply (ADR 0006), so an empty text leaves
+    // the reply exactly as it was: an older host sees no change.
+    const auto initialized = [](std::string_view instructions) {
+        std::istringstream in{R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"
+                              "\n"};
+        std::ostringstream out;
+        CHECK(apogee::mcp::serve_stdio(
+                  in, out, "s", "1", {},
+                  [](std::string_view, const nlohmann::json&) {
+                      return apogee::mcp::ToolCallResult{};
+                  },
+                  instructions) == 0);
+        const std::vector<nlohmann::json> frames = frames_of(out.str());
+        REQUIRE(frames.size() == 1);
+        return frames[0]["result"];
+    };
+    const nlohmann::json told = initialized("Apogee serves the person's own setup.");
+    CHECK(told["instructions"] == "Apogee serves the person's own setup.");
+    CHECK(told["serverInfo"]["name"] == "s");
+    CHECK(told["capabilities"].contains("tools"));
+
+    const nlohmann::json untold = initialized("");
+    CHECK_FALSE(untold.contains("instructions"));
+    CHECK(untold == nlohmann::json{{"protocolVersion", "2025-03-26"},
+                                   {"capabilities", {{"tools", nlohmann::json::object()}}},
+                                   {"serverInfo", {{"name", "s"}, {"version", "1"}}}});
+}
+
+TEST_CASE("instructions that are not UTF-8 reach the client mended, and the server goes on",
+          "[mcp][serve][58a][utf8]") {
+    // Text enters the server here, so it is mended here: a reply that is
+    // not UTF-8 would end the server at its dump.
+    std::istringstream in{R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"
+                          "\n"
+                          R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})"
+                          "\n"};
+    std::ostringstream out;
+    REQUIRE_NOTHROW(apogee::mcp::serve_stdio(
+        in, out, "s", "1", {},
+        [](std::string_view, const nlohmann::json&) { return apogee::mcp::ToolCallResult{}; },
+        "Collections: caf\xE9."));
+    const std::vector<nlohmann::json> frames = frames_of(out.str());
+    REQUIRE(frames.size() == 2);
+    CHECK(frames[0]["result"]["instructions"] == "Collections: caf\xEF\xBF\xBD.");
+    CHECK(frames[1]["result"]["tools"].empty());
+}
+
 TEST_CASE("an unknown method with an id is -32601; junk and notifications are ignored",
           "[mcp][serve]") {
     std::istringstream in{

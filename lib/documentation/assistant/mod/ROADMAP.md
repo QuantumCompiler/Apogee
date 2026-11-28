@@ -23,7 +23,7 @@ Opened 2026-10-21 (the user's call, from that day's mod spike; home, layers and 
 
 Opened 2026-11-07 from that day's spike (the CLI's track 58 carries the walls and the server's half). The user's call **both hosts**: Claude Code gets a plugin, and the desktop mod picks up the new reads.
 
-- [ ] **Apogee as a Claude Code plugin** *([2a](../../backlog/mod/v0.2.2/claude-code-plugin.md), gated on CLI 58a and 58c)* — the server registered with the coding-host profile and a skill saying when to use Apogee, installed from this repository's marketplace.
+- [ ] **Apogee as a Claude Code plugin** *([2a](../../backlog/mod/v0.2.2/claude-code-plugin.md), gated on CLI 58c; its CLI 58a gate satisfied 2026-11-28, when 58a [shipped](../cli/MILESTONES.md#2026-11-28--mcp-serve-introduces-itself-backlog-item-58a-the-server-introduces-itself))* — the server registered with the coding-host profile and a skill saying when to use Apogee, installed from this repository's marketplace.
 - [ ] **The desktop mod shows graphs and knowledge records** *([2b](../../backlog/mod/v0.2.2/mod-graphs-and-knowledge.md); its 1c gate satisfied 2026-11-21 and its CLI 58b gate 2026-11-28, when 58b [shipped](../cli/MILESTONES.md#2026-11-28--mcp-serve-graphs-and-knowledge-backlog-item-58b-the-server-serves-graphs-and-knowledge-records))* — `/apogee graphs`, `/apogee knowledge` and the pane's Knowledge section.
 
 ---

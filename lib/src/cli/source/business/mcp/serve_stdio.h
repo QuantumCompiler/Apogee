@@ -30,9 +30,15 @@ struct ServedTool {
 using Dispatch = std::function<ToolCallResult(std::string_view name, const nlohmann::json& args)>;
 
 /// Serves until `in` hits EOF. Returns 0 on a clean EOF.
+///
+/// `instructions` (58a) is what `initialize` tells a host the server is for,
+/// MCP's `instructions` field -- a host such as Claude Code puts it in its
+/// model's system prompt. Empty leaves the field out, so the reply is the one
+/// an older server gave (ADR 0006: a new field, never a changed one); text
+/// that is not UTF-8 is mended where it enters, never ending the server.
 int serve_stdio(std::istream& in, std::ostream& out, std::string_view server_name,
                 std::string_view version, const std::vector<ServedTool>& tools,
-                const Dispatch& dispatch);
+                const Dispatch& dispatch, std::string_view instructions = {});
 
 /// The read-only tools of a registry, as served tools; the dispatch that
 /// runs them. What `apogee mcp serve` serves first: a writing tool is

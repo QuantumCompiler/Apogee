@@ -551,6 +551,69 @@ appear in its next `tools/list`. The server still answers to its earlier,
 hidden spelling, `apogee __mcp-tools`. A host registered with it before 54a
 needs no change and gets the same tools.
 
+### What the server says when a host connects
+
+Since 58a, the `initialize` reply carries MCP's `instructions`: what the
+server is for, written from your own setup. A host such as Claude Code puts
+a server's instructions into its model's system prompt, so the model knows
+what Apogee holds before it calls anything. They hold three parts:
+
+- **What Apogee is**, and the server's two kinds of tool, naming only the
+  kinds of native read this server lists (no git on the Windows build, and
+  none a `tools.disabled` toolset switched off). When your config offers
+  `complete`, they say so.
+- **What your setup holds**, as names and counts. They list each collection
+  `list_collections` lists, with its chunk count and the model its vectors
+  are from (`lexical only` for none). They list each graph `graph list` names,
+  with its kind and size (`not built` for one that is not). They give how
+  many knowledge records there are and how many shipped. They list each
+  backend `complete` may name, with its bound, and only those: a backend that
+  lists nothing, or one left out because its provider bills, is never named.
+- **Which tool answers what**, for your own material only: your indexed
+  documents and decisions (`search_documents`, `knowledge_query`), how code
+  in an indexed project connects (`graph_query`, `graph_path`), what models
+  exist and where they stand (`models_status`), and a bounded side task for a
+  local model (`complete`, only where offered). Each line names only tools
+  the server lists. Nothing tells the host's model to prefer Apogee over its
+  own tools in general.
+
+For example, over a home with one ingested README and one code graph:
+
+```text
+This setup, as the server started (the reads answer live):
+- collections: notes (1 chunk, lexical only)
+- graphs: shop (named, 6 nodes, 6 edges)
+- knowledge records: none yet
+```
+
+The rules:
+
+- **Bounded.** The text is at most 2,000 characters. Each list shows at most
+  eight names, then the rest as a count with the tool that lists them all:
+  `… and 6 more: list_graphs`. When the text would still pass 2,000, every
+  list shows fewer names, down to its count alone.
+- **No secret and no path.** Nothing comes from a key, a token or `secrets/`.
+  No path appears either: a graph is named, never located, so its `sources`
+  are left out, and an embedder recorded by its absolute path is named by its
+  file. A name that is not UTF-8 is mended.
+- **Fixed at the server's start**, like the tool list, since a host reads
+  both once. Something added later, such as a collection or a graph, is
+  reachable through the reads at once, which answer at their call. The
+  instructions name it at the host's next start.
+- **With no config**, they say Apogee is not set up and name `apogee check`
+  (printed for the binary that runs, `apogee-dev check` on the dev channel).
+  Under a `--custom` root, whose path that command would carry, they name
+  the check command in words instead. With a config that will not load, they
+  say so and name the same command.
+  They never give the config's reason, which names its path. The reads still
+  answer with their own reasons.
+- **A new field.** An older host ignores `instructions` (the reply is
+  otherwise unchanged), and an empty text leaves the field out.
+
+The server offers no MCP `resources` or `prompts`: the instructions and the
+reads carry the same facts, and a second channel would be a second thing to
+keep current.
+
 ### Calling a local model: `complete`
 
 Since 54b, the server can hand a host's prompt to one of your local models
