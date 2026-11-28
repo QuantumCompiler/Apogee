@@ -299,6 +299,17 @@ lines above as notices, and last a document naming the folder it landed in
 the datasets with their line counts and shapes; `delete <name> -y` removes
 one.
 
+A dataset is named, not pathed (since CLI-M55): `info` and `delete` take a
+name `list` shows, never a path, and refuse one that could leave
+`training/datasets/` -- empty, `..`, a `/` or a `\`, a NUL, or a Windows
+root name such as `C:x` -- with `'<name>' is not a dataset name -- a name,
+never a path`, exit 1, before any file is looked at. Every listed name
+reads and deletes, a dash-led one after `--` (`datasets delete --yes -- -h`),
+save a hand-placed one holding a `\`, which no Apogee writer makes; Tab
+offers those names, a dash-led one only after `--`, and no file names.
+`train run --dataset` stays the one dataset verb that also takes a `.jsonl`
+path; its name, and `train eval --suite`'s, is read by the same rule.
+
 ## SafeTensors snapshots
 
 ```bash

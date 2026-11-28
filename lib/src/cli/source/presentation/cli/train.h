@@ -118,7 +118,9 @@ struct StudentResolution {
                                                 std::string_view name);
 
 /// The dataset `name_or_path` resolves to: a file path as given, else
-/// `training/datasets/<name>.jsonl`. Empty with `error` set otherwise.
+/// `training/datasets/<name>.jsonl` for a name the read rule takes
+/// (`training::dataset_read_error`, CLI-M55). Empty with `error` set
+/// otherwise.
 [[nodiscard]] std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
                                                     std::string_view name_or_path,
                                                     std::string& error);
@@ -131,8 +133,9 @@ struct StudentResolution {
                                                  const harness::BackendConfig& backend);
 
 /// The eval suite `--suite` (or `training.eval_suite_path`) names: a file
-/// path; else `training/suites/<name>.jsonl`; else `training/datasets/
-/// <name>.eval.jsonl` (what `datasets prepare --as-eval` writes); else a
+/// path; else, for a name the read rule takes (CLI-M55),
+/// `training/suites/<name>.jsonl`, then `training/datasets/
+/// <name>.eval.jsonl` (what `datasets prepare --as-eval` writes), then a
 /// kit's inline eval. `label` records what was found.
 struct SuiteResolution {
     std::vector<training::EvalItem> items;

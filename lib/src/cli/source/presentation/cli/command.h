@@ -63,6 +63,9 @@ inline constexpr const char* kChatValue = "CHAT";
 inline constexpr const char* kServerValue = "SERVER";
 /// A prepared dataset, or a `.jsonl` path.
 inline constexpr const char* kDatasetValue = "DATASET";
+/// A prepared dataset by name, never a path (CLI-M55) -- what `datasets
+/// info` and `delete` take: `DATASET`'s names, and no file names.
+inline constexpr const char* kDatasetNameValue = "DATASET_NAME";
 /// A training kit, bundled or the user's, or a path.
 inline constexpr const char* kKitValue = "KIT";
 /// An eval suite, a prepared `<name>.eval`, a kit, or a path.
@@ -194,7 +197,7 @@ inline constexpr const char* kProviderValue = "PROVIDER";
 
 /// Every name kind above, for the protocol to recognise and a test to hold
 /// each to a source.
-inline constexpr std::array<std::string_view, 55> kNameValues{kCollectionValue,
+inline constexpr std::array<std::string_view, 56> kNameValues{kCollectionValue,
                                                               kCollectionListValue,
                                                               kGraphValue,
                                                               kNamedGraphValue,
@@ -203,6 +206,7 @@ inline constexpr std::array<std::string_view, 55> kNameValues{kCollectionValue,
                                                               kChatValue,
                                                               kServerValue,
                                                               kDatasetValue,
+                                                              kDatasetNameValue,
                                                               kKitValue,
                                                               kSuiteValue,
                                                               kModelSuiteValue,

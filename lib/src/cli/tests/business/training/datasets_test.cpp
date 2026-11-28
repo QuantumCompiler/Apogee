@@ -22,6 +22,8 @@ namespace {
 using apogee::harness::ChatMessage;
 using apogee::training::chat_line;
 using apogee::training::CreateSource;
+using apogee::training::dataset_read_error;
+using apogee::training::dataset_write_error;
 using apogee::training::DatasetInfo;
 using apogee::training::DatasetStore;
 using apogee::training::mine_sessions;
@@ -48,6 +50,77 @@ TEST_CASE("dataset names are plain", "[training][datasets]") {
     CHECK_FALSE(valid_dataset_name("a/b"));
     CHECK_FALSE(valid_dataset_name("a b"));
     CHECK_FALSE(valid_dataset_name(std::string(129, 'a')));
+}
+
+TEST_CASE("a dataset is named, not pathed: the read rule refuses only what can leave the folder",
+          "[training][datasets][M55]") {
+    // CLI-M55: one `.jsonl` stripped, as the writer strips it, then the
+    // escape check CLI-M45's collection rule asks -- never a character set
+    // or a length, so every listed dataset keeps reading.
+    for (const std::string name : {"", "..", ".jsonl", "...jsonl", "a/b", "../x", "/abs/x", "a\\b",
+                                   "sub/inner", "../../../victim"}) {
+        INFO(name);
+        CHECK(dataset_read_error(name) ==
+              "'" + name + "' is not a dataset name -- a name, never a path");
+    }
+    const std::string nul{"a\0b", 3};
+    CHECK_FALSE(dataset_read_error(nul).empty());
+#ifdef _WIN32
+    for (const std::string name : {"C:x", "D:notes"}) {
+        INFO(name);
+        CHECK_FALSE(dataset_read_error(name).empty());
+    }
+#else
+    CHECK(dataset_read_error("a:b").empty());
+#endif
+    for (const std::string& name :
+         {std::string{"my set"}, std::string{"café"}, std::string{".hidden"}, std::string{"a..b"},
+          std::string{"-h"}, std::string{"x.eval"}, std::string{"a.jsonl"}, std::string{"."},
+          std::string(130, 'n')}) {
+        INFO(name);
+        CHECK(dataset_read_error(name).empty());
+    }
+}
+
+TEST_CASE("the write rule is today's, said before anything is written",
+          "[training][datasets][M55]") {
+    // Lifted out of `write` so synth can ask it first; the words unchanged.
+    CHECK(dataset_write_error("ok").empty());
+    CHECK(dataset_write_error("ok.jsonl").empty());
+    CHECK(dataset_write_error("my set") ==
+          "'my set' is not a dataset name: letters, digits, '-', '_' and '.', not starting with a "
+          "dot");
+    CHECK_FALSE(dataset_write_error("../x").empty());
+    CHECK_FALSE(dataset_write_error(".hidden").empty());
+    CHECK_FALSE(dataset_write_error(std::string(129, 'a')).empty());
+}
+
+TEST_CASE("the store's readers never join a refused name to the folder",
+          "[training][datasets][store][M55]") {
+    const apogee::testing::TempDir root{"datasets-m55-" + std::to_string(std::random_device{}())};
+    const DatasetStore store{root.path() / "datasets"};
+    std::filesystem::create_directories(root.path() / "datasets");
+    const std::filesystem::path escape = root.path() / "escape.jsonl";
+    std::ofstream{escape, std::ios::binary} << chat_line("q", "a") << "\n";
+    const std::string kept = bytes(escape);
+
+    CHECK_FALSE(store.exists("../escape"));
+    CHECK_FALSE(store.info("../escape").has_value());
+    CHECK(store.remove("../escape") == "'../escape' is not a dataset name -- a name, never a path");
+    const std::string absolute = (root.path() / "escape").string();
+    CHECK_FALSE(store.exists(absolute));
+    CHECK_FALSE(store.info(absolute).has_value());
+    CHECK_FALSE(store.remove(absolute).empty());
+    REQUIRE(std::filesystem::exists(escape));
+    CHECK(bytes(escape) == kept);
+
+    // A listed name the create rule refuses still reads and removes.
+    std::ofstream{root.path() / "datasets" / "my set.jsonl", std::ios::binary} << "{}\n";
+    CHECK(store.exists("my set"));
+    REQUIRE(store.info("my set").has_value());
+    CHECK(store.info("my set")->name == "my set");
+    CHECK(store.remove("my set").empty());
+    CHECK_FALSE(std::filesystem::exists(root.path() / "datasets" / "my set.jsonl"));
 }
 
 TEST_CASE("a chat line puts role before content, the order every producer writes",

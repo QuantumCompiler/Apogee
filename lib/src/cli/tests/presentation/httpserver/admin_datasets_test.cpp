@@ -134,7 +134,7 @@ struct Fixture {
         return home.path() / "training" / "datasets" / (std::string{name} + ".jsonl");
     }
 
-    int cli(const std::vector<std::string>& args) const {
+    int cli(const std::vector<std::string>& args, std::string* out = nullptr) const {
         std::ostringstream captured_out;
         std::ostringstream captured_err;
         std::streambuf* old_out = std::cout.rdbuf(captured_out.rdbuf());
@@ -149,6 +149,9 @@ struct Fixture {
         const int code = root.run(static_cast<int>(argv.size()), argv.data());
         std::cout.rdbuf(old_out);
         std::cerr.rdbuf(old_err);
+        if (out != nullptr) {
+            *out = captured_out.str();
+        }
         return code;
     }
 
@@ -224,6 +227,48 @@ TEST_CASE("get and delete answer honest 404s, and delete removes the file",
     CHECK(deleted.status == 200);
     CHECK(parsed(deleted)["deleted"] == "gone");
     CHECK_FALSE(std::filesystem::exists(fixture.dataset("gone")));
+}
+
+TEST_CASE("get and delete take every listed name, and refuse a path with the CLI's words",
+          "[httpserver][admin][datasets][M55]") {
+    // CLI-M55: the read rule, not the create rule, so a listed `my set`
+    // reads byte for byte as `datasets info --output-format json` prints it.
+    Fixture fixture;
+    const std::filesystem::path folder = fixture.home.path() / "training" / "datasets";
+    std::filesystem::create_directories(folder);
+    std::ofstream{folder / "my set.jsonl", std::ios::binary} << chat_line("q", "a") << "\n";
+    std::ofstream{folder / "café.jsonl", std::ios::binary} << chat_line("q", "a") << "\n";
+
+    const HttpResponse got = apogee::httpserver::admin_get_dataset(fixture.context(), "my set");
+    REQUIRE(got.status == 200);
+    std::string printed;
+    REQUIRE(fixture.cli({"datasets", "info", "my set", "--output-format", "json"}, &printed) == 0);
+    CHECK(printed == got.body + "\n");
+
+    const HttpResponse deleted =
+        apogee::httpserver::admin_delete_dataset(fixture.context(), "café");
+    CHECK(deleted.status == 200);
+    CHECK(parsed(deleted)["deleted"] == "café");
+    CHECK_FALSE(std::filesystem::exists(folder / "café.jsonl"));
+
+    // A name that could leave the folder: 400, the CLI's line without its
+    // `apogee datasets:` prefix, and nothing read or removed.
+    const std::filesystem::path outside = fixture.home.path() / "outside.jsonl";
+    std::ofstream{outside, std::ios::binary} << "{}\n";
+    for (const std::string name : {"../../outside", "../x", "a\\b", ".."}) {
+        INFO(name);
+        for (const HttpResponse& refused :
+             {apogee::httpserver::admin_get_dataset(fixture.context(), name),
+              apogee::httpserver::admin_delete_dataset(fixture.context(), name)}) {
+            CHECK(refused.status == 400);
+            CHECK(parsed(refused)["error"]["message"] ==
+                  "'" + name + "' is not a dataset name -- a name, never a path");
+        }
+    }
+    CHECK(std::filesystem::exists(outside));
+
+    // Guard: a new name is still the create rule's.
+    CHECK(fixture.create({{"name", "my set"}, {"force", true}}).status == 400);
 }
 
 TEST_CASE("the kits route lists the seeded kits", "[httpserver][admin][datasets][kits]") {

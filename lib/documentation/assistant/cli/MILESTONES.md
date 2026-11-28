@@ -6991,6 +6991,50 @@ The full suite through `lib/scripts/cicd.sh --test` (llama.cpp on) passed: 3,277
 - `install_runtime_set`, the offer to install at a terminal, refuses such a set before asking (`PythonEnv::unfit_reason`, the one wording `install` uses), so nothing is offered that pip would only refuse.
 - Tests: `runtime_test` (the ladder naming the rebuild on 3.14.5 and the install on 3.12.13), and `video_runtime_test` (a 3.9.6 environment refused before the offer, nothing asked, nothing run).
 
+### 2026-11-27 — `a-dataset-is-named-not-pathed-at-every-reader` (maintenance item M55): a dataset is named, not pathed, at every reader
+
+**Why.** The APP-M21 and APP-M22 probes' CLI aside ("datasets have no name rule"), then a sandboxed investigation, two skeptics and a critic (2026-11-26), found that the dataset store joined any string to its folder and only its writer checked a name.
+- **A delete removed a file outside the home.** With `training/datasets/` present, `apogee datasets delete --yes -- ../../../victim` printed `will remove:` with the joined path, then `removed.`, exit 0, and the home's parent lost `victim.jsonl`. `datasets info` read the same file, an absolute name or `sub/inner` reached the same way, and synth's existence check read the raw name too, calling the teacher before the writer refused the name.
+- **HTTP had the wrong guard.** `GET` and `DELETE /v1/admin/datasets/{id}` checked every name with the create rule, so a listed `my set` answered 400 while `datasets info -- "my set"` read it: parity broken both ways (ADR 0002). `train run --dataset` and `train eval --suite` used the create rule as their read gate as well.
+- **Completion offered file names** to `datasets info` and `delete` when no dataset matched.
+
+Every input reaching the unchecked readers was the person's own typing, and HTTP guarded its routes, so it was a destructive contract and parity bug, not an exploitable one.
+
+**What was built**
+
+- [x] **One read rule, in the store** (`business/training/datasets.h/.cpp`). `dataset_read_error` drops one `.jsonl`, as the writer does, and asks CLI-M45's escape check, `harness::name_leaves_folder` in `contracts/collection_name.h`: the empty name, `..` as the whole name, a `/` or a `\` on every platform, a NUL and a root name. Its words are `'<name>' is not a dataset name -- a name, never a path`. No character set and no length, so every listed dataset keeps reading (`my set`, `café`, `.hidden`, `a..b`, `-h`, `a:b` off Windows, a 130-byte name). `exists` answers false, `info` nullopt and `remove` the words for a refused name, so the store never joins one to the folder. `write`'s check is lifted out as `dataset_write_error`, in today's words.
+- [x] **Every reader asks it before a file is looked at.**
+  - `datasets info` and `delete` refuse with the rule's words, exit 1, one stderr line, and `delete` prints no `will remove:`, with or without the datasets folder.
+  - synth asks the write rule as its first step, before the config, the existence check, the kit and the teacher: no `[synth]` line and no teacher call.
+  - `GET` and `DELETE /v1/admin/datasets/{id}` take the read rule, 400 with the CLI's words without the `apogee datasets:` prefix. So a listed `my set` reads byte for byte as `datasets info --output-format json` prints it, and `café` deletes. POST create and synth keep the write rule.
+  - `train run --dataset`, a pipeline's stages and `train eval --suite` take the read rule for their name branch, after the path branch as before, so a listed `my set` resolves and finds `my set.eval.jsonl`.
+  - `check`'s pipeline row asks a stage's dataset through the run's own lookup (`resolve_dataset`), so a stage that climbs out of the folder is a warning, never found at the end of the climb, and one written `present.jsonl` is found as the run finds it (found by the build's review).
+- [x] **Completion offers what the verbs take** (ADR 0007). A names-only kind, `DATASET_NAME`, for `datasets info` and `delete`: the same listed names, with no file-name fallback. `train run --dataset` keeps `DATASET` and its files. Both kinds drop a listed name the read rule refuses, and `DATASET_NAME` reads `--` as the verb does (CLI-M45's `drop_misread_names`): a dash-led name only after `--`, and never one holding a line break.
+- [x] **Tests**, each failing on the old code unless named a guard:
+  - the rule's table and the store's readers on `../escape` and an absolute name, the file untouched, and a listed `my set` read and removed (`training/datasets_test`);
+  - `cli/datasets_test`: the traversal as a fixture, the home three levels down inside the temp directory, with `../../../victim`, an absolute name and `sub/inner`, with and without the folder, every victim's bytes kept; every listed name read and deleted after `--` (guards: the old verbs read them too); a POSIX `back\slash` refused and kept; synth refused before the teacher; and the guards (`create --from empty ok`, a delete without `--yes`);
+  - `httpserver/admin_datasets_test`: `my set`'s GET byte for byte the CLI's JSON, `café`'s DELETE, the 400 words for a climb, `a\b` and `..`, and POST `my set` still 400 (guard);
+  - `cli/train_test`: both resolvers by a listed `my set`, `../escape` refused with a file there, and a `.jsonl` path (guard);
+  - `cli/complete_sources_test`: `DATASET_NAME` with no paths, `DATASET` with them (guard), the refused names offered by neither, and at Tab through the command tree, `:hint` for `datasets info` and `delete`, `:files` for `train run --dataset`, a listed `-h` offered to `datasets delete` only after `--`, and a name holding a line break never;
+  - `cli/check_test`: a pipeline stage named `../../outside`, with that file present, warned, and one written `present.jsonl` found.
+- [x] **Docs.** [training.md](../../reference/cli/training.md) (a dataset is named, not pathed; `train run --dataset` the one dataset verb that takes a path); [http-api.md](../../reference/cli/http-api.md)'s `GET` and `DELETE /v1/admin/datasets/{id}` (any listed name, 400 for one that could leave the folder); DEVELOPER.md's `training/`, `command.h`, `complete_sources`, `check` and test rows. SPEC is unchanged.
+
+**Decisions made while building** (2026-11-27, each recorded for veto):
+- **The open calls' defaults, taken:**
+  - a `\` is refused on every platform, so a hand-placed macOS `back\slash.jsonl` stops reading through the CLI (`rm` removes it);
+  - `datasets info` and `delete` take a name only; `train run --dataset` stays the one dataset verb that takes a path;
+  - landed before CLI-59d, which still needs its own rule for path arguments;
+  - `datasets info` and `delete` stop offering file names at Tab.
+- **Build-time judgments** (the most conservative reading; for the user's veto):
+  - **Both dataset kinds drop a listed name the read rule refuses** (`back\slash`, a `...jsonl` listed as `..`), since both verbs refuse it. `DATASET_NAME` also drops a dash-led name before `--` and a name holding a line break, as CLI-M45's names-only kinds do (found by the build's review); `DATASET`, an option's value that parses whole, offers them as before.
+  - **`check`'s pipeline row takes the run's lookup**, `resolve_dataset`, rather than a probe of its own, so the row and a run agree on every stage (found by the build's review).
+  - **synth's write check runs first of all**, ahead of the config load too.
+  - **The write rule is `dataset_write_error`**, today's check and words, which CLI-M56's `dataset_create_error` replaces at synth's first check.
+  - **A refused name is echoed as typed**, control characters raw (the item left that as an aside), and the empty name gets the rule's one sentence.
+  - **train's name branches keep their words**: a refused name falls through to `no dataset named … and no such file` and `no eval suite`.
+
+**Verified.** The full gate, `lib/scripts/cicd.sh --test`; clang-format; Homebrew clang 22 and MinGW g++ over every changed source, no warning of ours; and the built binary in a sandbox home three levels deep: the victim kept, `my set` completed and deleted. A Windows root name and `\` are proven by CI's Windows rows.
+
 ## Milestone AA — The four layers
 
 **Goal.** Make the CLI's source say what it is: four layers -- **Presentation → Business → Data → Infrastructure** -- each package in one, each including only its own layer and those below, the law enforced by the build itself. Asked for by the user on 2026-10-03 and specced from a spike that measured the real include graph into the standing **Architecture** queue (A1–A4, A5 joining the same day). In C++ nothing makes this free the way Go's ban on import cycles does, which is why the layering here has always been a guarded convention, and this milestone turns it into structure.

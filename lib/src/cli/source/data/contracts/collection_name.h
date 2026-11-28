@@ -37,6 +37,8 @@ struct Config;
 /// every platform, a NUL (which a C API reads as the end of the path), or
 /// a root name, which `std::filesystem` would rebase the path onto (`D:x`
 /// on Windows; a POSIX path has none, so a store named `a:b` reads there).
+/// The one escape check: the dataset store's read rule asks it too
+/// (`training::dataset_read_error`, CLI-M55).
 [[nodiscard]] bool name_leaves_folder(std::string_view name);
 
 /// Why `name` cannot name a collection to read, in the words every reader

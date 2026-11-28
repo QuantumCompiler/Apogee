@@ -4,12 +4,12 @@
 |---|---|
 | **Type** | 🐞 Bug |
 | **Project** | CLI |
-| **Status** | 🔒 Blocked |
+| **Status** | 🟢 Ready |
 | **Fix version** | Maintenance (any time) |
 | **Component** | Training › the doors that name a new dataset: `datasets create`, `datasets synth`, `datasets prepare`'s derived name, and `POST /v1/admin/datasets` and `/synth` |
 | **Labels** | `datasets` `naming` `training` `http` |
 | **Epic** | — (maintenance has no track) |
-| **Blocked by** | [M55](a-dataset-is-named-not-pathed-at-every-reader.md) |
+| **Blocked by** | — |
 | **Blocks** | — |
 | **Reporter** | The APP-M21 and APP-M22 probes' CLI asides (2026-11-26), then a sandboxed investigation, two skeptics and a critic the same day |
 | **Created** | 2026-11-26 |
@@ -236,7 +236,7 @@ Hermetic: a temp `APOGEE_HOME`, the scripted mock teacher, and no Python environ
 | Refuse Windows device names on every platform? | `[default]` | Yes, as CLI-M46 does, so a home moves between platforms whole: `con`, `prn`, `aux`, `nul`, `com1`–`com9` and `lpt1`–`lpt9`, the part before the first `.` case-folded. Not measured on Windows. |
 | Does the rule bind `--force` over an existing dataset whose name it refuses? | `[default]` | Yes. `create --force` and `synth --force` over an existing `-h.jsonl`, `CON.jsonl` or `x.eval.jsonl` are refused with the same words, and the file is left as it was. `--force` replaces the file whole, unlike CLI-M46's ingest into an existing store, which adds to it. Overwriting `x.eval.jsonl` would replace a prepared suite with chat lines, and `x.jsonl.jsonl --force` would overwrite the dataset `x`. The way out is `datasets delete --yes -- <name>` and a plain name. No record names today's `--force` over such a file; CLI-M53 gives up the same replace for dash-named symphonies. |
 | Does the create rule live inside `DatasetStore::write`, as the investigation's settled fix put it? | `[default]` | No. It runs at the doors that name a new dataset in `training/datasets/`: `create_dataset` (both create doors), synth's first check on the CLI and over HTTP, and `prepare`'s derived name. `write` keeps today's character set and cap as its floor. Its other caller is a regime, which writes `<kit name>.jsonl` into its own work folder and runs its stages by path (Evidence 8). The first-character, `.eval` and `.jsonl` clauses guard a name that some verb reads, and nothing reads that file by name; only the device-name reason could apply there, and it is unmeasured. A refusal inside `write` would fail a regime after its teacher calls for a kit named `-x`. Found by reading while writing this spec; the investigation did not list that caller. |
-| Which read rule existing datasets go through, with its words, and synth's first check | `(consumed decision)` | [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md). This item's rule includes M55's read rule and replaces the rule in M55's first synth check with the create rule. |
+| Which read rule existing datasets go through, with its words, and synth's first check | `(consumed decision)` | [CLI-M55](../../../assistant/cli/MILESTONES.md#2026-11-27--a-dataset-is-named-not-pathed-at-every-reader-maintenance-item-m55-a-dataset-is-named-not-pathed-at-every-reader). This item's rule includes M55's read rule and replaces the rule in M55's first synth check with the create rule. |
 | How the printed `Train on it with: … --dataset <name>` lines carry a name | `(consumed decision)` | [CLI-M48](../../../assistant/cli/MILESTONES.md#2026-11-27--a-suggested-command-runs-as-printed-for-every-name-the-cli-makes-maintenance-item-m48-a-suggested-command-runs-as-printed-for-every-name-the-cli-makes) (shipped 2026-11-27), which renders every printed command. |
 
 ## Decision log
@@ -251,7 +251,7 @@ Hermetic: a temp `APOGEE_HOME`, the scripted mock teacher, and no Python environ
 
 ## Out of scope
 
-- **The read rule at every reader**, the path escape, HTTP GET and DELETE of listed names, `train run --dataset` and `train eval --suite` by name, and synth's order: [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md).
+- **The read rule at every reader**, the path escape, HTTP GET and DELETE of listed names, `train run --dataset` and `train eval --suite` by name, and synth's order: [CLI-M55](../../../assistant/cli/MILESTONES.md#2026-11-27--a-dataset-is-named-not-pathed-at-every-reader-maintenance-item-m55-a-dataset-is-named-not-pathed-at-every-reader).
 - **`prepare --out` paths**: an explicit output path, by design. A paired device reaching it through CLI-59d's door needs 59d's own rule for path arguments (an aside of the investigation); see [reads and commands over the network](../v0.2.3/reads-and-commands-over-the-network.md).
 - **The 128-byte cap**: unchanged.
 - **The TUI's row actions** passing a listed name without `--`, its dataset delete among them: [CLI-M51](../../../assistant/cli/MILESTONES.md#2026-11-27--the-tuis-row-actions-reach-a-dash-led-row-maintenance-item-m51-the-tuis-row-actions-reach-a-row-whose-name-starts-with-a-dash) (shipped 2026-11-27).
@@ -265,8 +265,9 @@ Hermetic: a temp `APOGEE_HOME`, the scripted mock teacher, and no Python environ
 
 ## Links
 
-- **Blocked by:** [CLI-M55](a-dataset-is-named-not-pathed-at-every-reader.md), whose read rule this item's create rule includes · **Blocks:** —
+- **Blocked by:** — · **Blocks:** —
 - **Relates to:**
+  - [CLI-M55](../../../assistant/cli/MILESTONES.md#2026-11-27--a-dataset-is-named-not-pathed-at-every-reader-maintenance-item-m55-a-dataset-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), whose read rule this item's create rule includes, and whose `dataset_write_error` this item's create rule replaces at synth's first check;
   - [CLI-M46](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-the-config-cannot-hold-is-refused-before-it-is-written-maintenance-item-m46-a-collection-the-config-cannot-hold-is-refused-before-it-is-written) (shipped 2026-11-27), the same create-rule shape for collections, sharing the device-name list;
   - [CLI-M45](../../../assistant/cli/MILESTONES.md#2026-11-27--a-collection-is-named-not-pathed-at-every-reader-maintenance-item-m45-a-collection-is-named-not-pathed-at-every-reader) (shipped 2026-11-27), the read and create split this item copies;
   - [CLI-M52](../../../assistant/cli/MILESTONES.md#2026-11-27--a-refused-scaffold-writes-nothing-maintenance-item-m52-a-refused-agent-or-mcp-scaffold-writes-nothing) (shipped 2026-11-27) and [CLI-M53](../../../assistant/cli/MILESTONES.md#2026-11-27--a-symphony-the-cli-writes-is-one-it-can-delete-maintenance-item-m53-a-symphony-the-cli-writes-is-one-it-can-delete) (shipped 2026-11-27), the same seam's refusals for agents, MCP servers and dash-named symphonies;

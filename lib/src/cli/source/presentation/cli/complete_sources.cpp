@@ -597,12 +597,22 @@ NameList list_names(std::string_view kind, const CompletionContext& context) {
     } else if (kind == kServerValue) {
         list.names = config.mcp_server_names();
         list.none = "no MCP servers configured -- 'apogee mcp create'";
-    } else if (kind == kDatasetValue) {
+    } else if (kind == kDatasetValue || kind == kDatasetNameValue) {
         for (const training::DatasetInfo& dataset :
              training::DatasetStore{harness::training_datasets_dir()}.list()) {
-            list.names.push_back(dataset.name);
+            // A listed file the read rule refuses (`back\slash`, a
+            // `...jsonl` listed as `..`) is one both verbs refuse (CLI-M55).
+            if (training::dataset_read_error(dataset.name).empty()) {
+                list.names.push_back(dataset.name);
+            }
         }
-        list.paths = true;
+        // `train run --dataset` also takes a `.jsonl` path; `datasets info`
+        // and `delete` take a name only, so no file names there -- and their
+        // positional reads a dash-led word as a flag until `--`.
+        list.paths = kind == kDatasetValue;
+        if (kind == kDatasetNameValue) {
+            drop_misread_names(list.names, context);
+        }
     } else if (kind == kKitValue) {
         list.names = kit_names();
         list.paths = true;

@@ -367,6 +367,70 @@ TEST_CASE("collections, datasets, kits, regimes, recipes and runs complete from 
     const c::NameList datasets = home.names(c::kDatasetValue);
     CHECK(has(datasets.names, "alpha"));
     CHECK(datasets.paths);
+    // `datasets info` and `delete` take a name, never a path (CLI-M55): the
+    // same names, and no file names when none matches.
+    const c::NameList names_only = home.names(c::kDatasetNameValue);
+    CHECK(has(names_only.names, "alpha"));
+    CHECK_FALSE(names_only.paths);
+    // A hand-placed file the read rule refuses (`...jsonl` lists as `..`; a
+    // `\` on every platform) is offered by neither kind, since both verbs
+    // refuse it; a spaced name the read rule takes is offered.
+    write_file(apogee::harness::training_datasets_dir() / "...jsonl", "{}\n");
+    write_file(apogee::harness::training_datasets_dir() / "my set.jsonl", "{}\n");
+#ifndef _WIN32
+    write_file(apogee::harness::training_datasets_dir() / "back\\slash.jsonl", "{}\n");
+#endif
+    for (const std::string_view kind : {c::kDatasetValue, c::kDatasetNameValue}) {
+        INFO(kind);
+        const std::vector<std::string> offered = home.names(kind).names;
+        CHECK(has(offered, "my set"));
+        CHECK_FALSE(has(offered, ".."));
+        CHECK_FALSE(has(offered, "back\\slash"));
+    }
+    {
+        // At Tab through the command tree: no dataset matches `zz`, so
+        // `datasets info` and `delete` say what they want, and `train run
+        // --dataset` falls back to the shell's file names.
+        const apogee::testing::EnvGuard protocol{c::kCompletionProtocolVar, "2"};
+        std::string said;
+        for (const std::string verb : {"info", "delete"}) {
+            INFO(verb);
+            REQUIRE(run_apogee({"__complete", "datasets", verb, "zz"}, &said) == 0);
+            CHECK(said.starts_with(":hint "));
+        }
+        REQUIRE(run_apogee({"__complete", "train", "run", "snap", "--dataset", "zz"}, &said) == 0);
+        CHECK(said == ":files\n");
+    }
+    {
+        // `datasets info` and `delete` read a dash-led word as a flag until
+        // `--` (CLI-M45's rule, `drop_misread_names`): a listed `-h` is
+        // offered after `--` only, and a name holding a line break, which a
+        // stub would split in two, never.
+        write_file(apogee::harness::training_datasets_dir() / "-h.jsonl", "{}\n");
+#ifndef _WIN32
+        write_file(apogee::harness::training_datasets_dir() / "a\nb.jsonl", "{}\n");
+#endif
+        const auto offered = [](std::vector<std::string> words) {
+            words.insert(words.begin(), "__complete");
+            std::string said;
+            REQUIRE(run_apogee(words, &said) == 0);
+            std::vector<std::string> lines;
+            std::istringstream in{said};
+            for (std::string line; std::getline(in, line);) {
+                lines.push_back(line);
+            }
+            return lines;
+        };
+        std::vector<std::string> lines = offered({"datasets", "delete", ""});
+        CHECK(has(lines, "my set"));
+        CHECK_FALSE(has(lines, "-h"));
+        CHECK_FALSE(has(lines, "a"));
+        CHECK_FALSE(has(lines, "b"));
+        lines = offered({"datasets", "delete", "--", ""});
+        CHECK(has(lines, "-h"));
+        CHECK_FALSE(has(lines, "a"));
+        CHECK_FALSE(has(lines, "b"));
+    }
 
     // The bundled kits, before seeding has put them anywhere.
     const std::vector<std::string> kits = home.names(c::kKitValue).names;

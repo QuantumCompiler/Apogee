@@ -57,12 +57,27 @@ std::string script_of(std::string_view text, bool metered = false) {
     return script.dump();
 }
 
-struct Fixture {
-    apogee::testing::TempDir home{"datasets-cli-" + std::to_string(std::random_device{}())};
-    apogee::testing::EnvGuard guard{"APOGEE_HOME", home.path().string()};
-    std::filesystem::path config_path = home.path() / "config" / "config.yaml";
+/// The home: the temp directory itself, or a folder below it (CLI-M55), so
+/// a name that climbs out of the datasets folder still lands inside the
+/// temp directory.
+struct Home {
+    std::filesystem::path at;
 
-    Fixture() {
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return at;
+    }
+};
+
+struct Fixture {
+    apogee::testing::TempDir tmp{"datasets-cli-" + std::to_string(std::random_device{}())};
+    Home home;
+    apogee::testing::EnvGuard guard;
+    std::filesystem::path config_path;
+
+    explicit Fixture(const std::filesystem::path& below = {})
+        : home{below.empty() ? tmp.path() : tmp.path() / below},
+          guard{"APOGEE_HOME", home.path().string()},
+          config_path{home.path() / "config" / "config.yaml"} {
         write(home.path() / "teacher.json", script_of(kBatch));
         write(home.path() / "metered.json", script_of(kBatch, true));
         write(home.path() / "prose.json", script_of("I only speak prose."));
@@ -308,6 +323,119 @@ TEST_CASE("datasets kits, list, info and delete", "[commands][datasets][listing]
     REQUIRE(fixture.run({"datasets", "delete", "one", "-y"}, &out, &err) == 0);
     CHECK_FALSE(std::filesystem::exists(fixture.dataset("one")));
     CHECK(fixture.run({"datasets", "delete", "one", "-y"}, &out, &err) == 1);
+}
+
+TEST_CASE("datasets info and delete take a name, never a path: nothing outside the folder is read",
+          "[commands][datasets][M55]") {
+    // CLI-M55's bug as a fixture: the home three levels down, so
+    // `../../../victim` is `<tmp>/l1/l2/l3/victim.jsonl` -- removed, with
+    // `removed.` and exit 0, before the read rule.
+    const Fixture fixture{std::filesystem::path{"l1"} / "l2" / "l3" / "home"};
+    const std::filesystem::path datasets = fixture.home.path() / "training" / "datasets";
+    const std::filesystem::path victim = fixture.tmp.path() / "l1" / "l2" / "l3" / "victim.jsonl";
+    const std::filesystem::path absolute = fixture.tmp.path() / "abs" / "victim.jsonl";
+    const std::filesystem::path inner = datasets / "sub" / "inner.jsonl";
+    const std::string line = chat_line("q", "a") + "\n";
+    for (const std::filesystem::path& file : {victim, absolute, inner}) {
+        write(file, line);
+    }
+    const auto refuses = [&fixture, &line](const std::vector<std::string>& names,
+                                           const std::vector<std::filesystem::path>& kept) {
+        for (const std::string& name : names) {
+            INFO(name);
+            const std::string said =
+                "apogee datasets: '" + name + "' is not a dataset name -- a name, never a path\n";
+            std::string out;
+            std::string err;
+            CHECK(fixture.run({"datasets", "info", "--", name}, &out, &err) == 1);
+            CHECK(err == said);
+            CHECK(out.empty());
+            CHECK(fixture.run({"datasets", "delete", "--yes", "--", name}, &out, &err) == 1);
+            CHECK(err == said);
+            CHECK(out.find("will remove:") == std::string::npos);
+            for (const std::filesystem::path& file : kept) {
+                INFO(file.string());
+                REQUIRE(std::filesystem::exists(file));
+                CHECK(bytes(file) == line);
+            }
+        }
+    };
+    const std::string absolute_name = (fixture.tmp.path() / "abs" / "victim").string();
+    refuses({"../../../victim", absolute_name, "sub/inner"}, {victim, absolute, inner});
+
+    // The same with no datasets folder at all.
+    std::filesystem::remove_all(datasets);
+    refuses({"../../../victim", absolute_name}, {victim, absolute});
+}
+
+TEST_CASE("every listed dataset reads and deletes by its listed name",
+          "[commands][datasets][M55]") {
+    // The read rule refuses only what can leave the folder, so the names the
+    // full-screen shell and the Mac app pass from `datasets list` all reach
+    // the verb -- a dash-led one after `--`.
+    const Fixture fixture;
+    std::vector<std::string> names{"my set", "café", ".hidden",
+                                   "a..b",   "-h",   std::string(130, 'n')};
+#ifndef _WIN32
+    names.emplace_back("a:b");
+#endif
+    for (const std::string& name : names) {
+        write(fixture.dataset(name), chat_line("q", "a") + "\n");
+    }
+    std::string out;
+    std::string err;
+    REQUIRE(fixture.run({"datasets", "list"}, &out, &err) == 0);
+    const std::string listed = out;
+    for (const std::string& name : names) {
+        INFO(name);
+        CHECK(listed.find(name) != std::string::npos);
+        CHECK(fixture.run({"datasets", "info", "--", name}, &out, &err) == 0);
+        CHECK(out.find("lines:  1") != std::string::npos);
+        CHECK(fixture.run({"datasets", "delete", "--yes", "--", name}, &out, &err) == 0);
+        CHECK(out.find("removed.") != std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(fixture.dataset(name)));
+    }
+#ifndef _WIN32
+    // A `\` is refused on every platform (the item's default), so a
+    // hand-placed POSIX `back\slash.jsonl` stops reading here and stays.
+    write(fixture.dataset("back\\slash"), "{}\n");
+    CHECK(fixture.run({"datasets", "info", "--", "back\\slash"}, &out, &err) == 1);
+    CHECK(err.find("is not a dataset name -- a name, never a path") != std::string::npos);
+    CHECK(fixture.run({"datasets", "delete", "--yes", "--", "back\\slash"}, &out, &err) == 1);
+    CHECK(std::filesystem::exists(fixture.dataset("back\\slash")));
+#endif
+    // Guards: create's names and the preview without --yes are today's.
+    REQUIRE(fixture.run({"datasets", "create", "--from", "empty", "ok"}, &out, &err) == 0);
+    REQUIRE(fixture.run({"datasets", "delete", "ok"}, &out, &err) == 0);
+    CHECK(std::filesystem::exists(fixture.dataset("ok")));
+}
+
+TEST_CASE("datasets synth asks the write rule before the existence check, the kit and the teacher",
+          "[commands][datasets][synth][M55]") {
+    // `prose` yields nothing usable, so a teacher that ran ends `no usable
+    // examples`; refused first, the teacher is never called.
+    const Fixture fixture;
+    std::string out;
+    std::string err;
+    CHECK(fixture.run({"datasets", "synth", "--teacher", "prose", "--kit", "reasoning", "--count",
+                       "1", "--", "my set"},
+                      &out, &err) == 1);
+    CHECK(err ==
+          "apogee datasets: 'my set' is not a dataset name: letters, digits, '-', '_' and '.', "
+          "not starting with a dot\n");
+    CHECK(err.find("[synth] teacher") == std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(fixture.dataset("my set")));
+
+    // An existing file reached by a climb (the home's own `outside.jsonl`)
+    // is never "already exists": the name is refused before the store is
+    // asked.
+    write(fixture.home.path() / "outside.jsonl", "{}\n");
+    CHECK(fixture.run(
+              {"datasets", "synth", "--teacher", "prose", "--kit", "nokit", "--", "../../outside"},
+              &out, &err) == 1);
+    CHECK(err.find("is not a dataset name:") != std::string::npos);
+    CHECK(err.find("already exists") == std::string::npos);
+    CHECK(err.find("no kit named") == std::string::npos);
 }
 
 TEST_CASE("datasets prepare refuses on a pipe until the environment exists, naming the command",

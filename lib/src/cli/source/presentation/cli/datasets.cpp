@@ -29,6 +29,7 @@
 #include "models/source_hf.h"
 #include "operations/dataset_core.h"
 #include "platform/platform.h"
+#include "training/datasets.h"
 #include "training/python_env.h"
 #include "training/script_runner.h"
 #include "transport/http_client.h"
@@ -458,6 +459,12 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     synth->add_flag("-f,--force", *synth_force, "Overwrite an existing dataset");
     synth->callback([&context, synth_name, synth_teacher, synth_kit, synth_count, synth_topic,
                      synth_temperature, synth_max_tokens, synth_parallel, synth_force]() {
+        // The write rule first (CLI-M55): a name the writer will refuse is
+        // refused before the store, the kit or the teacher is asked.
+        if (const std::string refused = training::dataset_write_error(*synth_name);
+            !refused.empty()) {
+            fail_user(refused);
+        }
         std::filesystem::path config_path;
         const harness::Config config = load_config_strict(context, config_path);
         const training::DatasetStore store{harness::training_datasets_dir()};
@@ -586,9 +593,14 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto info_name = std::make_shared<std::string>();
     auto info_format = std::make_shared<ReadFormat>(ReadFormat::Text);
     CLI::App* info = cmd->add_subcommand("info", "Show one dataset");
-    info->add_option("name", *info_name, "Dataset name")->type_name(kDatasetValue)->required();
+    info->add_option("name", *info_name, "Dataset name")->type_name(kDatasetNameValue)->required();
     add_read_format(info, info_format);
     info->callback([info_name, info_format]() {
+        // A name, never a path (CLI-M55), said before any file is looked at.
+        if (const std::string refused = training::dataset_read_error(*info_name);
+            !refused.empty()) {
+            fail_user(refused);
+        }
         const training::DatasetStore store{harness::training_datasets_dir()};
         const std::optional<training::DatasetInfo> found = store.info(*info_name);
         if (!found.has_value()) {
@@ -605,9 +617,12 @@ void DatasetsCommand::bind(CLI::App& root, const RootContext& context) {
     auto del_name = std::make_shared<std::string>();
     auto del_yes = std::make_shared<bool>(false);
     CLI::App* remove = cmd->add_subcommand("delete", "Remove a dataset");
-    remove->add_option("name", *del_name, "Dataset name")->type_name(kDatasetValue)->required();
+    remove->add_option("name", *del_name, "Dataset name")->type_name(kDatasetNameValue)->required();
     remove->add_flag("-y,--yes", *del_yes, "Do not ask for confirmation");
     remove->callback([del_name, del_yes]() {
+        if (const std::string refused = training::dataset_read_error(*del_name); !refused.empty()) {
+            fail_user(refused);
+        }
         const training::DatasetStore store{harness::training_datasets_dir()};
         if (!store.exists(*del_name)) {
             fail_user("no dataset named '" + *del_name + "' in " + store.dir().string());

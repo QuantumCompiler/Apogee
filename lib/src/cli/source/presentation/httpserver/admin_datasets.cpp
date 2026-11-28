@@ -23,6 +23,8 @@ constexpr std::string_view kSynthJobKind = "datasets-synth";
 constexpr std::string_view kConfigError = "config_error";
 constexpr int kNotImplemented = 501;
 
+/// The write rule, for the routes that name a new dataset (POST create and
+/// synth). GET and DELETE read, so they take the read rule (CLI-M55).
 [[nodiscard]] bool plain_name(std::string_view name) {
     return training::valid_dataset_name(name);
 }
@@ -165,8 +167,8 @@ HttpResponse admin_create_dataset(const AdminConfigContext& /*context*/,
 }
 
 HttpResponse admin_get_dataset(const AdminConfigContext& /*context*/, std::string_view name) {
-    if (!plain_name(name)) {
-        return error_response(400, "'" + std::string{name} + "' is not a dataset name");
+    if (const std::string refused = training::dataset_read_error(name); !refused.empty()) {
+        return error_response(400, refused);
     }
     const std::optional<training::DatasetInfo> info = store().info(name);
     if (!info.has_value()) {
@@ -176,8 +178,8 @@ HttpResponse admin_get_dataset(const AdminConfigContext& /*context*/, std::strin
 }
 
 HttpResponse admin_delete_dataset(const AdminConfigContext& /*context*/, std::string_view name) {
-    if (!plain_name(name)) {
-        return error_response(400, "'" + std::string{name} + "' is not a dataset name");
+    if (const std::string refused = training::dataset_read_error(name); !refused.empty()) {
+        return error_response(400, refused);
     }
     const training::DatasetStore datasets = store();
     if (!datasets.exists(name)) {

@@ -2923,11 +2923,11 @@ void check_training(CheckReport& report, const CheckInputs& inputs) {
             problems.push_back("student '" + spec.student + "': " + student.error);
         }
         for (const harness::PipelineStageSpec& stage : spec.stages) {
-            const std::filesystem::path given{stage.dataset};
-            const bool found = std::filesystem::is_regular_file(given, code) ||
-                               std::filesystem::is_regular_file(
-                                   training / "datasets" / (stage.dataset + ".jsonl"), code);
-            if (!found) {
+            // The lookup a run makes (CLI-M55): a path, else a name by the
+            // read rule, so a stage that climbs out of the folder is never
+            // found there.
+            std::string unresolved;
+            if (resolve_dataset(training / "datasets", stage.dataset, unresolved).empty()) {
                 problems.push_back("stage '" + stage.name + "' names dataset '" + stage.dataset +
                                    "', which is neither a file nor under training/datasets/");
             }

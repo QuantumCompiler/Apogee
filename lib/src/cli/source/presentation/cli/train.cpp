@@ -1915,7 +1915,8 @@ std::filesystem::path resolve_dataset(const std::filesystem::path& datasets_dir,
     if (std::filesystem::is_regular_file(given, code)) {
         return std::filesystem::absolute(given, code);
     }
-    if (training::valid_dataset_name(name_or_path)) {
+    // A name by the read rule (CLI-M55), so every listed dataset resolves.
+    if (training::dataset_read_error(name_or_path).empty()) {
         const training::DatasetStore store{datasets_dir};
         if (store.exists(name_or_path)) {
             return store.path_for(name_or_path);
@@ -1968,7 +1969,7 @@ SuiteResolution resolve_suite(const std::filesystem::path& training_dir,
         return resolution;
     }
     const std::string name{name_or_path};
-    if (training::valid_dataset_name(name)) {
+    if (training::dataset_read_error(name).empty()) {
         for (const std::filesystem::path& candidate :
              {training_dir / "suites" / (name + ".jsonl"),
               training_dir / "datasets" / (name + ".eval.jsonl")}) {

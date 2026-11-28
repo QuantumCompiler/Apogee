@@ -37,6 +37,23 @@ struct DatasetInfo {
 /// Letters, digits, `-`, `_` and `.`, not starting with a dot, at most 128.
 [[nodiscard]] bool valid_dataset_name(std::string_view name) noexcept;
 
+/// **A dataset is named, not pathed** (CLI-M55): why `name` cannot name a
+/// dataset to read, or empty when it can. One trailing `.jsonl` is dropped,
+/// as `write` drops it, and what is left is asked the escape check every
+/// collection reader asks (`harness::name_leaves_folder`, CLI-M45): the
+/// empty name, `..`, a `/` or a `\` on every platform, a NUL, a root name.
+/// Never a character set or a length, so every dataset `list` shows keeps
+/// reading (`my set`, `café`, `.hidden`, `-h`, a 130-byte name). Every
+/// reader asks it -- the store's `exists`, `info` and `remove`, `datasets
+/// info` and `delete`, the HTTP GET and DELETE, and train's name branches --
+/// so no reader joins a refused name to the folder.
+[[nodiscard]] std::string dataset_read_error(std::string_view name);
+
+/// Why `name` cannot name a dataset to write, or empty when it can: the
+/// check `write` runs (`valid_dataset_name` after one `.jsonl` is dropped),
+/// in its words, which synth asks before anything else (CLI-M55).
+[[nodiscard]] std::string dataset_write_error(std::string_view name);
+
 /// The shape of a JSONL file's lines, and their count.
 [[nodiscard]] std::string dataset_shape(const std::filesystem::path& path, int& lines);
 
@@ -48,14 +65,18 @@ public:
         return dir_;
     }
 
-    /// `<dir>/<name>.jsonl`; a name already ending in `.jsonl` is kept.
+    /// `<dir>/<name>.jsonl`; a name already ending in `.jsonl` is kept. The
+    /// join itself checks nothing: a caller asks `dataset_read_error` (or
+    /// `exists`, which asks it) first (CLI-M55).
     [[nodiscard]] std::filesystem::path path_for(std::string_view name) const;
 
+    /// False for a name the read rule refuses, before any file is looked at.
     [[nodiscard]] bool exists(std::string_view name) const;
 
     /// Every dataset, sorted by name. A missing directory lists as empty.
     [[nodiscard]] std::vector<DatasetInfo> list() const;
 
+    /// Nothing for a name the read rule refuses, as for an absent one.
     [[nodiscard]] std::optional<DatasetInfo> info(std::string_view name) const;
 
     /// Writes `lines` -- each one JSON object, a newline appended -- through a
@@ -64,7 +85,8 @@ public:
     [[nodiscard]] std::string write(std::string_view name, const std::vector<std::string>& lines,
                                     bool force, std::filesystem::path* out = nullptr) const;
 
-    /// Removes the dataset. The error text, or empty.
+    /// Removes the dataset. The error text -- the read rule's words for a
+    /// name it refuses -- or empty.
     [[nodiscard]] std::string remove(std::string_view name) const;
 
 private:

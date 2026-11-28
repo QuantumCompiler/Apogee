@@ -521,6 +521,35 @@ TEST_CASE(
     CHECK(apogee::commands::render_iteration(event).starts_with("iter 12 · "));
 }
 
+TEST_CASE("train reads a dataset and a suite by any listed name, and a path as a path",
+          "[commands][train][resolve][M55]") {
+    // CLI-M55: the name branches take the read rule, not the create rule,
+    // so a listed `my set` resolves; the path branch stays first.
+    const RunFixture fixture;
+    const std::filesystem::path datasets = fixture.training / "datasets";
+    write_file(datasets / "my set.jsonl", "{\"prompt\": \"p\", \"completion\": \"c\"}\n");
+    write_file(datasets / "my set.eval.jsonl", "{\"prompt\": \"q\", \"expected\": \"e\"}\n");
+    std::string error;
+    CHECK(apogee::commands::resolve_dataset(datasets, "my set", error) ==
+          datasets / "my set.jsonl");
+    CHECK(error.empty());
+    const apogee::commands::SuiteResolution suite =
+        apogee::commands::resolve_suite(fixture.training, "my set");
+    CHECK(suite.error.empty());
+    CHECK(suite.items.size() == 1);
+    CHECK(suite.label == (datasets / "my set.eval.jsonl").string());
+
+    // A climb out of the folder is never a name, even with a file there.
+    write_file(fixture.training / "escape.jsonl", "{}\n");
+    CHECK(apogee::commands::resolve_dataset(datasets, "../escape", error).empty());
+    CHECK(error.find("no dataset named '../escape'") != std::string::npos);
+    CHECK(apogee::commands::resolve_suite(fixture.training, "../escape")
+              .error.find("no eval suite") != std::string::npos);
+    // A `.jsonl` path keeps resolving as a path (guard).
+    CHECK(apogee::commands::resolve_dataset(datasets, (datasets / "my set.jsonl").string(),
+                                            error) == datasets / "my set.jsonl");
+}
+
 TEST_CASE(
     "train eval gates at 100%, judges pairwise through a named backend, skips loudly "
     "without one, refuses a vendor CLI, records, and re-runs only with --force",

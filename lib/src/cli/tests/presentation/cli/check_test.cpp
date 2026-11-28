@@ -1738,6 +1738,28 @@ TEST_CASE(
     CHECK(row_with(report, "cycle") == nullptr);
     CHECK(report.passed());
 
+    // CLI-M55: the row asks the run's own lookup (`resolve_dataset`), so a
+    // stage that climbs out of the folder is never found there, even with a
+    // file at the end of the climb, and one written with its `.jsonl` is.
+    install.write("outside.jsonl", "{}\n");
+    install.write(
+        "config/config.yaml",
+        "backends:\n  local:\n    type: mock\n"
+        "training:\n  pipelines:\n"
+        "    climb:\n      student: tiny\n      stages:\n"
+        "        - name: a\n          dataset: ../../outside\n          eval_suite: reasoning\n"
+        "    written:\n      student: tiny\n      stages:\n"
+        "        - name: a\n          dataset: present.jsonl\n          eval_suite: reasoning\n");
+    load_into(inputs);
+    report = run_checks(inputs);
+    const apogee::commands::CheckRow* climb = row_with(report, "pipeline: climb");
+    REQUIRE(climb != nullptr);
+    CHECK(climb->status == Status::Warn);
+    CHECK(climb->detail.find("dataset '../../outside'") != std::string::npos);
+    const apogee::commands::CheckRow* written = row_with(report, "pipeline: written");
+    REQUIRE(written != nullptr);
+    CHECK(written->status == Status::Ok);
+
     // The cycle: incomplete, an unknown pipeline, a non-llamacpp backend, ok.
     auto cycle = [&](const std::string& block) {
         install.write("config/config.yaml",

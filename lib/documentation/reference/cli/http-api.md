@@ -1362,12 +1362,18 @@ parse or validate carries `error` rather than being hidden.
 
 ### `GET /v1/admin/datasets/{id}`
 
-One dataset: `200 {name, path, lines, bytes, shape}`; `404` when absent.
+One dataset, any listed name the read rule takes: `200 {name, path,
+lines, bytes, shape}`, byte for byte what `apogee datasets info <name>
+--output-format json` prints; `404` when absent; `400` for a name that
+could leave the folder (CLI-M55: empty, `..`, a `/` or a `\`, a NUL, a
+Windows root name), its message the CLI's words, `'<name>' is not a dataset
+name -- a name, never a path`.
 
 ### `DELETE /v1/admin/datasets/{id}`
 
-The twin of `apogee datasets delete`: removes the file. `200 {"deleted":
-name}`; `404` when absent.
+The twin of `apogee datasets delete`: removes the file, for any listed
+name the read rule takes. `200 {"deleted": name}`; `404` when absent;
+`400` for a name that could leave the folder, as `GET`.
 
 The literal `synth` and `kits` paths are matched before the `{id}` rows, so
 neither is ever read as a dataset name. `datasets prepare` (a server-side

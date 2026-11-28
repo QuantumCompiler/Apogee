@@ -9,6 +9,8 @@
 #include <random>
 #include <system_error>
 
+#include "contracts/collection_name.h"
+
 namespace apogee::training {
 namespace {
 
@@ -37,6 +39,15 @@ bool valid_date(std::string_view date) {
     return true;
 }
 
+/// `name` without one trailing `.jsonl`, as the writer and the readers take it.
+std::string_view without_extension(std::string_view name) {
+    constexpr std::string_view kExtension = ".jsonl";
+    if (name.ends_with(kExtension)) {
+        name.remove_suffix(kExtension.size());
+    }
+    return name;
+}
+
 }  // namespace
 
 bool valid_dataset_name(std::string_view name) noexcept {
@@ -46,6 +57,22 @@ bool valid_dataset_name(std::string_view name) noexcept {
     return std::ranges::all_of(name, [](unsigned char c) {
         return std::isalnum(c) != 0 || c == '-' || c == '_' || c == '.';
     });
+}
+
+std::string dataset_read_error(std::string_view name) {
+    if (harness::name_leaves_folder(without_extension(name))) {
+        return "'" + std::string{name} + "' is not a dataset name -- a name, never a path";
+    }
+    return {};
+}
+
+std::string dataset_write_error(std::string_view name) {
+    if (!valid_dataset_name(without_extension(name))) {
+        return "'" + std::string{name} +
+               "' is not a dataset name: letters, digits, '-', '_' and '.', not starting with a "
+               "dot";
+    }
+    return {};
 }
 
 std::string dataset_shape(const std::filesystem::path& path, int& lines) {
@@ -104,6 +131,9 @@ std::filesystem::path DatasetStore::path_for(std::string_view name) const {
 }
 
 bool DatasetStore::exists(std::string_view name) const {
+    if (!dataset_read_error(name).empty()) {
+        return false;
+    }
     std::error_code code;
     return std::filesystem::is_regular_file(path_for(name), code);
 }
@@ -150,16 +180,10 @@ std::optional<DatasetInfo> DatasetStore::info(std::string_view name) const {
 
 std::string DatasetStore::write(std::string_view name, const std::vector<std::string>& lines,
                                 bool force, std::filesystem::path* out) const {
-    std::string plain{name};
-    if (plain.ends_with(".jsonl")) {
-        plain.erase(plain.size() - 6);
+    if (std::string refused = dataset_write_error(name); !refused.empty()) {
+        return refused;
     }
-    if (!valid_dataset_name(plain)) {
-        return "'" + std::string{name} +
-               "' is not a dataset name: letters, digits, '-', '_' and '.', not starting with a "
-               "dot";
-    }
-    const std::filesystem::path path = path_for(plain);
+    const std::filesystem::path path = path_for(without_extension(name));
     std::error_code code;
     if (!force && std::filesystem::exists(path, code)) {
         return "dataset already exists: " + path.string() + " (pass --force to overwrite it)";
@@ -193,6 +217,9 @@ std::string DatasetStore::write(std::string_view name, const std::vector<std::st
 }
 
 std::string DatasetStore::remove(std::string_view name) const {
+    if (std::string refused = dataset_read_error(name); !refused.empty()) {
+        return refused;
+    }
     const std::filesystem::path path = path_for(name);
     std::error_code code;
     if (!std::filesystem::is_regular_file(path, code)) {
