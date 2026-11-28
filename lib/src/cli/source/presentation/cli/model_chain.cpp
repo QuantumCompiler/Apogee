@@ -9,14 +9,16 @@
 #include "cli/helpers.h"
 #include "cli/interrupt.h"
 #include "cli/job_stream.h"
+#include "cli/notes.h"
 
 namespace apogee::commands {
 
 namespace {
 
-/// A note as the summary says it, with one prefix (55d): a note the stage
-/// worded as its standalone verb does -- `note: `, `warning: ` -- as it is,
-/// any other given `note: `. Never two, never none.
+/// A note's words as the summary says them, with one prefix (55d): a note
+/// the stage worded as its standalone verb does -- `note: `, `warning: ` --
+/// as it is, any other given `note: `. Never two, never none; the writer puts
+/// `apogee models: ` before it (CLI-M60).
 [[nodiscard]] std::string said_as_note(const std::string& note) {
     if (note.starts_with("note: ") || note.starts_with("warning: ")) {
         return note;
@@ -92,8 +94,12 @@ ChainLog run_chain(const std::vector<ChainStage>& stages, ChainLog log, std::ost
             out << "  " << line << "\n";
         }
     }
+    // Where the summary said them, after what is ready and before the next
+    // step: each on stderr in the house voice, or a notice on an open job
+    // stream (CLI-M60). The result -- `ready:`, `next` -- stays on `out`.
+    out.flush();
     for (const std::string& note : log.notes) {
-        out << said_as_note(note) << "\n";
+        say_note("models", said_as_note(note));
     }
     if (!log.next.empty()) {
         out << "\n" << log.next << "\n";

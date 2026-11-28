@@ -67,11 +67,10 @@ function(as_written out text)
 endfunction()
 
 # Whole files: every line the rule flags in them is allowed. Two strings an
-# entry: the file and the reason.
-set(allowed_files
-    "presentation/cli/models_pull.cpp"
-    "the models family's notes, which CLI-M60 moves onto the writer"
-)
+# entry: the file and the reason. None since CLI-M60, which moved the models
+# family's notes -- `models_pull.cpp`, listed whole until then -- onto the
+# writer.
+set(allowed_files "")
 # Lines: three strings an entry -- the file, a piece of the line, the reason.
 set(allowed_lines
     "presentation/cli/knowledge.cpp" "\"Warning: a real capture would fail -- \""
@@ -91,16 +90,19 @@ set(problems "")
 set(allowed_file_names "")
 set(file_entry 0)
 math(EXPR files_last "${files_length} - 1")
-foreach(at RANGE 0 ${files_last} 2)
-    list(GET allowed_files ${at} entry_file)
-    list(APPEND allowed_file_names "${entry_file}")
-    if(NOT EXISTS "${SOURCE_DIR}/${entry_file}")
-        list(APPEND problems "the allow-list names ${entry_file}, which is not under ${SOURCE_DIR} "
-                             "-- a file that moved must move here too")
-    endif()
-    set(file_matched_${file_entry} FALSE)
-    math(EXPR file_entry "${file_entry} + 1")
-endforeach()
+# An empty list has no range to walk (`foreach(RANGE 0 -1)` is an error).
+if(files_length GREATER 0)
+    foreach(at RANGE 0 ${files_last} 2)
+        list(GET allowed_files ${at} entry_file)
+        list(APPEND allowed_file_names "${entry_file}")
+        if(NOT EXISTS "${SOURCE_DIR}/${entry_file}")
+            list(APPEND problems "the allow-list names ${entry_file}, which is not under "
+                                 "${SOURCE_DIR} -- a file that moved must move here too")
+        endif()
+        set(file_matched_${file_entry} FALSE)
+        math(EXPR file_entry "${file_entry} + 1")
+    endforeach()
+endif()
 set(line_entry 0)
 math(EXPR lines_last "${lines_length} - 1")
 foreach(at RANGE 0 ${lines_last} 3)
@@ -184,14 +186,16 @@ if(statements EQUAL 0)
                          "nothing, so it would pass on anything")
 endif()
 set(file_entry 0)
-foreach(at RANGE 0 ${files_last} 2)
-    list(GET allowed_files ${at} entry_file)
-    if(EXISTS "${SOURCE_DIR}/${entry_file}" AND NOT file_matched_${file_entry})
-        list(APPEND problems "the allow-list exempts ${entry_file}, where the rule flags no line "
-                             "-- remove the entry")
-    endif()
-    math(EXPR file_entry "${file_entry} + 1")
-endforeach()
+if(files_length GREATER 0)
+    foreach(at RANGE 0 ${files_last} 2)
+        list(GET allowed_files ${at} entry_file)
+        if(EXISTS "${SOURCE_DIR}/${entry_file}" AND NOT file_matched_${file_entry})
+            list(APPEND problems "the allow-list exempts ${entry_file}, where the rule flags no "
+                                 "line -- remove the entry")
+        endif()
+        math(EXPR file_entry "${file_entry} + 1")
+    endforeach()
+endif()
 set(line_entry 0)
 foreach(at RANGE 0 ${lines_last} 3)
     list(GET allowed_lines ${at} entry_file)

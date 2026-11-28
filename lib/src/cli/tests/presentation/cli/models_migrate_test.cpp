@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
-#include <sstream>
+#include <streambuf>
 #include <string>
 #include <vector>
 
@@ -31,6 +31,40 @@
 /// projector, a promotion ledger, a run's base model, a collection's recorded
 /// embedding model -- pointed at the new places.
 namespace {
+
+/// One stream's bytes kept on their own and, in the order written, beside
+/// the other's: stdout and stderr apart, and the merged pipe a terminal shows
+/// -- where a note said on stderr sits among the result lines (CLI-M60).
+class Teed final : public std::streambuf {
+public:
+    Teed(std::string& own, std::string& merged) : own_{own}, merged_{merged} {}
+
+protected:
+    int_type overflow(int_type c) override {
+        if (!traits_type::eq_int_type(c, traits_type::eof())) {
+            own_ += traits_type::to_char_type(c);
+            merged_ += traits_type::to_char_type(c);
+        }
+        return traits_type::not_eof(c);
+    }
+
+    std::streamsize xsputn(const char* text, std::streamsize count) override {
+        own_.append(text, static_cast<std::size_t>(count));
+        merged_.append(text, static_cast<std::size_t>(count));
+        return count;
+    }
+
+private:
+    std::string& own_;
+    std::string& merged_;
+};
+
+/// What a run said: stdout, stderr, and both as one pipe shows them.
+struct Said {
+    std::string out{};
+    std::string err{};
+    std::string merged{};
+};
 
 void write_file(const std::filesystem::path& path, const std::string& bytes) {
     std::filesystem::create_directories(path.parent_path());
@@ -104,11 +138,21 @@ struct Home {
         store.set_embedding_model(flat_gguf.string(), 4);
     }
 
+    /// stdout into `out`; stderr dropped.
     int run(const std::vector<std::string>& args, std::string* out) const {
-        std::ostringstream captured;
-        std::ostringstream ignored;
-        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
-        std::streambuf* old_err = std::cerr.rdbuf(ignored.rdbuf());
+        Said said;
+        const int code = run(args, &said);
+        *out = said.out;
+        return code;
+    }
+
+    /// stdout and stderr apart, and merged in the order written (CLI-M60).
+    int run(const std::vector<std::string>& args, Said* said) const {
+        *said = {};
+        Teed captured{said->out, said->merged};
+        Teed errors{said->err, said->merged};
+        std::streambuf* old_out = std::cout.rdbuf(&captured);
+        std::streambuf* old_err = std::cerr.rdbuf(&errors);
         int code = -1;
         try {
             apogee::commands::RootCommand command{apogee::commands::default_registry()};
@@ -126,7 +170,6 @@ struct Home {
         }
         std::cout.rdbuf(old_out);
         std::cerr.rdbuf(old_err);
-        *out = captured.str();
         return code;
     }
 };
@@ -307,4 +350,46 @@ TEST_CASE("migrate moves a flat MLX model into mlx/ and repoints the backend nam
     CHECK(apogee::models::list_store_snapshots(roots, "mlx-community--M-4bit").empty());
     const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
     CHECK(config.backends.at("fast").model_path == stored.front().dir.string());
+}
+
+TEST_CASE("migrate --yes says a collection it cannot open on stderr, between its result lines",
+          "[commands][models][migrate][M60]") {
+    // CLI-M60, the reproduction (`c-m2`): the note was on stdout between
+    // `updated` and `migrated.`, with stderr empty.
+    const Home home;
+    const std::filesystem::path bad = home.home / "embeddings" / "bad.db";
+    write_file(bad, "these bytes are not a SQLite database at all, only junk\n");
+    Said said;
+    REQUIRE(home.run({"models", "migrate", "--yes"}, &said) == 0);
+    INFO(said.merged);
+    CHECK(said.out.find("moved    ") != std::string::npos);
+    CHECK(said.out.find("updated  " + home.config_path.string() + "\n") != std::string::npos);
+    CHECK(said.out.ends_with("\nmigrated.\n"));
+    CHECK(said.out.find("could not open") == std::string::npos);
+    const std::string note = "apogee models: note: could not open " + bad.string() +
+                             ": database error: file is not a database\n";
+    CHECK(said.err == note);
+    // On one pipe the note keeps its place: after the config's line, before
+    // the outcome.
+    const std::size_t at = said.merged.find(note);
+    REQUIRE(at != std::string::npos);
+    CHECK(said.merged.find("updated  " + home.config_path.string()) < at);
+    CHECK(at < said.merged.find("\nmigrated.\n"));
+}
+
+TEST_CASE("migrate without --yes opens no collection, so a bad one changes nothing it says",
+          "[commands][models][migrate][M60]") {
+    // CLI-M60's guard (`c-m1`): the plan says no note, on either stream.
+    const Home home;
+    const std::filesystem::path bad = home.home / "embeddings" / "bad.db";
+    write_file(bad, "these bytes are not a SQLite database at all, only junk\n");
+    Said with_bad;
+    REQUIRE(home.run({"models", "migrate"}, &with_bad) == 0);
+    CHECK(with_bad.err.empty());
+    CHECK(with_bad.out.find("could not open") == std::string::npos);
+    CHECK(with_bad.out.find("re-run with --yes") != std::string::npos);
+    std::filesystem::remove(bad);
+    Said without;
+    REQUIRE(home.run({"models", "migrate"}, &without) == 0);
+    CHECK(with_bad.out == without.out);
 }

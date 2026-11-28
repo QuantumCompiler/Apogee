@@ -31,10 +31,12 @@ struct ChainLog {
     /// What to type next, when there is one thing.
     std::string next;
     /// What a stage would warn about on its own -- a base model, a projector
-    /// that could not be made -- said once, in the summary, however many
-    /// stages noticed it. Each as its standalone verb says it, its `note: `
-    /// or `warning: ` included; one given without either is said with
-    /// `note: ` -- one prefix, never two (55d).
+    /// that could not be made -- said once, where the summary says it,
+    /// however many stages noticed it: on stderr in the house voice
+    /// (`apogee models: note: …`, CLI-M60), or a notice on an open job
+    /// stream. Each as its standalone verb says it, its `note: ` or
+    /// `warning: ` included; one given without either is said with `note: `
+    /// -- one prefix after the house voice's, never two (55d).
     std::vector<std::string> notes;
 
     /// Adds `note` unless it is already there.
@@ -48,10 +50,12 @@ struct ChainStage {
 };
 
 /// Runs `stages` in order, narrating on `out`, starting from `log`. Returns
-/// the log once every stage has run, its summary printed. When a stage
-/// throws, says where the chain stopped and how to resume -- unless the stage
-/// emptied `resume`, having found nothing after it could run (55d) -- and
-/// rethrows.
+/// the log once every stage has run, its summary printed: `ready:` and its
+/// lines, then the notes -- through `say_note`, on stderr or the open job
+/// stream, never on `out` (CLI-M60) -- then `next`. When a stage throws, says
+/// where the chain stopped and how to resume -- unless the stage emptied
+/// `resume`, having found nothing after it could run (55d) -- and rethrows;
+/// the notes are not said then.
 ///
 /// Every stage, and every gap between two, runs under one `InterruptScope`
 /// (57i) that each stage's own joins: a stage stops on its token, and a stop

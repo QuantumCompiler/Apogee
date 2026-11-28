@@ -1052,10 +1052,16 @@ note never changes the exit code, and a refusal is the last stderr line of a
 run that fails. *Since CLI-M58 (2026-11-27)* this holds for `graph build`,
 `graph update`, `graph communities`, `embed ingest`, `knowledge capture`,
 `knowledge reindex` and `agents delete` too, whose notes were stdout lines
-before (`[graph] …`, `warning: …`, `Note: …`, `(could not remove …)`); the
-models verbs follow with CLI-M60. A host keeps the outcome line and shows the
-`apogee <verb>: ` lines as the run's notes. The verb is the producer's --
-`embed ingest --graph`'s build says `apogee graph: …`.
+before (`[graph] …`, `warning: …`, `Note: …`, `(could not remove …)`). *Since
+CLI-M60 (2026-11-28)* it holds for the models verbs too -- `models pull`,
+`convert`, `quantize`, `migrate` and the register chain -- whose notes and
+warnings were stdout lines and are now `apogee models: note: …` and
+`apogee models: warning: …`, a two-line one joined into one line with ` -- `.
+On a job's stream (`models pull --output-format stream-json`) each such note
+is one `notice` of its words instead, and stderr carries none of it. A host
+keeps the outcome line and shows the `apogee <verb>: ` lines as the run's
+notes. The verb is the producer's -- `embed ingest --graph`'s build says
+`apogee graph: …`.
 
 A read a host renders takes `--output-format json` and prints **one JSON
 document** of the same facts as the human view — never a stream, and stdout

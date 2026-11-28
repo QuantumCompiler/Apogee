@@ -9,6 +9,7 @@
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +39,67 @@
 /// POSIX only: the stand-in interpreter is a `#!/bin/sh` script.
 #if !defined(_WIN32)
 namespace {
+
+/// One stream's bytes kept on their own and, in the order written, beside
+/// the other's: stdout and stderr apart, and the merged pipe a terminal shows
+/// -- where a note said on stderr sits among the result lines (CLI-M60).
+class Teed final : public std::streambuf {
+public:
+    Teed(std::string& own, std::string& merged) : own_{own}, merged_{merged} {}
+
+protected:
+    int_type overflow(int_type c) override {
+        if (!traits_type::eq_int_type(c, traits_type::eof())) {
+            own_ += traits_type::to_char_type(c);
+            merged_ += traits_type::to_char_type(c);
+        }
+        return traits_type::not_eof(c);
+    }
+
+    std::streamsize xsputn(const char* text, std::streamsize count) override {
+        own_.append(text, static_cast<std::size_t>(count));
+        merged_.append(text, static_cast<std::size_t>(count));
+        return count;
+    }
+
+private:
+    std::string& own_;
+    std::string& merged_;
+};
+
+/// What a run said: stdout, stderr, and both as one pipe shows them.
+struct Said {
+    std::string out{};
+    std::string err{};
+    std::string merged{};
+};
+
+/// stdout and stderr captured into `said` for one block, restored however
+/// it ends.
+class SaidCapture {
+public:
+    explicit SaidCapture(Said& said)
+        : out_{said.out, said.merged},
+          err_{said.err, said.merged},
+          old_out_{std::cout.rdbuf(&out_)},
+          old_err_{std::cerr.rdbuf(&err_)} {}
+
+    SaidCapture(const SaidCapture&) = delete;
+    SaidCapture& operator=(const SaidCapture&) = delete;
+    SaidCapture(SaidCapture&&) = delete;
+    SaidCapture& operator=(SaidCapture&&) = delete;
+
+    ~SaidCapture() {
+        std::cout.rdbuf(old_out_);
+        std::cerr.rdbuf(old_err_);
+    }
+
+private:
+    Teed out_;
+    Teed err_;
+    std::streambuf* old_out_;
+    std::streambuf* old_err_;
+};
 
 void write_file(const std::filesystem::path& path, const std::string& bytes) {
     std::filesystem::create_directories(path.parent_path());
@@ -140,30 +202,26 @@ struct Home {
         return out;
     }
 
+    /// stdout and stderr as one pipe shows them, into `out`.
     int run(const std::vector<std::string>& args, std::string* out) const {
-        std::ostringstream captured;
-        std::ostringstream errors;
-        std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
-        std::streambuf* old_err = std::cerr.rdbuf(errors.rdbuf());
-        int code = -1;
-        try {
-            apogee::commands::RootCommand command{apogee::commands::default_registry()};
-            std::vector<std::string> full{"--config", config_path.string()};
-            full.insert(full.end(), args.begin(), args.end());
-            std::vector<const char*> argv{"apogee"};
-            for (const std::string& arg : full) {
-                argv.push_back(arg.c_str());
-            }
-            code = command.run(static_cast<int>(argv.size()), argv.data());
-        } catch (...) {
-            std::cout.rdbuf(old_out);
-            std::cerr.rdbuf(old_err);
-            throw;
-        }
-        std::cout.rdbuf(old_out);
-        std::cerr.rdbuf(old_err);
-        *out = captured.str() + errors.str();
+        Said said;
+        const int code = run(args, &said);
+        *out = said.merged;
         return code;
+    }
+
+    /// stdout and stderr apart, and merged in the order written (CLI-M60).
+    int run(const std::vector<std::string>& args, Said* said) const {
+        *said = {};
+        const SaidCapture captured{*said};
+        apogee::commands::RootCommand command{apogee::commands::default_registry()};
+        std::vector<std::string> full{"--config", config_path.string()};
+        full.insert(full.end(), args.begin(), args.end());
+        std::vector<const char*> argv{"apogee"};
+        for (const std::string& arg : full) {
+            argv.push_back(arg.c_str());
+        }
+        return command.run(static_cast<int>(argv.size()), argv.data());
     }
 };
 
@@ -208,15 +266,24 @@ TEST_CASE("convert makes a vision model's projector beside it", "[commands][mode
 }
 
 TEST_CASE("a projector the converter cannot make leaves the model, and a later run adds it",
-          "[commands][models][convert]") {
+          "[commands][models][convert][M60]") {
     const Home home;
     home.add_snapshot("org--vision", true);
     write_file(home.refuse_projector, "");
     std::string out;
-    REQUIRE(home.run({"models", "convert", "org--vision"}, &out) == 0);
-    CHECK(out.find("warning: its projector could not be made") != std::string::npos);
-    CHECK(out.find("cannot make a projector for this model's architecture") != std::string::npos);
-    CHECK(out.find("it cannot read images without one") != std::string::npos);
+    {
+        // The warning is one stderr line in the house voice, its two lines
+        // joined (CLI-M60); stdout, the result, holds none of it.
+        Said said;
+        REQUIRE(home.run({"models", "convert", "org--vision"}, &said) == 0);
+        INFO(said.merged);
+        CHECK(said.err ==
+              "apogee models: warning: its projector could not be made -- the converter shipped "
+              "with this build's llama.cpp cannot make a projector for this model's architecture "
+              "-- the model works for text; it cannot read images without one\n");
+        CHECK(said.out.find("projector could not") == std::string::npos);
+        CHECK(said.out.find("cannot read images") == std::string::npos);
+    }
     auto stored = apogee::models::list_store_ggufs(home.roots, "org--vision");
     REQUIRE(stored.size() == 1);
     CHECK(stored.front().projector.empty());
@@ -243,19 +310,26 @@ TEST_CASE("a projector the converter cannot make leaves the model, and a later r
 }
 
 TEST_CASE("a text-only model is converted once, with no projector attempted",
-          "[commands][models][convert]") {
+          "[commands][models][convert][M60]") {
     const Home home;
     home.add_snapshot("org--text", false);
-    std::string out;
-    REQUIRE(home.run({"models", "convert", "org--text"}, &out) == 0);
+    Said said;
+    REQUIRE(home.run({"models", "convert", "org--text"}, &said) == 0);
+    INFO(said.merged);
     CHECK(home.converter_calls().size() == 1);
     const auto stored = apogee::models::list_store_ggufs(home.roots, "org--text");
     REQUIRE(stored.size() == 1);
     CHECK(stored.front().projector.empty());
-    CHECK(out.find("projector") == std::string::npos);
-    CHECK(out.find("--mmproj-path") == std::string::npos);
-    // No chat template: a base model, said so -- converted all the same.
-    CHECK(out.find("no chat template -- it is a base model") != std::string::npos);
+    CHECK(said.merged.find("projector") == std::string::npos);
+    CHECK(said.merged.find("--mmproj-path") == std::string::npos);
+    // No chat template: a base model, said so -- converted all the same. One
+    // stderr line in the house voice, its two lines joined (CLI-M60).
+    CHECK(said.err ==
+          "apogee models: note: this model has no chat template -- it is a base model, which "
+          "continues text rather than answering -- to chat, convert its instruction-tuned "
+          "release (often named '-it' or '-Instruct'); a base model is what fine-tuning starts "
+          "from.\n");
+    CHECK(said.out.find("chat template") == std::string::npos);
 }
 
 // ---- one command to runnable: --register (M3) -------------------------------
@@ -301,13 +375,12 @@ struct FakeQuantizer {
     }
 };
 
-/// Runs the chain on `home`, its narration captured; false when it threw.
+/// Runs the chain on `home`, what it said captured apart and merged (CLI-M60);
+/// false when it threw.
 bool chain(const Home& home, const std::string& snapshot, std::vector<std::string> levels,
-           FakeQuantizer& quantizer, std::string* out, std::string base_name = {}) {
-    const std::ostringstream captured;
-    std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
-    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
-    bool ok = true;
+           FakeQuantizer& quantizer, Said* said, std::string base_name = {}) {
+    *said = {};
+    const SaidCapture captured{*said};
     try {
         apogee::commands::run_register_chain(
             RegisterChainRequest{.roots = home.roots,
@@ -319,11 +392,18 @@ bool chain(const Home& home, const std::string& snapshot, std::vector<std::strin
                                  .base_name = std::move(base_name)},
             ChainTools{.quantize = quantizer.get()});
     } catch (...) {
-        ok = false;
+        return false;
     }
-    std::cout.rdbuf(old_out);
-    std::cerr.rdbuf(old_err);
-    *out = captured.str();
+    return true;
+}
+
+/// The same, its narration as one pipe shows it.
+bool chain(const Home& home, const std::string& snapshot, std::vector<std::string> levels,
+           FakeQuantizer& quantizer, std::string* out, std::string base_name = {}) {
+    Said said;
+    const bool ok =
+        chain(home, snapshot, std::move(levels), quantizer, &said, std::move(base_name));
+    *out = said.merged;
     return ok;
 }
 
@@ -666,25 +746,79 @@ TEST_CASE("a chain run again registers nothing twice", "[commands][models][conve
 }
 
 TEST_CASE("a base model is registered, its note said once and beside its name",
-          "[commands][models][convert][register]") {
+          "[commands][models][convert][register][M60]") {
     const Home home;
     home.add_snapshot("org--text", false);  // no chat template
     FakeQuantizer quantizer;
-    std::string out;
-    REQUIRE(chain(home, "org--text", {"Q4_K_M"}, quantizer, &out));
-    INFO(out);
-    const std::string note = "note: this model has no chat template -- it is a base model";
-    CHECK(out.find(note) != std::string::npos);
-    CHECK(out.find(note) == out.rfind(note));
-    CHECK(out.find("text-F16  (a base model") != std::string::npos);
-    CHECK(out.find("text-Q4KM  (a base model") != std::string::npos);
+    Said said;
+    REQUIRE(chain(home, "org--text", {"Q4_K_M"}, quantizer, &said));
+    INFO(said.merged);
+    // Said once, on stderr in the house voice (CLI-M60), though both the
+    // convert and the quantize noticed it.
+    const std::string note =
+        "apogee models: note: this model has no chat template -- it is a base model, which "
+        "continues text rather than answering -- to chat, convert its instruction-tuned release "
+        "(often named '-it' or '-Instruct'); a base model is what fine-tuning starts from.\n";
+    CHECK(said.err == note);
+    CHECK(said.out.find("chat template") == std::string::npos);
+    // stdout keeps the result: what is ready, each with its aside, and the
+    // one thing to type last.
+    CHECK(said.out.find("\nready:\n") != std::string::npos);
+    CHECK(said.out.find("text-F16  (a base model") != std::string::npos);
+    CHECK(said.out.find("text-Q4KM  (a base model") != std::string::npos);
+    CHECK(said.out.ends_with("\nchat with one:  apogee chat -m text-Q4KM\n"));
+    // On one pipe, where the summary said it: after the entries, before the
+    // next step.
+    const std::size_t at = said.merged.find(note);
+    REQUIRE(at != std::string::npos);
+    CHECK(said.merged.find("text-Q4KM  (a base model") < at);
+    CHECK(at < said.merged.find("chat with one:"));
     const apogee::harness::Config config = apogee::harness::load_config(home.config_path);
     CHECK(config.backends.contains("text-F16"));
     CHECK(config.backends.contains("text-Q4KM"));
 }
 
+TEST_CASE("a projector that does not come along to a quantization is one stderr line",
+          "[commands][models][quantize][M60]") {
+    // CLI-M60: quantize's warning and its continuation were two stdout lines.
+    // A quantizer that leaves a file where the projector's link would go
+    // stands in for any reason the link cannot be made.
+    const Home home;
+    home.add_snapshot("org--vision", true);
+    FakeQuantizer quantizer;
+    std::string out;
+    REQUIRE(chain(home, "org--vision", {}, quantizer, &out));  // the F16 alone
+    const auto f16 = stored_at(home, "org--vision", "vision-F16.gguf");
+    REQUIRE_FALSE(f16.projector.empty());
+    const apogee::commands::Quantizer inner = quantizer.get();
+    const apogee::commands::Quantizer in_the_way =
+        [&inner, &f16](const std::filesystem::path& input, const std::filesystem::path& output,
+                       std::string_view level, const apogee::models::QuantizeProgress& progress,
+                       const apogee::harness::CancellationToken& cancellation) {
+            write_file(output.parent_path() / f16.projector.filename(), "not a projector");
+            return inner(input, output, level, progress, cancellation);
+        };
+    Said said;
+    {
+        const SaidCapture captured{said};
+        CHECK_NOTHROW(apogee::commands::run_quantize({.roots = home.roots,
+                                                      .model = "org--vision/gguf/" + f16.id,
+                                                      .from = {},
+                                                      .type = "Q4_K_M"},
+                                                     in_the_way));
+    }
+    INFO(said.merged);
+    CHECK(said.out.find("did not come along") == std::string::npos);
+    CHECK(said.out.find("point mmproj_path") == std::string::npos);
+    REQUIRE(said.err.ends_with("\n"));
+    CHECK(said.err.find('\n') == said.err.size() - 1);  // one line
+    CHECK(said.err.starts_with(
+        "apogee models: warning: its projector did not come along -- a file already exists at "));
+    CHECK(said.err.ends_with(" -- point mmproj_path at " + f16.projector.string() + "\n"));
+}
+
 TEST_CASE("an embedding model's chain ends on the embedding door, never on a chat",
-          "[commands][models][convert][register][embedding]") {
+          "[commands][models][convert][register][embedding][M60]") {
     // The audit's finding (55d): the GGUF route's last line told the person to
     // chat with an entry that embeds, under a base model's note that does not
     // apply, and never named the embedding role.
@@ -698,19 +832,24 @@ TEST_CASE("an embedding model's chain ends on the embedding door, never on a cha
         {"idx": 1, "path": "1_Pooling", "type": "sentence_transformers.models.Pooling"},
         {"idx": 2, "path": "2_Normalize", "type": "sentence_transformers.models.Normalize"}])");
     FakeQuantizer quantizer;
-    std::string out;
-    REQUIRE(chain(home, "org--embed", {"Q4_K_M"}, quantizer, &out));
-    INFO(out);
+    Said said;
+    REQUIRE(chain(home, "org--embed", {"Q4_K_M"}, quantizer, &said));
+    INFO(said.merged);
     const std::string door =
         "point the embedding role at it:  apogee config set-default-embedding embed-Q4KM";
-    CHECK(out.ends_with("\n" + door + "\n"));
-    CHECK(out.find("chat with one") == std::string::npos);
-    CHECK(out.find("base model") == std::string::npos);
-    CHECK(out.find("note: note:") == std::string::npos);
-    CHECK(out.find("note: an embedding model -- the backend embeds and answers no chat; point "
-                   "the embedding role at it: apogee config set-default-embedding embed-F16\n") !=
-          std::string::npos);
-    CHECK(out.find("  embed-F16\n  embed-Q4KM\n") != std::string::npos);  // no base model's aside
+    CHECK(said.out.ends_with("\n" + door + "\n"));
+    CHECK(said.merged.find("chat with one") == std::string::npos);
+    CHECK(said.merged.find("base model") == std::string::npos);
+    CHECK(said.merged.find("note: note:") == std::string::npos);
+    // Each entry's note on stderr in the house voice (CLI-M60), stdout none.
+    const std::string note =
+        "apogee models: note: an embedding model -- the backend embeds and answers no chat; "
+        "point the embedding role at it: apogee config set-default-embedding ";
+    CHECK(said.err == note + "embed-F16\n" + note + "embed-Q4KM\n");
+    CHECK(said.out.find("note:") == std::string::npos);
+    CHECK(said.out.find("  embed-F16\n  embed-Q4KM\n") !=
+          std::string::npos);  // no base model's aside
+    std::string out;
     // The door, as printed, on that state.
     REQUIRE(home.run({"config", "set-default-embedding", "embed-Q4KM"}, &out) == 0);
     CHECK(apogee::harness::load_config(home.config_path).models.default_embedding == "embed-Q4KM");

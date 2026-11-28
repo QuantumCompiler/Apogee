@@ -66,21 +66,41 @@ struct Table {
     return log;
 }
 
+/// stderr captured for a test, restored after it: where the chain's notes
+/// are said (CLI-M60).
+struct CapturedStderr {
+    std::ostringstream text;
+    std::streambuf* original = std::cerr.rdbuf(text.rdbuf());
+
+    CapturedStderr() = default;
+    CapturedStderr(const CapturedStderr&) = delete;
+    CapturedStderr& operator=(const CapturedStderr&) = delete;
+    CapturedStderr(CapturedStderr&&) = delete;
+    CapturedStderr& operator=(CapturedStderr&&) = delete;
+
+    ~CapturedStderr() {
+        std::cerr.rdbuf(original);
+    }
+};
+
 }  // namespace
 
 TEST_CASE("a chain runs every stage in order, then says what is ready",
           "[commands][models][chain]") {
     Table table;
     std::ostringstream out;
+    const CapturedStderr err;
     const ChainLog log = run_chain(table.stages(-1), start(), out);
     CHECK(table.ran.size() == 4);
     const std::string said = out.str();
     CHECK(said.find("[1/4] pull org/model's full weights\n") == 0);
     CHECK(said.find("[2/4] convert to F16") < said.find("[3/4] quantize to Q4_K_M"));
     CHECK(said.find("[3/4] quantize to Q4_K_M") < said.find("[4/4] register 2 backends"));
-    CHECK(said.find("ready:\n  model-F16\n  model-Q4_K_M\n") != std::string::npos);
-    // A warning two stages noticed is said once.
-    CHECK(said.find("note: a base model") == said.rfind("note: a base model"));
+    CHECK(said.find("ready:\n  model-F16\n  model-Q4_K_M\n\nchat with one:") != std::string::npos);
+    // A warning two stages noticed is said once, on stderr in the house
+    // voice (CLI-M60) -- and the result on `out` holds no note.
+    CHECK(err.text.str() == "apogee models: note: a base model\n");
+    CHECK(said.find("note:") == std::string::npos);
     CHECK(log.notes.size() == 1);
     CHECK(said.ends_with("chat with one:  apogee chat -m model-Q4_K_M\n"));
     CHECK(said.find("stopped at") == std::string::npos);
@@ -89,18 +109,25 @@ TEST_CASE("a chain runs every stage in order, then says what is ready",
 TEST_CASE("a note is said with one prefix, never two and never none", "[commands][models][chain]") {
     // 55d: notes arrive worded as their standalone verb says them, prefix
     // and all, and the summary once added its own -- `note: note:`.
+    // CLI-M60: each said on stderr after the house prefix, which is never a
+    // second one.
     std::ostringstream out;
+    const CapturedStderr err;
     const std::vector<ChainStage> stages{{"convert to F16", [](ChainLog& log) {
                                               log.note("note: a base model");
                                               log.note("warning: no projector");
                                               log.note("an embedding model");
                                           }}};
     (void)run_chain(stages, start(), out);
-    const std::string said = out.str();
-    CHECK(said.find("\nnote: a base model\nwarning: no projector\nnote: an embedding model\n") !=
-          std::string::npos);
-    CHECK(said.find("note: note:") == std::string::npos);
-    CHECK(said.find("note: warning:") == std::string::npos);
+    const std::string noted = err.text.str();
+    CHECK(noted ==
+          "apogee models: note: a base model\n"
+          "apogee models: warning: no projector\n"
+          "apogee models: note: an embedding model\n");
+    CHECK(noted.find("note: note:") == std::string::npos);
+    CHECK(noted.find("note: warning:") == std::string::npos);
+    CHECK(out.str().find("note:") == std::string::npos);
+    CHECK(out.str().find("warning:") == std::string::npos);
 }
 
 TEST_CASE("a stage that finds nothing after it can run stops the chain with nothing to resume",
@@ -220,6 +247,7 @@ TEST_CASE("on a job's stream each stage is an event, and the rest of what it say
     // events, every other line it prints a `notice`, nothing else on stdout.
     SECTION("every stage done") {
         CapturedStdout stdout_;
+        const CapturedStderr errors;
         {
             apogee::commands::JobStream job{"models pull"};
             Table table;
@@ -252,6 +280,8 @@ TEST_CASE("on a job's stream each stage is an event, and the rest of what it say
                              "Q4_K_M",
                              "ready:", "  model-F16", "  model-Q4_K_M", "note: a base model",
                              "chat with one:  apogee chat -m model-Q4_K_M"});
+        // The note is the stream's notice instead, never also stderr's (CLI-M60).
+        CHECK(errors.text.str().empty());
     }
     SECTION("a stage that fails: failed, then where and how to resume") {
         CapturedStdout stdout_;

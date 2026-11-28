@@ -28,6 +28,7 @@
 #include "cli/model_chain.h"
 #include "cli/models.h"
 #include "cli/models_migrate.h"
+#include "cli/notes.h"
 #include "contracts/backend_door.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -277,12 +278,12 @@ std::string projector_failure(const std::string& error) {
 
 /// What a snapshot with no chat template is said to be: a base model, whose
 /// GGUF continues text rather than answering -- which reads as a broken chat
-/// unless it is said. One wording, standalone and chained (M3).
+/// unless it is said. One wording, standalone and chained (M3), one line
+/// (CLI-M60: its two lines joined with ` -- `, as CLI-M58 joins a note).
 [[nodiscard]] std::string base_model_note() {
     return "note: this model has no chat template -- it is a base model, which continues "
-           "text rather than answering.\n"
-           "      To chat, convert its instruction-tuned release (often named '-it' or "
-           "'-Instruct'); a base model is what fine-tuning starts from.";
+           "text rather than answering -- to chat, convert its instruction-tuned release "
+           "(often named '-it' or '-Instruct'); a base model is what fine-tuning starts from.";
 }
 
 /// The one command that puts a stored model to use, its projector included
@@ -771,7 +772,7 @@ PulledSnapshot pull_snapshot(const std::string& ref, const models::StoreRoots& r
         final_dir = commit.dir;
     }
     if (!models::write_snapshot(final_dir, record)) {
-        std::cout << "note: the snapshot landed but its record could not be written\n";
+        say_note("models", "note: the snapshot landed but its record could not be written");
     }
 
     std::size_t digests = 0;
@@ -1830,8 +1831,9 @@ PulledMlx pull_mlx(const std::string& ref, const models::StoreRoots& roots,
     // what puts it to use.
     const models::MlxKind kind = models::read_mlx_kind(pulled.dir);
     if (!pulled.info.mlx_format && kind.backend()) {
-        std::cout << "note: its files carry no mlx-lm marks (no quantization, shards not saved by "
-                     "mlx-lm) -- mlx-lm reads such weights all the same\n";
+        say_note("models",
+                 "note: its files carry no mlx-lm marks (no quantization, shards not saved by "
+                 "mlx-lm) -- mlx-lm reads such weights all the same");
     }
     print_pulled_mlx_hint(stored_at(roots, pulled.model, pulled.dir), kind);
     return pulled;
@@ -2327,7 +2329,7 @@ ConvertedMlx convert_model_to_mlx(const models::StoreRoots& roots, std::string_v
             return out;
         }
         if (!models::snapshot_has_chat_template(source.path)) {
-            std::cout << base_model_note() << "\n";
+            say_note("models", base_model_note());
         }
         print_mlx_backend_hint(stored_at(roots, out.model, out.dir));
     }
@@ -2496,7 +2498,7 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     const auto finish = [&out, chained]() {
         if (!chained) {
             for (const std::string& warning : out.warnings) {
-                std::cout << warning << "\n";
+                say_note("models", warning);
             }
         }
     };
@@ -2667,8 +2669,8 @@ ConvertedModel convert_model(const models::StoreRoots& roots, std::string_view g
     }
     if (!projector_problem.empty()) {
         out.warnings.push_back("warning: its projector could not be made -- " + projector_problem +
-                               "\n         the model works for text; it cannot read " +
-                               encoders.reads() + " without one");
+                               " -- the model works for text; it cannot read " + encoders.reads() +
+                               " without one");
     }
     if (out.base_model) {
         out.warnings.push_back(base_model_note());
@@ -2806,14 +2808,14 @@ QuantizedModel quantize_model(const models::StoreRoots& roots, std::string_view 
     }
     if (!projector_problem.empty()) {
         out.warnings.push_back("warning: its projector did not come along -- " + projector_problem +
-                               "\n         point mmproj_path at " + input.projector.string());
+                               " -- point mmproj_path at " + input.projector.string());
     }
     out.file = stored.file;
     out.projector = stored.projector;
     out.id = stored.file.parent_path().filename().string();
     if (!chained) {
         for (const std::string& warning : out.warnings) {
-            std::cout << warning << "\n";
+            say_note("models", warning);
         }
         print_backend_hint(stored.file, stored.projector);
     }
@@ -3824,9 +3826,9 @@ void pull_stored(const PullRequest& request, const TransportMaker& transport,
     if (entry.has_value() && !request.yes) {
         const models::GgufInfo peek = models::inspect_gguf(entry->blob);
         if (peek.parsed && models::is_known_unrunnable(peek.architecture)) {
-            std::cout << "warning: architecture '" << peek.architecture
-                      << "' is not known to run in Apogee's llama.cpp.\n"
-                      << "         Pulling anyway is fine -- pass --yes to skip this notice.\n";
+            say_note("models", "warning: architecture '" + peek.architecture +
+                                   "' is not known to run in Apogee's llama.cpp -- pulling "
+                                   "anyway is fine; pass --yes to skip this notice.");
         }
     }
 
@@ -3867,8 +3869,8 @@ void pull_stored(const PullRequest& request, const TransportMaker& transport,
         if (!vision.ok) {
             // The model is already in place and usable for text, so this is
             // a warning rather than a failure of the whole pull.
-            std::cout << "warning: the projector could not be copied -- " << vision.error
-                      << "\n         this model will work for text but not for images\n";
+            say_note("models", "warning: the projector could not be copied -- " + vision.error +
+                                   " -- this model will work for text but not for images");
         } else {
             projector_copied = true;
         }
@@ -3899,7 +3901,7 @@ void pull_stored(const PullRequest& request, const TransportMaker& transport,
         std::cout << "\n" << model_file.string() << "\n";
         std::cout << "verified: " << result.sidecar.verification.summary() << "\n";
         if (!result.error.empty()) {
-            std::cout << "note: " << result.error << "\n";
+            say_note("models", "note: " + result.error);
         }
     }
 

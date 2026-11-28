@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "cli/models_pull.h"
+#include "cli/notes.h"
 #include "cli/train.h"
 #include "contracts/config.h"
 #include "contracts/config_edit.h"
@@ -352,8 +353,9 @@ void apply_plan(const Plan& plan, const std::filesystem::path& config_path) {
                     std::cout << "rebound  " << entry.path().filename().string() << "\n";
                 }
             } catch (const std::exception& e) {
-                std::cout << "note: could not open " << entry.path().string() << ": " << e.what()
-                          << "\n";
+                // Not the migration's result: a note, on stderr (CLI-M60).
+                say_note("models",
+                         "note: could not open " + entry.path().string() + ": " + e.what());
             }
         }
     }

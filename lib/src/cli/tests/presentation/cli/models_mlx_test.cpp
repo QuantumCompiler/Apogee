@@ -222,9 +222,18 @@ struct Pull {
 
     /// `pull_mlx`, its output captured; the exit code it failed with, or 0.
     int run(std::string* out, const apogee::harness::CancellationToken& cancellation = {}) const {
+        return run(out, out, cancellation);
+    }
+
+    /// The same, stdout in `out` and stderr in `err` -- apart unless they are
+    /// one string, then as one pipe shows them.
+    int run(std::string* out, std::string* err,
+            const apogee::harness::CancellationToken& cancellation = {}) const {
         const std::ostringstream captured;
+        const std::ostringstream captured_err;
         std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
-        std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+        std::streambuf* old_err =
+            std::cerr.rdbuf(out == err ? captured.rdbuf() : captured_err.rdbuf());
         int code = 0;
         try {
             (void)apogee::commands::pull_mlx("mlx-community/M-4bit", roots, *client, cancellation);
@@ -234,6 +243,9 @@ struct Pull {
         std::cout.rdbuf(old_out);
         std::cerr.rdbuf(old_err);
         *out = captured.str();
+        if (out != err) {
+            *err = captured_err.str();
+        }
         return code;
     }
 
@@ -355,6 +367,26 @@ TEST_CASE("a source that publishes no digests is checked by size, and says so",
     // The id waits for the bytes: the same rule, over what landed.
     CHECK(std::filesystem::is_directory(pull.roots.models / "mlx-community--M-4bit" / "mlx" /
                                         shard_id(pull.repo, {.shards = 2})));
+    pull.check_no_staging();
+}
+
+TEST_CASE("a pulled set with no mlx-lm marks says so on stderr, in the house voice",
+          "[commands][models][mlx][pull][M60]") {
+    // CLI-M60: the note was a stdout line among the pull's result lines.
+    const Pull pull{{}, {.bits = 0, .shards = 2, .format = "pt"}};
+    std::string out;
+    std::string err;
+    REQUIRE(pull.run(&out, &err) == 0);
+    INFO(out);
+    INFO(err);
+    CHECK(err ==
+          "apogee models: note: its files carry no mlx-lm marks (no quantization, shards not "
+          "saved by mlx-lm) -- mlx-lm reads such weights all the same\n");
+    CHECK(out.find("mlx-lm marks") == std::string::npos);
+    // The result stays where it was: the stored set and what puts it to use.
+    CHECK(out.find("mlx model: llama, ") != std::string::npos);
+    CHECK(out.find("\nUse it by adding a backend:\n  apogee config add-backend M-4bit-bf16 --type "
+                   "mlx --model-path ") != std::string::npos);
     pull.check_no_staging();
 }
 
@@ -3110,18 +3142,20 @@ TEST_CASE("a pulled draft head's closing hint names only commands the binary tak
 }
 
 TEST_CASE("an MLX embedding chain ends on the embedding door, its note said with one prefix",
-          "[commands][models][mlx][convert][chain][embedding]") {
+          "[commands][models][mlx][convert][chain][embedding][M60]") {
     // The audit's findings (55d): the chain's last line told the person to
     // chat with an entry that embeds, and its note came out `note: note:`.
     // mlx-embeddings' build played in process, so it runs on every host.
+    // Since CLI-M60 the note is said on stderr in the house voice.
     CliHome home{"backends:\n  m:\n    type: mock\n"};
     fake_mlx_runtime(home.home());
     (void)fake_mlx_embeddings(home.home());
     const std::string handle = "Gemma-Embedding-300M/safetensors/b6845e67fafb";
     embedding_snapshot(home.models() / handle);
     const std::ostringstream captured;
+    const std::ostringstream captured_err;
     std::streambuf* old_out = std::cout.rdbuf(captured.rdbuf());
-    std::streambuf* old_err = std::cerr.rdbuf(captured.rdbuf());
+    std::streambuf* old_err = std::cerr.rdbuf(captured_err.rdbuf());
     int code = 0;
     try {
         apogee::commands::run_mlx_register_chain(
@@ -3145,17 +3179,21 @@ TEST_CASE("an MLX embedding chain ends on the embedding door, its note said with
     std::cout.rdbuf(old_out);
     std::cerr.rdbuf(old_err);
     const std::string out = captured.str();
+    const std::string err = captured_err.str();
     INFO(out);
+    INFO(err);
     REQUIRE(code == 0);
     const std::string door =
         "point the embedding role at it:  apogee config set-default-embedding "
         "Gemma-Embedding-300M-4bit";
     CHECK(out.ends_with("\n" + door + "\n"));
     CHECK(out.find("chat with one") == std::string::npos);
-    CHECK(out.find("note: note:") == std::string::npos);
-    CHECK(out.find("\nnote: an embedding model -- the backend embeds and answers no chat; point "
-                   "the embedding role at it: apogee config set-default-embedding "
-                   "Gemma-Embedding-300M-4bit\n") != std::string::npos);
+    CHECK(out.find("note:") == std::string::npos);
+    CHECK(err.find("note: note:") == std::string::npos);
+    CHECK(err ==
+          "apogee models: note: an embedding model -- the backend embeds and answers no chat; "
+          "point the embedding role at it: apogee config set-default-embedding "
+          "Gemma-Embedding-300M-4bit\n");
     // An entry that answers no chat is never made the default (M33).
     CHECK(out.find("models.default") == std::string::npos);
     CHECK(apogee::harness::load_config(home.config_path()).models.default_backend.empty());
