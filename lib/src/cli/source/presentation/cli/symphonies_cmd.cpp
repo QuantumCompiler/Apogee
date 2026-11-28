@@ -529,30 +529,32 @@ void bind_delete(CLI::App& parent, const RootContext& context) {
     cmd->callback([&context, name]() {
         const std::filesystem::path config_path = config_path_for(context);
         const harness::Config config = load(config_path);
-        if (config.find_symphony(*name) == nullptr) {
-            const symphony::Found found =
-                symphony::find_definition(config, symphonies_dir_for(config_path), *name);
-            if (found.definition.has_value() &&
-                found.definition->source == symphony::Source::Shipped) {
-                fail_user("'" + *name +
-                          "' is a shipped starter, with no config entry to delete -- it stays");
-            }
-            if (found.definition.has_value() && !found.definition->path.empty()) {
-                fail_user("'" + *name + "' is a spec file, with no config entry to delete -- " +
-                          "remove " + found.definition->path.string() + " yourself");
-            }
+        // Found as `show` finds it -- trimmed, folded (CLI-M53) -- and a
+        // config entry deleted, said and looked up again by its own key.
+        const symphony::Found found =
+            symphony::find_definition(config, symphonies_dir_for(config_path), *name);
+        if (found.definition.has_value() && found.definition->source == symphony::Source::Shipped) {
+            fail_user("'" + *name +
+                      "' is a shipped starter, with no config entry to delete -- it stays");
+        }
+        if (found.definition.has_value() && !found.definition->path.empty()) {
+            fail_user("'" + *name + "' is a spec file, with no config entry to delete -- " +
+                      "remove " + found.definition->path.string() + " yourself");
+        }
+        if (!found.definition.has_value()) {
             fail_user(found.error.empty() ? "no symphony named '" + *name + "'" : found.error);
         }
+        const std::string key = found.definition->spec.name;
         try {
             harness::edit_config_file(config_path, [&](std::string_view content) {
-                return harness::delete_symphony(content, *name);
+                return harness::delete_symphony(content, key);
             });
         } catch (const std::exception& e) {
             fail_user(e.what());
         }
-        std::cout << "removed symphony '" << *name << "' from " << config_path.string() << "\n";
+        std::cout << "removed symphony '" << key << "' from " << config_path.string() << "\n";
         const symphony::Found remains =
-            symphony::find_definition(load(config_path), symphonies_dir_for(config_path), *name);
+            symphony::find_definition(load(config_path), symphonies_dir_for(config_path), key);
         if (remains.definition.has_value()) {
             std::cout << "the " << symphony::to_string(remains.definition->source)
                       << " symphony of that name plays again\n";

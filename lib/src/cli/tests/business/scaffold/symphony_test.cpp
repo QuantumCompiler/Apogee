@@ -190,3 +190,41 @@ TEST_CASE(
                Catch::Matchers::ContainsSubstring("which nests 5 deep -- l0 → l1 → l2 → l3 → l4"));
     CHECK(tree.bytes() == before);
 }
+
+TEST_CASE("a dash-named entry a JSONC config holds is never replaced, the bytes kept",
+          "[scaffold][symphony][M53]") {
+    // CLI-M53: the write behind `symphonies create --force`, `edit` and `PUT`.
+    // Before it, the replace landed by accident -- the bridge's quoted key was
+    // missed and a second one appended -- where every other section refuses.
+    const Tree tree;
+    const std::filesystem::path config = tree.config.parent_path() / "config.json";
+    std::filesystem::remove(tree.config);
+    std::ofstream{config, std::ios::binary}
+        << "{\n  // mine\n  \"backends\": {\"l3b\": {\"type\": \"mock\"}},\n"
+           "  \"models\": {\"default\": \"l3b\"},\n  \"symphonies\": {\n"
+           "    \"-x\": {\"stages\": [{\"name\": \"s\", \"role\": \"chat\", \"prompt\": "
+           "\"Hand: {{input}}\"}]}\n  }\n}\n";
+    const auto bytes = [&] {
+        const std::ifstream in{config, std::ios::binary};
+        std::ostringstream out;
+        out << in.rdbuf();
+        return out.str();
+    };
+    const std::string before = bytes();
+    REQUIRE(apogee::harness::load_config(config).find_symphony("-x") != nullptr);
+    apogee::harness::SymphonySpec changed = duo();
+    changed.name = "-x";
+    for (const bool force : {true, false}) {
+        INFO(force);
+        try {
+            (void)create_symphony(config, changed, force);
+            FAIL("the dash-named entry was written");
+        } catch (const std::runtime_error& e) {
+            CHECK(std::string{e.what()} ==
+                  "symphony name '-x' is not one both config formats can edit -- a name is "
+                  "letters, digits, '_', '-', '.' and '/', first neither '-' nor '.', and not "
+                  "null");
+        }
+        CHECK(bytes() == before);
+    }
+}

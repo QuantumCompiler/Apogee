@@ -86,6 +86,16 @@ struct Fixture {
     }
 };
 
+/// The error envelope's type.
+std::string type_of(const HttpResponse& response) {
+    return nlohmann::json::parse(response.body).at("error").at("type").get<std::string>();
+}
+
+/// The error envelope's message.
+std::string message_of(const HttpResponse& response) {
+    return nlohmann::json::parse(response.body).at("error").at("message").get<std::string>();
+}
+
 HttpRequest with_body(std::string method, const nlohmann::json& body) {
     HttpRequest request;
     request.method = std::move(method);
@@ -174,6 +184,13 @@ TEST_CASE("what the plane refuses, and the status it says it with",
         admin_create_symphony(fixture.context(), with_body("POST", backend));
     CHECK(refused.status == 400);
     CHECK_THAT(refused.body, Catch::Matchers::ContainsSubstring("'l3b' is a backend"));
+    // The error table's type for a 400, never an empty one (CLI-M53).
+    CHECK(type_of(refused) == "invalid_request_error");
+    nlohmann::json looped = pair_body();
+    looped["stages"][0] = {{"name", "again"}, {"play", "pair"}};
+    const HttpResponse loop = admin_create_symphony(fixture.context(), with_body("POST", looped));
+    CHECK(loop.status == 400);
+    CHECK(type_of(loop) == "invalid_request_error");
     nlohmann::json keyed = pair_body();
     keyed["stages"][0]["backend"] = "l3b";
     CHECK(admin_create_symphony(fixture.context(), with_body("POST", keyed)).status == 400);
@@ -188,7 +205,10 @@ TEST_CASE("what the plane refuses, and the status it says it with",
     CHECK(Fixture::bytes(fixture.http_config) == before);
 
     REQUIRE(admin_create_symphony(fixture.context(), with_body("POST", pair_body())).status == 201);
-    CHECK(admin_create_symphony(fixture.context(), with_body("POST", pair_body())).status == 409);
+    const HttpResponse again =
+        admin_create_symphony(fixture.context(), with_body("POST", pair_body()));
+    CHECK(again.status == 409);
+    CHECK(type_of(again) == "conflict");
     nlohmann::json forced = pair_body();
     forced["force"] = true;
     CHECK(admin_create_symphony(fixture.context(), with_body("POST", forced)).status == 200);
@@ -247,4 +267,60 @@ TEST_CASE("a chain written over HTTP is byte-identical to one the CLI writes (27
     CHECK(mixed.status == 400);
     CHECK_THAT(mixed.body, Catch::Matchers::ContainsSubstring("never both"));
     CHECK(Fixture::bytes(fixture.http_config) == written);
+}
+
+TEST_CASE("a dash-named symphony over HTTP: refused at write, refused by name at delete",
+          "[httpserver][admin][symphonies][jsonc][M53]") {
+    // CLI-M53, on a JSONC config as `config init` writes: the editor's rules
+    // reach the routes through the one mutation path.
+    const apogee::testing::TempDir home{"admin-symphonies-jsonc-" +
+                                        std::to_string(std::random_device{}())};
+    const std::filesystem::path config = home.path() / "config" / "config.json";
+    std::filesystem::create_directories(config.parent_path());
+    std::ofstream{config, std::ios::binary}
+        << "{\n  // keep me\n  \"backends\": {\"l3b\": {\"type\": \"mock\"}},\n"
+           "  \"models\": {\"default\": \"l3b\"}\n}\n";
+    const apogee::harness::Config startup = apogee::harness::load_config(config);
+    const AdminConfigContext context{.config_path = config, .startup = &startup};
+    const std::string rule =
+        "is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' "
+        "and '/', first neither '-' nor '.', and not null";
+
+    nlohmann::json dashed = pair_body();
+    dashed["name"] = "-z";
+    // With no symphonies section, then with one: the same 400, nothing written.
+    for (const bool section : {false, true}) {
+        INFO(section);
+        if (section) {
+            REQUIRE(admin_create_symphony(context, with_body("POST", pair_body())).status == 201);
+        }
+        const std::string before = Fixture::bytes(config);
+        const HttpResponse refused = admin_create_symphony(context, with_body("POST", dashed));
+        CHECK(refused.status == 400);
+        CHECK(type_of(refused) == "invalid_request_error");
+        CHECK(message_of(refused) == "symphony name '-z' " + rule);
+        CHECK(Fixture::bytes(config) == before);
+    }
+
+    // A "-x" already there: its PUT and DELETE refused by name, the file
+    // unchanged; an absent name is still a 404.
+    std::string text = Fixture::bytes(config);
+    text.insert(text.find("\"pair\": {"),
+                "\"-x\": {\"stages\": [{\"name\": \"s\", \"role\": \"chat\", \"prompt\": "
+                "\"Hand: {{input}}\"}]},\n    ");
+    std::ofstream{config, std::ios::binary | std::ios::trunc} << text;
+    REQUIRE(admin_get_symphony(context, "-x").status == 200);
+    const HttpResponse put = admin_put_symphony(context, "-x", with_body("PUT", pair_body()));
+    CHECK(put.status == 400);
+    CHECK(type_of(put) == "invalid_request_error");
+    CHECK(message_of(put) == "symphony name '-x' " + rule);
+    const HttpResponse deleted = admin_delete_symphony(context, "-x");
+    CHECK(deleted.status == 400);
+    CHECK(type_of(deleted) == "invalid_request_error");
+    CHECK(message_of(deleted) == "symphony '-x' " + rule);
+    CHECK(Fixture::bytes(config) == text);
+    const HttpResponse absent = admin_delete_symphony(context, "nothere");
+    CHECK(absent.status == 404);
+    CHECK(type_of(absent) == "not_found_error");
+    CHECK(message_of(absent) == "no symphony entry named 'nothere'");
 }

@@ -411,7 +411,7 @@ TEST_CASE("a path under a home whose folder holds a space and a quote is one wor
     CHECK(pasted.words.back() == kept.string());
 }
 
-TEST_CASE("a symphony named with a leading dash is played and edited as created says",
+TEST_CASE("a symphony named with a leading dash is played and edited as its commands say",
           "[commands][suggested-command][M48]") {
     if (!apogee::platform::supports_child_processes() || !fs::exists("/usr/bin/env")) {
         SKIP("no child processes or no /usr/bin/env here: no shell can read a pasted line");
@@ -422,11 +422,22 @@ TEST_CASE("a symphony named with a leading dash is played and edited as created 
     REQUIRE(odd.home.run({"symphonies", "create", "s1"}, &out, &err) == 0);
     CHECK(out.find("Play it:  apogee symphonies play s1 --input \"…\"\n") != std::string::npos);
     INFO(err);
-    REQUIRE(odd.home.run({"symphonies", "create", "--", "-q"}, &out, &err) == 0);
+    // Since CLI-M53 `create` makes no dash-led name (2026-11-27), so `-q` is
+    // one a person wrote, or an older binary did -- seeded by hand under the
+    // section `s1` opened -- and its commands are the ones `create` prints,
+    // built by the same renderer call.
+    CHECK(odd.home.run({"symphonies", "create", "--", "-q"}, &out, &err) == 1);
+    std::ofstream{odd.home.config_path(), std::ios::binary | std::ios::app}
+        << "  -q:\n    stages:\n      - {name: answer, role: utility, prompt: '{{input}}'}\n";
+    REQUIRE(apogee::harness::load_config(odd.home.config_path()).find_symphony("-q") != nullptr);
     const std::string play = "apogee symphonies play --input \"…\" -- -q";
     const std::string edit = "apogee symphonies edit -- -q";
-    CHECK(out.find("Play it:  " + play + "\n") != std::string::npos);
-    CHECK(out.find("Edit it:  " + edit + "\n") != std::string::npos);
+    CHECK(apogee::harness::render(
+              {.verbs = {"symphonies", "play"},
+               .parts = {apogee::harness::operand("-q"),
+                         apogee::harness::option_placeholder("--input", "\"…\"")}}) == play);
+    CHECK(apogee::harness::render({.verbs = {"symphonies", "edit"},
+                                   .parts = {apogee::harness::operand("-q")}}) == edit);
     // Pasted, each reaches its verb on `-q`; the play's input filled first.
     std::string filled = play;
     filled.replace(filled.find("\"…\""), 5, "hi");

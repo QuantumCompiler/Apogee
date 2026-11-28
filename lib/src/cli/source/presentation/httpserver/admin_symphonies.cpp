@@ -151,11 +151,14 @@ HttpResponse write(const AdminConfigContext& context, const HttpRequest& request
     try {
         result = scaffold::create_symphony(context.config_path, *spec, forced);
     } catch (const std::exception& e) {
+        // A collision is a 409; every other refusal -- a name the editor
+        // refuses, a stage on a backend, a definition that loops -- takes the
+        // error table's 400 type (CLI-M53), matched as CLI-M52 matches the
+        // agents', so a name holding the word is not a conflict.
         const std::string what = e.what();
         const bool collision = what.find("already exists") != std::string::npos ||
-                               what.find("collides") != std::string::npos;
-        return error_response(collision ? 409 : 400, what,
-                              collision ? kConflict : std::string_view{});
+                               what.find(" collides with existing '") != std::string::npos;
+        return collision ? error_response(409, what, kConflict) : error_response(400, what);
     }
     const Loaded after = load_now(context);
     if (!after.config.has_value()) {

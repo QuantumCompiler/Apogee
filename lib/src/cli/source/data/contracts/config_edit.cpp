@@ -1814,6 +1814,15 @@ std::string append_symphony(std::string_view content, std::string_view name,
         throw ConfigEditError("symphony name '" + std::string{name} +
                               "' is not one (letters, digits, '_' and '-')");
     }
+    // 55f's add rule, ahead of both paths (CLI-M53): a name the JSONC bridge
+    // would quote, written plain into an existing section, read back as a
+    // key no later edit or delete finds. A replace of one already there is
+    // refused too, as every other section's add refuses it.
+    if (!yaml_plain_key(name)) {
+        throw ConfigEditError("symphony name '" + std::string{name} +
+                              "' is not one both config formats can edit -- " +
+                              std::string{kEntryNameRule});
+    }
     Lines lines = split_lines(content);
     const std::string terminator = dominant_terminator(lines);
     Lines entry;
@@ -1879,7 +1888,9 @@ std::string delete_symphony(std::string_view content, std::string_view name) {
     }
     const std::optional<std::size_t> key_line = find_entry_line(lines, range, name);
     if (!key_line.has_value()) {
-        throw ConfigEditError("symphony '" + std::string{name} + "' not found in config");
+        // 57e's refusal (CLI-M53): a name no plain key spells is said to be
+        // one, whether or not the config holds it -- never "not found".
+        throw missing_entry("symphony", "symphonies", name);
     }
     auto [begin, end] = symphony_extent(lines, *key_line, range.end);
     // The blank separator above it goes too: the exact inverse of the append.

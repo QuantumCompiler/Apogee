@@ -297,14 +297,20 @@ public:
 /// anything a block cannot carry exactly double-quoted -- and a stage that
 /// plays a symphony (27r) its `play:` and its `input:` when set, so the entry
 /// reads back through the one parser as exactly `spec`. The name must be one
-/// (`is_symphony_name`). Same collision and `force` rules as
+/// (`is_symphony_name`) and, as every entry's at add (55f; CLI-M53), one both
+/// config formats edit (`yaml_plain_key`: first not `-`), on both paths -- a
+/// replace under `force` of an entry already named otherwise is refused too,
+/// a hand edit its way out. Same collision and `force` rules as
 /// `append_backend`; a replaced entry keeps its place and the comment above
 /// it.
 [[nodiscard]] std::string append_symphony(std::string_view content, std::string_view name,
                                           const SymphonySpec& spec, bool force);
 
 /// Removes the entry and its lines -- a prompt's included, whatever they
-/// start with; the exact inverse of the append.
+/// start with; the exact inverse of the append. A name no key both formats
+/// edit that the editor does not find -- a JSONC config's bridged key, or
+/// none -- is refused by name (57e's `missing_entry`; CLI-M53), never "not
+/// found in config".
 [[nodiscard]] std::string delete_symphony(std::string_view content, std::string_view name);
 
 /// `spec` as a spec file: `name:` first, then the definition exactly as an

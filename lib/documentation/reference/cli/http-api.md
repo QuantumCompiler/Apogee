@@ -622,9 +622,14 @@ the config entry is byte-identical to the CLI's. A stage naming a backend (a
 `backend` or `model` key, or a `role` that is a configured backend) is `400`
 with the reason, as is any other refusal -- an unknown role, a template naming
 no earlier stage, a schema that is not one, a stage that both plays a role and
-a symphony, a definition that would loop or nest past the cap; `409` (`type: conflict`) when the
-name exists without `force`. `201` with the definition's view (`200` when it
-replaced one). No restart is needed: a play reads the config each run.
+a symphony, a definition that would loop or nest past the cap, and a name both
+config formats cannot edit (`symphony name '-z' is not one both config formats
+can edit -- a name is letters, digits, '_', '-', '.' and '/', first neither '-'
+nor '.', and not null`, CLI-M53, whether or not a `symphonies` section exists);
+each `400` is `type: invalid_request_error`. `409` (`type: conflict`) when the
+name exists without `force`, or collides with one in another case. `201` with
+the definition's view (`200` when it replaced one). No restart is needed: a play
+reads the config each run.
 
 ### `GET /v1/admin/symphonies/{id}`
 
@@ -637,13 +642,19 @@ client gives. `404` when unknown.
 The twin of `apogee symphonies edit`: the same body as `POST`, with the name
 from the path and `force` implied -- what `edit` writes back. A starter or a
 spec file edited this way gains a config entry of its name that stands in for
-it. `200` with the view; `400` on a refusal or a malformed body.
+it. `200` with the view; `400` on a refusal or a malformed body -- an entry
+already named otherwise (a leading `-`, written by hand or by an older binary)
+among them, in `POST`'s name words, the file unchanged: a hand edit is the way
+out (CLI-M53).
 
 ### `DELETE /v1/admin/symphonies/{id}`
 
 The twin of `apogee symphonies delete`: the entry is removed, the exact
 inverse of its writing. `200 {deleted}`; `404` when there is no entry --
-including for a shipped starter, which has none. There is deliberately no
+including for a shipped starter, which has none. An entry the config holds
+under a name both formats cannot edit is `400` `invalid_request_error`, named
+(`symphony '-x' is not one both config formats can edit -- …`), never "not
+found" (CLI-M53). There is deliberately no
 play route: playing runs the host's models on a user's act, and stays on the
 command line as training control does.
 

@@ -587,6 +587,29 @@ TEST_CASE("a comment inside a hand-written entry goes with the entry, not before
     CHECK(replaced.find("the user's note") == std::string::npos);
 }
 
+TEST_CASE("a symphony name both formats cannot edit is refused at add, with or without a section",
+          "[contracts][symphony][config_edit][M53]") {
+    // 55f's add rule on both of append_symphony's paths (CLI-M53): before
+    // it, a name the JSONC bridge would quote was written plain into an
+    // existing section, and no later delete found it.
+    const std::string without = "models:\n  default: x\n";
+    const std::string with = append_symphony(without, "first", two_stages(), false);
+    for (const std::string_view name : {"-y", "-", "--x"}) {
+        INFO(name);
+        const std::string said = "symphony name '" + std::string{name} +
+                                 "' is not one both config formats can edit -- a name is "
+                                 "letters, digits, '_', '-', '.' and '/', first neither '-' nor "
+                                 "'.', and not null";
+        CHECK_THROWS_WITH(append_symphony(without, name, two_stages(), false), said);
+        CHECK_THROWS_WITH(append_symphony(with, name, two_stages(), false), said);
+        CHECK_THROWS_WITH(append_symphony(with, name, two_stages(), true), said);
+    }
+    // A name the rule takes is untouched: its own words when absent, and an
+    // append and its delete still exact inverses (guards).
+    CHECK_THROWS_WITH(delete_symphony(with, "nope"), "symphony 'nope' not found in config");
+    CHECK(delete_symphony(append_symphony(with, "duo-2", two_stages(), false), "duo-2") == with);
+}
+
 TEST_CASE("the shipped starters are compiled in byte for byte, and each parses",
           "[contracts][symphony][assets]") {
     const std::filesystem::path dir = std::filesystem::path{APOGEE_ASSETS_DIR} / "symphonies";

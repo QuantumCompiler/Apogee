@@ -338,3 +338,141 @@ TEST_CASE("a chain's budget is the config's symphony_caps, stopping it named (27
     REQUIRE(home.run({"symphonies", "play", "summarize-verify", "--input", "P", "-q"}, &out,
                      &err) == 0);
 }
+
+namespace {
+
+/// CLI-M53's fixture: a JSONC home as `config init` and `config add-backend
+/// echo --type mock` leave it -- the shipped template, one mock backend.
+struct JsoncHome {
+    CliHome home{std::string{apogee::harness::config_template()}, "config.json"};
+
+    JsoncHome() {
+        std::string out;
+        std::string err;
+        const int code = home.run({"config", "add-backend", "echo", "--type", "mock"}, &out, &err);
+        INFO(err);
+        REQUIRE(code == 0);
+    }
+
+    [[nodiscard]] int run(const std::vector<std::string>& args, std::string* out,
+                          std::string* err) const {
+        return home.run(args, out, err);
+    }
+};
+
+/// The last line `text` holds, its newline dropped.
+std::string last_line(std::string text) {
+    while (!text.empty() && text.back() == '\n') {
+        text.pop_back();
+    }
+    const std::size_t at = text.rfind('\n');
+    return at == std::string::npos ? text : text.substr(at + 1);
+}
+
+constexpr std::string_view kNameRule =
+    "is not one both config formats can edit -- a name is letters, digits, '_', '-', '.' and "
+    "'/', first neither '-' nor '.', and not null";
+
+}  // namespace
+
+TEST_CASE("a symphony the CLI writes into a JSONC config is one it can delete",
+          "[commands][symphonies][jsonc][M53]") {
+    const JsoncHome home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"symphonies", "create", "--stage", "s:chat:Echo: {{input}}", "first"}, &out,
+                     &err) == 0);
+
+    // A new dash name is refused before a byte is written, as every other
+    // section refuses it (55f) -- the section there or not.
+    const std::string before = home.home.config_text();
+    CHECK(home.run({"symphonies", "create", "--stage", "s:chat:Echo: {{input}}", "--", "-y"}, &out,
+                   &err) == 1);
+    CHECK(last_line(err) == "apogee symphonies: symphony name '-y' " + std::string{kNameRule});
+    CHECK(out.empty());
+    CHECK(home.home.config_text() == before);
+
+    // One already there -- hand-written, or by an older binary -- still
+    // shows and plays, and its delete and replace are refused by name.
+    std::string text = before;
+    const std::size_t first = text.find("\"first\": {");
+    REQUIRE(first != std::string::npos);
+    text.insert(first,
+                "\"-x\": {\"stages\": [{\"name\": \"s\", \"role\": \"chat\", \"prompt\": "
+                "\"Hand: {{input}}\"}]},\n    ");
+    std::ofstream{home.home.config_path(), std::ios::binary | std::ios::trunc} << text;
+    CHECK(home.run({"symphonies", "delete", "--", "-x"}, &out, &err) == 1);
+    CHECK(last_line(err) == "apogee symphonies: symphony '-x' " + std::string{kNameRule});
+    CHECK(home.home.config_text() == text);
+    CHECK(home.run({"symphonies", "create", "--force", "--stage", "s:chat:Changed: {{input}}", "--",
+                    "-x"},
+                   &out, &err) == 1);
+    CHECK(last_line(err) == "apogee symphonies: symphony name '-x' " + std::string{kNameRule});
+    CHECK(home.home.config_text() == text);
+    const int shown = home.run({"symphonies", "show", "--", "-x"}, &out, &err);
+    CHECK(shown == 0);
+    const int played = home.run({"symphonies", "play", "--input", "hi", "--", "-x"}, &out, &err);
+    INFO(err);
+    CHECK(played == 0);
+    // Completion keeps offering it: the loader reads it, the verb says why not.
+    REQUIRE(home.run({"__complete", "symphonies", "delete", ""}, &out, &err) == 0);
+    CHECK(("\n" + out).find("\n-x\n") != std::string::npos);
+    CHECK(home.home.config_text() == text);
+}
+
+TEST_CASE("symphonies delete finds an entry as show does and names it by its own key",
+          "[commands][symphonies][M53]") {
+    const JsoncHome home;
+    std::string out;
+    std::string err;
+    REQUIRE(home.run({"symphonies", "create", "--stage", "s:chat:Echo: {{input}}", "first"}, &out,
+                     &err) == 0);
+    REQUIRE(home.run({"symphonies", "show", "--", " first"}, &out, &err) == 0);
+    const int trimmed = home.run({"symphonies", "delete", "--", " first"}, &out, &err);
+    INFO(err);
+    REQUIRE(trimmed == 0);
+    CHECK(out.starts_with("removed symphony 'first' from "));
+    CHECK(apogee::harness::load_config(home.home.config_path()).find_symphony("first") == nullptr);
+    REQUIRE(home.run({"symphonies", "create", "--stage", "s:chat:Echo: {{input}}", "first"}, &out,
+                     &err) == 0);
+    REQUIRE(home.run({"symphonies", "delete", "FIRST"}, &out, &err) == 0);
+    CHECK(out.starts_with("removed symphony 'first' from "));
+    CHECK(apogee::harness::load_config(home.home.config_path()).find_symphony("first") == nullptr);
+
+    // An entry standing in for a starter, named in another case: its key is
+    // the one removed and said, and the starter plays again.
+    REQUIRE(home.run({"symphonies", "create", "--from", "summarize-verify", "summarize-verify"},
+                     &out, &err) == 0);
+    REQUIRE(home.run({"symphonies", "delete", "SUMMARIZE-VERIFY"}, &out, &err) == 0);
+    CHECK(out.starts_with("removed symphony 'summarize-verify' from "));
+    CHECK(out.ends_with("\nthe shipped symphony of that name plays again\n"));
+
+    // Guards: a starter with no entry and a spec file keep today's words.
+    const std::string before = home.home.config_text();
+    CHECK(home.run({"symphonies", "delete", "summarize-verify"}, &out, &err) == 1);
+    CHECK(last_line(err) ==
+          "apogee symphonies: 'summarize-verify' is a shipped starter, with no "
+          "config entry to delete -- it stays");
+    const std::filesystem::path dir = home.home.home() / "symphonies";
+    std::filesystem::create_directories(dir);
+    std::ofstream{dir / "dropped.yaml", std::ios::binary}
+        << "stages:\n  - {name: a, role: utility, prompt: '{{input}}'}\n";
+    const std::string dropped = (dir / "dropped.yaml").string();
+    CHECK(home.run({"symphonies", "delete", "dropped"}, &out, &err) == 1);
+    CHECK(last_line(err) ==
+          "apogee symphonies: 'dropped' is a spec file, with no config entry "
+          "to delete -- remove " +
+              dropped + " yourself");
+    // Named by its path, the same refusal for the same file.
+    CHECK(home.run({"symphonies", "delete", dropped}, &out, &err) == 1);
+    CHECK(last_line(err) == "apogee symphonies: '" + dropped +
+                                "' is a spec file, with no config entry to delete -- remove " +
+                                dropped + " yourself");
+    // A spec file of that name that does not read says why, as `show` does.
+    std::ofstream{dir / "broken.yaml", std::ios::binary} << "stages: [\n";
+    CHECK(home.run({"symphonies", "delete", "broken"}, &out, &err) == 1);
+    CHECK(last_line(err).starts_with("apogee symphonies: " + (dir / "broken.yaml").string()));
+    CHECK(home.run({"symphonies", "delete", "nope"}, &out, &err) == 1);
+    CHECK(last_line(err).starts_with("apogee symphonies: no symphony named 'nope'"));
+    CHECK(home.home.config_text() == before);
+}

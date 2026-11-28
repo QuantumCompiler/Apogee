@@ -820,3 +820,48 @@ TEST_CASE("every set and delete on an odd JSONC name names rename-backend, never
     // A name the rule takes, absent, is simply not there.
     CHECK_THROWS_WITH(delete_backend(kOdd, "absent"), "backend 'absent' not found in config");
 }
+
+TEST_CASE("a symphony name the bridge would quote is refused at add and by name at delete",
+          "[config_edit][jsonc][M53][names]") {
+    // CLI-M53: the symphony branch takes 55f's add rule on both paths and
+    // 57e's refusal by name. Before it, `-y` added into an existing section
+    // was written plain, read back as the JSON key "-y", bridged quoted on the
+    // next edit, and never found again.
+    using namespace apogee::harness;
+    SymphonySpec spec;
+    SymphonyStage stage;
+    stage.name = "s";
+    stage.role = "chat";
+    stage.prompt = "Echo: {{input}}";
+    spec.stages.push_back(stage);
+    const std::string with = append_symphony(kJsonc, "first", spec, false);
+    for (const std::string_view name : {"-y", "-", "--x"}) {
+        INFO(name);
+        const std::string added = "symphony name '" + std::string{name} +
+                                  "' is not one both config formats can edit -- a name is "
+                                  "letters, digits, '_', '-', '.' and '/', first neither '-' nor "
+                                  "'.', and not null";
+        CHECK_THROWS_WITH(append_symphony(kJsonc, name, spec, false), added);
+        CHECK_THROWS_WITH(append_symphony(with, name, spec, false), added);
+    }
+
+    // A "-x" a person wrote, or an older binary did: still loaded, but every
+    // write and the delete refuse it by name, never "not found".
+    std::string odd = with;
+    odd.replace(odd.find("\"first\": {"), 0,
+                "\"-x\": {\"stages\": [{\"name\": \"s\", \"role\": \"chat\", \"prompt\": "
+                "\"Hand: {{input}}\"}]},\n    ");
+    REQUIRE(parse_config(odd, "<t>").find_symphony("-x") != nullptr);
+    const std::string named =
+        "symphony '-x' is not one both config formats can edit -- a name "
+        "is letters, digits, '_', '-', '.' and '/', first neither '-' nor "
+        "'.', and not null";
+    CHECK_THROWS_WITH(delete_symphony(odd, "-x"), named);
+    CHECK_THROWS_WITH(append_symphony(odd, "-x", spec, true),
+                      Catch::Matchers::StartsWith("symphony name '-x' is not one both config "
+                                                  "formats can edit -- "));
+    // An absent plain name keeps its own words, and a plain name's append and
+    // delete stay exact inverses (guards).
+    CHECK_THROWS_WITH(delete_symphony(odd, "nope"), "symphony 'nope' not found in config");
+    CHECK(delete_symphony(append_symphony(with, "duo", spec, false), "duo") == with);
+}
